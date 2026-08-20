@@ -41,4 +41,7 @@ assert '.\\installer\\uninstall.ps1' in landing
 full=(DOCS/'README.md').read_text(encoding='utf-8')
 assert 'Release layout (v14.4.1+)' in full
 assert '.\\installer\\install.ps1' in full
+assert 'single top-level folder is always named `Lattice-Vale`' in full
+release=(DOCS/'RELEASE.md').read_text(encoding='utf-8')
+assert 'exactly one top-level folder named `Lattice-Vale`' in release
 print('v14.4.1 release layout fixtures: PASS')

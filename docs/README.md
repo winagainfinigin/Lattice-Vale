@@ -116,7 +116,7 @@ Upstream contributions should remain portable and preservation-first, but a priv
 
 ## Quick start
 
-1. Download the versioned release ZIP from GitHub and extract it. The ZIP filename may include the release version, but its single top-level folder is always named `LatticeVale`.
+1. Download the versioned release ZIP from GitHub and extract it. The ZIP filename may include the release version, but its single top-level folder is always named `Lattice-Vale`.
 2. Open the extracted `LatticeVale` folder.
 3. Optionally verify source hashes:
 

@@ -6,7 +6,7 @@ Confirm the repository root contains only conventional repository files (`.gitat
 
 ## v14.4.0 stable-promotion release checks
 
-Confirm the runtime/configuration source remains behaviorally unchanged from the audited v14.3.43 line except for version/test/release metadata. Confirm all documentation-audit corrections are present, `FEATURES.md` is included and cross-linked, the exact source manifest is regenerated after final edits, the final ZIP has one top-level `LatticeVale` folder, and the external ZIP SHA-256 is published with the release.
+Confirm the runtime/configuration source remains behaviorally unchanged from the audited v14.3.43 line except for version/test/release metadata. Confirm all documentation-audit corrections are present, `FEATURES.md` is included and cross-linked, the exact source manifest is regenerated after final edits, the final ZIP has one top-level `Lattice-Vale` folder, and the external ZIP SHA-256 is published with the release.
 
 ## v14.3.43 release checks
 
@@ -33,7 +33,7 @@ Before publishing a release:
 5. Run `tools\New-SourceManifest.ps1` **after all source/documentation edits are final**.
 6. Run `installer\verify-release.ps1` and confirm every manifest entry verifies.
 7. Scan the release tree for unexpected `.exe`, `.msi`, `.dll`, package/archive, bytecode, credential, data, backup files, private keys, access tokens, and machine-specific private state. If publishing on GitHub, enable secret scanning/push protection where available.
-8. Create the versioned release ZIP from the reviewed tree without adding generated third-party installers or images. The ZIP filename may contain the release version, but the archive must contain exactly one top-level folder named `LatticeVale` (never a versioned root-folder name).
+8. Create the versioned release ZIP from the reviewed tree without adding generated third-party installers or images. The ZIP filename may contain the release version, but the archive must contain exactly one top-level folder named `Lattice-Vale` (never a versioned root-folder name).
 9. Extract that ZIP into a fresh directory and rerun source-manifest/static validation against the extracted copy.
 10. Recheck all installer-managed update pins/channels against the versions this release intends to support: Hermes, Matrix/Synapse, QMD, the audited Honcho commit, SearXNG, managed Ollama, default Ollama models/capabilities, Docker package policy, and the pinned NVIDIA Container Toolkit package set. Record deliberate version changes in `SOURCES.md`/`CHANGELOG.md`. A newer release must change the corresponding bundle pin/source reference if **Update / repair installer-managed software** is expected to move an existing stack to that newer component version. For native Ollama, verify both missing-model `/api/pull` behavior and pre-infrastructure embedding validation without assuming a Compose network already exists.
 11. For changes to native Windows Ollama, Windows relays, WSL networking, firewall handling, or startup/shutdown integration, execute `docs/WINDOWS-INTEGRATION-TEST-MATRIX.md` on representative real Windows + WSL systems. Record which rows were actually exercised; fixtures/static assertions do not count as end-to-end execution.
