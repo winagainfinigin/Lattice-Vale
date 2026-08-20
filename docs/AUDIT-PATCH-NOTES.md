@@ -86,7 +86,7 @@ If it reports that `E_UNEXPECTED` persists under mirrored networking, use the re
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\tools\Repair-LatticeVale-WslHost.ps1 -DistroName Ubuntu-24.04 -SkipComponentStoreRepair -ApplyNatFallback
 ```
 
-Only after the helper reports a passing WSL launch probe should `install.ps1` be rerun.
+Only after the helper reports a passing WSL launch probe should `installer/install.ps1` be rerun.
 
 ## Microsoft / primary-source references reviewed
 

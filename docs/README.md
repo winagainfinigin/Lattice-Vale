@@ -6,7 +6,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.1 is a packaging/layout patch over the validated v14.4.0 runtime.** No new runtime behavior is introduced by the promotion. The release incorporates the final documentation audit, adds `FEATURES.md` as the canonical install/options reference, and carries forward the v14.3.43 Scheduled Task compatibility fix, v14.3.42 clean-host reset boundary, v14.3.41 WSL host-safety policy, v14.3.39 shared-Docker repair safety, and v14.3.38 Kanban/skill-management policy.
 
-For detailed history, use `CHANGELOG.md`. For the stable documentation remediation record, use `docs/DOCUMENTATION-AUDIT-v14.4.0.md`. For implementation/audit lineage, use `BACKPORT-NOTES.md` and the retained `*PATCH-NOTES.md` files.
+For detailed history, use `CHANGELOG.md`. For the stable documentation remediation record, use `DOCUMENTATION-AUDIT-v14.4.0.md`. For implementation/audit lineage, use `BACKPORT-NOTES.md` and the retained `*PATCH-NOTES.md` files.
 
 ### Release layout (v14.4.1+)
 
@@ -41,7 +41,7 @@ See **`FEATURES.md`** for the complete current feature and installer-option refe
 
 When **LatticeVale-managed WSL/Docker Ollama** is selected, LatticeVale can use **Auto**, **CPU**, **NVIDIA**, or **AMD/ROCm** acceleration. v14.3.5 probes the **selected Ubuntu distro** before a forced GPU mode is accepted; Windows GPU presence alone is not treated as container readiness. Auto enables an accelerator only after its WSL/Docker prerequisites pass and otherwise falls back to CPU. Forced NVIDIA requires `/dev/dxg` plus a working WSL `nvidia-smi` probe before selection and may then install/configure the tested NVIDIA Container Toolkit 1.20.0 package set; a complete newer toolkit is preserved. The managed Ollama Docker AMD/ROCm path requires x86_64 plus `/dev/kfd` and `/dev/dri`; `/dev/dxg` alone is not assumed to satisfy that path. On repair, an unusable saved forced mode is explicitly reconciled before bootstrap.
 
-**Native Windows Ollama is an optional advanced integration.** It crosses Windows/WSL/Docker networking and firewall boundaries; users who prefer the smallest integration surface should select LatticeVale-managed WSL/Docker Ollama instead. See `docs/NATIVE-OLLAMA-INTEGRATION.md` and `docs/WINDOWS-INTEGRATION-TEST-MATRIX.md`.
+**Native Windows Ollama is an optional advanced integration.** It crosses Windows/WSL/Docker networking and firewall boundaries; users who prefer the smallest integration surface should select LatticeVale-managed WSL/Docker Ollama instead. See `NATIVE-OLLAMA-INTEGRATION.md` and `WINDOWS-INTEGRATION-TEST-MATRIX.md`.
 
 Alternatively, if native Windows Ollama is installed, LatticeVale detects the installation separately from its runtime state. If the local API is stopped, setup clearly states that native Ollama must be running, and selecting the native option can explicitly launch that existing installation and re-probe it. Once a Windows-local API and a safe relay topology are both verified, the questionnaire offers **native Windows Ollama**. The selected models do **not** need to be downloaded manually first: LatticeVale queries Ollama's model list, pulls missing selected models through the native API when needed, verifies the requested embedding capability directly through that already-verified API path, and routes Hermes/Honcho to it. It does **not** install/update native Ollama or choose its Windows GPU backend. Its preferred private transports do not change `OLLAMA_HOST`; only the explicitly accepted v14.3.18 direct-WSL fallback changes that bind setting, with installer-owned firewall scoping and rollback. Native Ollama therefore retains its own Windows GPU/Vulkan/ROCm behavior and Windows model store. If either the API or relay path is not verified, this option is not offered.
 
@@ -62,14 +62,14 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\veri
 
 Then inspect at minimum:
 
-- `install.ps1`
+- `installer\install.ps1`
 - `LatticeVale-Core\Install-LatticeVale.ps1`
 - `LatticeVale-Core\linux\bootstrap.sh`
 - `LatticeVale-Core\stack\configure-stack.sh`
 - `LatticeVale-Core\stack\compose.yaml`
-- `SECURITY.md`
+- `docs\SECURITY.md`
 
-`SOURCE-SHA256SUMS.txt` records hashes for executable/configuration source in the bundle. For a GitHub release, also compare the **ZIP SHA-256** shown on the release page with `Get-FileHash` before extracting/running it.
+`installer\SOURCE-SHA256SUMS.txt` records hashes for every shipped release file except the manifest itself. For a GitHub release, also compare the **ZIP SHA-256** shown on the release page with `Get-FileHash` before extracting/running it.
 
 The supported launch command uses a **single isolated child PowerShell process** with an execution-policy override:
 
@@ -108,7 +108,7 @@ If you customize the installer:
 
 - Clearly identify the build as modified/downstream when sharing it; do not represent a changed bundle as an unmodified official LatticeVale release.
 - Keep secrets, generated WSL data, backups, tokens, recovery keys, and machine-specific private state out of source control.
-- If you change a file covered by `SOURCE-SHA256SUMS.txt`, regenerate the manifest with `tools\New-SourceManifest.ps1` after all edits and run `installer/verify-release.ps1` before distribution.
+- If you change a file covered by `installer\SOURCE-SHA256SUMS.txt`, regenerate the manifest with `tools\New-SourceManifest.ps1` after all edits and run `installer/verify-release.ps1` before distribution.
 - If you expand OS/version/architecture support, update `LatticeVale-Core/compatibility.conf` and the related tests instead of merely bypassing a preflight blocker. Verify every affected container image, package source, networking path, and GPU/runtime assumption for the new target.
 - Third-party software fetched or built by LatticeVale retains its own license and terms. The MIT license for LatticeVale does not relicense those projects; see `THIRD-PARTY-NOTICES.md`.
 
@@ -248,22 +248,25 @@ The uninstaller verifies the same release source manifest as `installer/install.
 
 The uninstaller never unregisters the WSL distro. It also preserves shared/general prerequisites and applications that may predate LatticeVale or be used elsewhere, including Docker Engine/packages, native Windows Ollama, Windows Tailscale, Obsidian, Ubuntu Pro, and unrelated Windows firewall/tasks/settings. A separately selected Windows-backed Obsidian vault is outside `~/hermes-stack` and is never deleted by the purge.
 
-For an intentionally **clean WSL/LatticeVale rebuild**, use `tools\Reset-LatticeVale-CleanHost.ps1` instead of making `uninstall.ps1` more destructive. The clean-host reset is dry-run by default and, only when explicitly selected, can remove proven LatticeVale/legacy Foundry Windows integrations, unregister WSL distributions, remove global `.wslconfig*` state, uninstall the Store/MSI WSL app, and delete a verified LatticeVale source tree. It does not disable shared Hyper-V/VirtualMachinePlatform infrastructure or uninstall Tailscale/Obsidian. See `Instructions.txt` before using it.
+For an intentionally **clean WSL/LatticeVale rebuild**, use `tools\Reset-LatticeVale-CleanHost.ps1` instead of making `installer\uninstall.ps1` more destructive. The clean-host reset is dry-run by default and, only when explicitly selected, can remove proven LatticeVale/legacy Foundry Windows integrations, unregister WSL distributions, remove global `.wslconfig*` state, uninstall the Store/MSI WSL app, and delete a verified LatticeVale source tree. It does not disable shared Hyper-V/VirtualMachinePlatform infrastructure or uninstall Tailscale/Obsidian. See `Instructions.txt` before using it.
 
 ## Repository layout
 
 ```text
-install.ps1                         Friendly verified install/repair entry point
-uninstall.ps1                       Verified conservative uninstall/purge entry point
-verify-release.ps1                  Read-only source hash verifier
-SOURCE-SHA256SUMS.txt               Release source/config manifest
-SECURITY.md                         Security model and reporting
-SOURCES.md                          Official runtime download/source inventory
-RELEASE.md                          Maintainer release/audit checklist
-SUPPORT.md                          Public support/reporting guidance
+installer/
+  install.ps1                       Friendly verified install/repair entry point
+  uninstall.ps1                     Verified conservative uninstall/purge entry point
+  verify-release.ps1                Read-only source hash verifier
+  SOURCE-SHA256SUMS.txt             Exact release-tree manifest
+docs/
+  README.md                         Complete project documentation
+  SECURITY.md                       Security model and reporting
+  SOURCES.md                        Official runtime download/source inventory
+  RELEASE.md                        Maintainer release/audit checklist
+  SUPPORT.md                        Public support/reporting guidance
+  Instructions.txt                  Full setup + everyday-use guide
+  Installer Description.txt         Concise project description
 LICENSE                             MIT license for LatticeVale source
-Instructions.txt                    Full setup + everyday-use guide
-Installer Description.txt           Concise project description
 tools/New-SourceManifest.ps1        Deterministic release-manifest generator
 tools/Reset-LatticeVale-CleanHost.ps1 Explicit dry-run-first clean WSL/LatticeVale host reset
 LatticeVale-Core/
@@ -277,7 +280,7 @@ LatticeVale-Core/
   windows/LatticeVale-WindowsNativeServiceRelay.ps1 Optional WSL-only bridge to verified native Windows services
   tests/                             Regression/static fixtures
   AUDIT.md                             General audit/security invariants
-  (all patch/version notes are consolidated in ../CHANGELOG.md)
+  (all patch/version notes are consolidated in ../docs/CHANGELOG.md)
 ```
 
 ## Validation

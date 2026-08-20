@@ -26,7 +26,7 @@ Changes to managed Hermes profile policy must be tested on **arbitrary profile n
 
 LatticeVale is MIT-licensed. Local modifications, private system-specific variants, public forks, and redistributed customized builds are permitted under that license. A downstream fork may intentionally target one machine or environment; upstream pull requests should remain portable across the documented supported baseline unless the change is explicitly adding and testing a new supported target.
 
-When publishing a modified build, identify it as modified/downstream, preserve the MIT notice, regenerate `SOURCE-SHA256SUMS.txt`, and do not include private machine state or credentials. Third-party components keep their own licenses; modifying an integrated upstream project is not the same as modifying LatticeVale itself.
+When publishing a modified build, identify it as modified/downstream, preserve the MIT notice, regenerate `installer/SOURCE-SHA256SUMS.txt`, and do not include private machine state or credentials. Third-party components keep their own licenses; modifying an integrated upstream project is not the same as modifying LatticeVale itself.
 
 Changes should preserve LatticeVale's two core guarantees: **clean installs stay functional** and **repair stays preservation-first**.
 
@@ -43,4 +43,4 @@ Before opening a pull request:
 9. Keep destructive maintenance explicit and narrowly scoped.
 10. Changes to Windows relays, WSL networking/firewall logic, or native Windows Ollama require fixture coverage **and** a documented target-system test plan based on `docs/WINDOWS-INTEGRATION-TEST-MATRIX.md`; do not treat static assertions as proof of live Windows behavior.
 
-For security-sensitive findings, follow `SECURITY.md` instead of opening a public exploit-detail issue.
+For security-sensitive findings, follow `docs/SECURITY.md` instead of opening a public exploit-detail issue.

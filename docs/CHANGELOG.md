@@ -8,6 +8,7 @@
 - Updates entry-point path resolution so launchers find `LatticeVale-Core/` and `tools/` from their new `installer/` location and continue verifying the complete extracted release tree.
 - Updates clean-host source recognition, WSL-host repair guidance, CI/tests, and all affected documentation for the new layout.
 - Adds release-layout regression coverage so future packaging changes cannot silently break the launchers or manifest root.
+- Corrects remaining documentation references that still described pre-v14.4.1 root-level entry points, manifest locations, or clean-host source recognition; no runtime behavior changes.
 
 ## 14.4.0 - 2026-08-20
 

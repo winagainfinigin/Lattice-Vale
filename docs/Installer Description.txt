@@ -273,7 +273,7 @@ Advanced recovery is intentionally separate because some recovery actions can re
 7. NORMAL UNINSTALL VS. CLEAN-HOST RESET
 ================================================================================
 
-Normal `uninstall.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites.
+Normal `installer\uninstall.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites.
 
 `tools\Reset-LatticeVale-CleanHost.ps1` is a separate administrator utility for a different goal: intentionally returning a host to a fresh WSL/LatticeVale baseline. It is never called automatically by install, repair, update, verify, or normal uninstall. It defaults to a dry run and requires both `-Execute` and the exact interactive confirmation `CLEAN-RESET`.
 
@@ -300,7 +300,7 @@ The installer is capability-based within that supported boundary. It does not re
 9. LICENSE / CUSTOMIZATION CONTEXT
 ================================================================================
 
-LatticeVale's own source and documentation are MIT-licensed and may be inspected, modified, forked, and redistributed subject to the MIT notice. A modified/downstream build should be labeled as modified, should not publish secrets or generated private state, and should regenerate/verify the release manifest after documentation or source changes. Third-party components keep their own licenses and terms. See README.md, CONTRIBUTING.md, and THIRD-PARTY-NOTICES.md for the repository/publication details.
+LatticeVale's own source and documentation are MIT-licensed and may be inspected, modified, forked, and redistributed subject to the MIT notice. A modified/downstream build should be labeled as modified, should not publish secrets or generated private state, and should regenerate/verify the release manifest after documentation or source changes. Third-party components keep their own licenses and terms. See the repository-root `README.md`, plus `docs\CONTRIBUTING.md` and `docs\THIRD-PARTY-NOTICES.md`, for repository/publication details.
 
 ================================================================================
 10. WHERE TO GO NEXT

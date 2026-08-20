@@ -22,7 +22,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.0 is distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.4.1 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 
@@ -96,12 +96,12 @@ Native Windows Ollama relay selection follows current Microsoft WSL networking b
 
 Public release auditing rejects compiled installers/binaries/bytecode and opaque bootstrap patterns. All LatticeVale executable logic—including the optional desktop shortcut launcher—is present as readable `.ps1`, `.sh`, `.py`, YAML, Dockerfile, or configuration source. See `.github/workflows/validate.yml`, `SECURITY.md`, `LatticeVale-Core/AUDIT.md`, and the consolidated `CHANGELOG.md`.
 
-LatticeVale's MIT license permits downstream modification and redistribution of LatticeVale source/documentation. A customized repository should keep its changed source inspectable, regenerate `SOURCE-SHA256SUMS.txt`, identify itself as modified, and separately respect the licenses/terms of every fetched or incorporated third-party component.
+LatticeVale's MIT license permits downstream modification and redistribution of LatticeVale source/documentation. A customized repository should keep its changed source inspectable, regenerate `installer/SOURCE-SHA256SUMS.txt`, identify itself as modified, and separately respect the licenses/terms of every fetched or incorporated third-party component.
 
 ## Pinned image policy
 
-LatticeVale release defaults use explicit upstream versioned image tags to reduce unreviewed drift. Versioned registry tags improve repeatability but are **not equivalent to immutable image digests** and may theoretically be republished upstream. Between refresh windows, repair does not advance pins merely because upstream has something newer. During the 30-day managed refresh or an explicit Windows Update / repair run, a LatticeVale release may advance only the bundle-declared defaults that are proven installer-owned by ownership markers; explicit `.env` overrides remain user-owned. Fixed tags advance to a different version only when the LatticeVale bundle itself declares a different tag; pulling a fixed tag is not treated as permission to follow arbitrary upstream releases. `SOURCE-SHA256SUMS.txt` authenticates the LatticeVale source/configuration bundle only—it does not authenticate third-party registry contents. NVIDIA Container Toolkit, when selected for supported NVIDIA GPU acceleration, is installed from NVIDIA's official `nvidia.github.io/libnvidia-container` APT repository.
+LatticeVale release defaults use explicit upstream versioned image tags to reduce unreviewed drift. Versioned registry tags improve repeatability but are **not equivalent to immutable image digests** and may theoretically be republished upstream. Between refresh windows, repair does not advance pins merely because upstream has something newer. During the 30-day managed refresh or an explicit Windows Update / repair run, a LatticeVale release may advance only the bundle-declared defaults that are proven installer-owned by ownership markers; explicit `.env` overrides remain user-owned. Fixed tags advance to a different version only when the LatticeVale bundle itself declares a different tag; pulling a fixed tag is not treated as permission to follow arbitrary upstream releases. `installer/SOURCE-SHA256SUMS.txt` authenticates the complete shipped LatticeVale release tree except the manifest itself—it does not authenticate third-party registry contents or downloads fetched later at install/update time. NVIDIA Container Toolkit, when selected for supported NVIDIA GPU acceleration, is installed from NVIDIA's official `nvidia.github.io/libnvidia-container` APT repository.
 
 ## Uninstaller
 
-`uninstall.ps1` and `LatticeVale-Core/Uninstall-LatticeVale.ps1` are first-party LatticeVale source and use only Windows/WSL/PowerShell facilities already required by the installer; they add no third-party dependency.
+`installer/uninstall.ps1` and `LatticeVale-Core/Uninstall-LatticeVale.ps1` are first-party LatticeVale source and use only Windows/WSL/PowerShell facilities already required by the installer; they add no third-party dependency.

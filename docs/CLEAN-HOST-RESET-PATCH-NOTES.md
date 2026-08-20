@@ -23,4 +23,4 @@ The tool never uses `tailscale serve reset`. It inspects current Serve JSON and 
 
 ## Release rule
 
-The utility is dry-run by default, never invoked automatically, and source-tree deletion requires a recognizable LatticeVale release root (`install.ps1` + `LatticeVale-Core/VERSION.txt`) and refuses filesystem roots.
+The utility is dry-run by default, never invoked automatically, and source-tree deletion requires a recognizable LatticeVale release root (`installer/install.ps1` + `LatticeVale-Core/VERSION.txt`) and refuses filesystem roots.

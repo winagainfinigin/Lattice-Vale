@@ -1,10 +1,14 @@
-# LatticeVale v14.4.1 documentation audit and remediation record
+# LatticeVale v14.4.0 documentation audit and v14.4.1 layout follow-up
 
 ## Scope
 
 The v14.4.0 stable promotion was prepared from the audited v14.3.43 runtime tree. The documentation audit reviewed the complete Markdown/text documentation set, including current operator/release documents and the explicitly archival pre-LatticeVale v13 patch-note collection. Ambiguous or historical claims were cross-checked against the current installer/configuration source before being treated as current behavior.
 
 v14.4.0 intentionally does **not** introduce new runtime stack behavior. It promotes the tested v14.3.43 runtime line and applies documentation, version/test metadata, and release-integrity changes.
+
+## v14.4.1 layout follow-up
+
+v14.4.1 later moved substantive documentation under `docs/` and public entry points plus the source manifest under `installer/`. References below to files being at repository root describe the v14.4.0 audit state at the time of that remediation; current locations include `docs/FEATURES.md`, `docs/Instructions.txt`, `docs/Installer Description.txt`, `docs/CHANGELOG.md`, `docs/SECURITY.md`, `docs/SOURCES.md`, `docs/THIRD-PARTY-NOTICES.md`, `docs/RELEASE.md`, and `installer/SOURCE-SHA256SUMS.txt`. The repository-root `README.md` and `LICENSE` remain at root.
 
 ## Remediated findings
 

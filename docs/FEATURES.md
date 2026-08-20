@@ -900,7 +900,7 @@ Repair does not deliberately delete:
 
 # 13. Normal uninstall
 
-`uninstall.ps1` is intentionally conservative.
+`installer\uninstall.ps1` is intentionally conservative.
 
 It can:
 
@@ -1015,40 +1015,40 @@ Examples of superseded behavior that should **not** be interpreted as current fe
 - historical guessed/default Obsidian vault locations — current fresh install requires an explicit Windows-local vault path when Obsidian is selected
 - historical Quick Setup defaults for host/system-affecting choices — current fresh install uses explicit questionnaire semantics
 
-Current root documentation and current source take precedence over archived v13 notes.
+Current primary documentation and current source take precedence over archived v13 notes.
 
 ---
 
 # 18. Documentation files reviewed for this consolidation
 
-## Current/release documentation (28)
+## v14.4.0 audit source set, mapped to the current v14.4.1 layout (28)
 
 - `.github/PULL_REQUEST_TEMPLATE.md`
-- `AUDIT-PATCH-NOTES.md`
-- `BACKPORT-NOTES.md`
-- `CHANGELOG.md`
-- `CLEAN-HOST-RESET-PATCH-NOTES.md`
-- `COMPATIBILITY-PORT-RECLAIM-PATCH-NOTES.md`
-- `CONTRIBUTING.md`
-- `EXISTING-INSTALL-QC-PATCH-NOTES.md`
-- `FUNCTIONAL-WSL-PREFLIGHT-PATCH-NOTES.md`
-- `Installer Description.txt`
-- `Instructions.txt`
-- `KANBAN-SKILL-POLICY-PATCH-NOTES.md`
+- `docs/AUDIT-PATCH-NOTES.md`
+- `docs/BACKPORT-NOTES.md`
+- `docs/CHANGELOG.md`
+- `docs/CLEAN-HOST-RESET-PATCH-NOTES.md`
+- `docs/COMPATIBILITY-PORT-RECLAIM-PATCH-NOTES.md`
+- `docs/CONTRIBUTING.md`
+- `docs/EXISTING-INSTALL-QC-PATCH-NOTES.md`
+- `docs/FUNCTIONAL-WSL-PREFLIGHT-PATCH-NOTES.md`
+- `docs/Installer Description.txt`
+- `docs/Instructions.txt`
+- `docs/KANBAN-SKILL-POLICY-PATCH-NOTES.md`
 - `LatticeVale-Core/AUDIT.md`
 - `LatticeVale-Core/README.md`
 - `LatticeVale-Core/VERSION.txt`
-- `MATRIX-RESILIENCE-PATCH-NOTES.md`
-- `NETWORK-SAFETY-PATCH-NOTES.md`
-- `README.md`
-- `RELEASE.md`
-- `SECURITY.md`
-- `SOURCE-SHA256SUMS.txt`
-- `SOURCES.md`
-- `SUPPORT.md`
-- `THIRD-PARTY-NOTICES.md`
-- `UPDATE-REPAIR-PATCH-NOTES.md`
-- `WSL-HOST-SAFETY-PATCH-NOTES.md`
+- `docs/MATRIX-RESILIENCE-PATCH-NOTES.md`
+- `docs/NETWORK-SAFETY-PATCH-NOTES.md`
+- repository-root `README.md`
+- `docs/RELEASE.md`
+- `docs/SECURITY.md`
+- `installer/SOURCE-SHA256SUMS.txt`
+- `docs/SOURCES.md`
+- `docs/SUPPORT.md`
+- `docs/THIRD-PARTY-NOTICES.md`
+- `docs/UPDATE-REPAIR-PATCH-NOTES.md`
+- `docs/WSL-HOST-SAFETY-PATCH-NOTES.md`
 - `docs/NATIVE-OLLAMA-INTEGRATION.md`
 - `docs/WINDOWS-INTEGRATION-TEST-MATRIX.md`
 
@@ -1096,11 +1096,11 @@ Every file under `docs/legacy-patch-notes/hermes-wsl-foundry-v13/` was included 
 
 If incorporated into a future LatticeVale release, this file should be the **canonical install-capability/options catalog** and should cross-reference rather than replace:
 
-- `README.md` — short project overview / quick start
-- `Instructions.txt` — procedures and commands
-- `Installer Description.txt` — conceptual post-install/settings guide
-- `SECURITY.md` — trust/ownership/security model
-- `SOURCES.md` — exact runtime acquisition/source pins
-- `CHANGELOG.md` — historical version chronology
+- repository-root `README.md` — short project overview / quick start
+- `docs/Instructions.txt` — procedures and commands
+- `docs/Installer Description.txt` — conceptual post-install/settings guide
+- `docs/SECURITY.md` — trust/ownership/security model
+- `docs/SOURCES.md` — exact runtime acquisition/source pins
+- `docs/CHANGELOG.md` — historical version chronology
 
 Keeping a single feature/options catalog would prevent current questionnaire choices from becoming scattered across several documents again.

@@ -14,7 +14,7 @@ If the clean-host reset dry run from v14.3.42 failed on a Scheduled Task action 
 
 ## v14.3.42 clean-host reset support
 
-Use normal `uninstall.ps1` for preservation-first removal. Use `tools\Reset-LatticeVale-CleanHost.ps1` only for an intentional fresh WSL/LatticeVale baseline. Always run it without `-Execute` first. `-RemoveWslRuntime` permanently removes every WSL distro registered to the current Windows user; shared Hyper-V/VirtualMachinePlatform, Tailscale, Obsidian and unrelated Windows networking remain outside its ownership boundary.
+Use normal `installer/uninstall.ps1` for preservation-first removal. Use `tools\Reset-LatticeVale-CleanHost.ps1` only for an intentional fresh WSL/LatticeVale baseline. Always run it without `-Execute` first. `-RemoveWslRuntime` permanently removes every WSL distro registered to the current Windows user; shared Hyper-V/VirtualMachinePlatform, Tailscale, Obsidian and unrelated Windows networking remain outside its ownership boundary.
 
 ## v14.3.41 WSL cold-start recovery
 
@@ -36,7 +36,7 @@ Use GitHub Issues for reproducible LatticeVale installer, repair, documentation,
 
 Modified/forked builds are permitted under the MIT license. For an issue involving a customized build, disclose that it is modified and summarize the relevant changes or provide a minimal diff. When practical, reproduce the issue against an unmodified release so maintainers can distinguish an upstream LatticeVale defect from a downstream customization.
 
-Do **not** post passwords, API keys, Matrix access tokens/recovery keys, private backup contents, or other credentials. Security-sensitive reports should follow `SECURITY.md` instead of a public issue.
+Do **not** post passwords, API keys, Matrix access tokens/recovery keys, private backup contents, or other credentials. Security-sensitive reports should follow `docs/SECURITY.md` instead of a public issue.
 
 Questions about Hermes Agent itself, Matrix/Synapse, Tailscale, Docker, Obsidian, QMD, Honcho, Ollama, Ubuntu, or other upstream products may need to be reported to their respective upstream projects when the issue is not caused by LatticeVale integration logic.
 

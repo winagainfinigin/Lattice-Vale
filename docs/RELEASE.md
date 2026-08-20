@@ -31,7 +31,7 @@ Before publishing a release:
 3. Run the Linux regression/static suite or let GitHub Actions do so.
 4. Parse every PowerShell entry point on Windows (the GitHub Actions Windows job does this).
 5. Run `tools\New-SourceManifest.ps1` **after all source/documentation edits are final**.
-6. Run `verify-release.ps1` and confirm every manifest entry verifies.
+6. Run `installer\verify-release.ps1` and confirm every manifest entry verifies.
 7. Scan the release tree for unexpected `.exe`, `.msi`, `.dll`, package/archive, bytecode, credential, data, backup files, private keys, access tokens, and machine-specific private state. If publishing on GitHub, enable secret scanning/push protection where available.
 8. Create the versioned release ZIP from the reviewed tree without adding generated third-party installers or images. The ZIP filename may contain the release version, but the archive must contain exactly one top-level folder named `LatticeVale` (never a versioned root-folder name).
 9. Extract that ZIP into a fresh directory and rerun source-manifest/static validation against the extracted copy.

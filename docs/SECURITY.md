@@ -51,7 +51,7 @@ LatticeVale is intentionally source-visible:
 - no `curl | bash` installer entry point is used;
 - the main Windows, Linux, Docker, and audit logic is readable in the repository.
 
-Run `verify-release.ps1` to verify the extracted executable/config source against `SOURCE-SHA256SUMS.txt`. For GitHub releases, separately compare the downloaded ZIP's SHA-256 with the checksum published on the release page. An in-archive manifest detects accidental/extracted-file changes but is not a substitute for an externally published release checksum or code signing.
+Run `installer\verify-release.ps1` to verify every extracted release file except the manifest itself against `installer\SOURCE-SHA256SUMS.txt`. For GitHub releases, separately compare the downloaded ZIP's SHA-256 with the checksum published on the release page. An in-archive manifest detects accidental/extracted-file changes but is not a substitute for an externally published release checksum or code signing.
 
 ## PowerShell execution policy
 
