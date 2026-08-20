@@ -1,2 +1,16 @@
-# Auto detect text files and perform LF normalization
-* text=auto
+# SOURCE-SHA256SUMS.txt hashes exact bytes, so all reviewable source/config
+# is checked out with deterministic LF line endings on every platform.
+# PowerShell runtime source is additionally kept ASCII-only for Windows PowerShell 5.1.
+* text=auto eol=lf
+*.ps1 text eol=lf
+*.txt text eol=lf
+*.cmd text eol=lf
+*.bat text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.conf text eol=lf
+Dockerfile* text eol=lf

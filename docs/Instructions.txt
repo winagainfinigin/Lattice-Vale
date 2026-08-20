@@ -1,0 +1,328 @@
+LATTICEVALE v14.4.1 — INSTRUCTIONS
+
+PURPOSE OF THIS FILE
+This file is the procedural operator guide: what to do, in what order, and how to verify or recover the installation.
+For a plain-language explanation of what LatticeVale installs, what Hermes can do, and which settings may still require your decisions after installation, read "Installer Description.txt".
+For the complete current feature/install-option inventory, read FEATURES.md.
+For security boundaries read SECURITY.md. For release history read CHANGELOG.md.
+For modifying or forking LatticeVale under its MIT license, use README.md and CONTRIBUTING.md; keep this file focused on operating the installer.
+
+================================================================================
+1. BEFORE YOU START
+================================================================================
+
+1. Use Windows 10/11 x64/AMD64 with Administrator access.
+2. Install and verify Microsoft WSL separately before using LatticeVale.
+3. Have an existing Ubuntu 22.04, 24.04, or 26.04 WSL2 distro using amd64/x86_64.
+4. Confirm the distro launches normally and has a normal non-root sudo user with a home under /home/.
+5. Fresh installs require the Windows volume backing the selected WSL distro to be over 50 GiB total capacity and have at least 50 GiB free. Existing managed stacks may qualify for repair with less space when the installer explicitly says so.
+6. Have Internet access for packages, container images, provider authentication, and any models that must be downloaded.
+7. If you intend to use native Windows Ollama, install it separately first. LatticeVale can use and launch an existing native Ollama, but does not install or update that Windows application.
+8. Extract the complete release ZIP to a normal Windows folder. Do not run install.ps1 from inside a ZIP viewer.
+
+LatticeVale does NOT create, import, move, unregister, convert, or repair WSL distributions during normal installation. v14.3.41+ does not create or switch global WSL `networkingMode`; an existing externally configured mirrored mode is used only if it already works.
+
+If WSL itself fails after a reboot with `Catastrophic failure` / `Wsl/Service/E_UNEXPECTED`, do not unregister the distro or delete its VHDX. From an elevated PowerShell window in the extracted LatticeVale folder, first run:
+
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\tools\Repair-LatticeVale-WslHost.ps1
+
+If the helper reports that `.wslconfig` uses mirrored networking, follow its printed NAT-recovery command. With one registered distro the helper auto-selects it; with multiple distros specify `-DistroName <exact-name>`. The NAT recovery backs up `.wslconfig`, changes only `[wsl2] networkingMode`, preserves other WSL settings, and retests the same registered distro before broader component repair.
+
+================================================================================
+2. VERIFY THE RELEASE
+================================================================================
+
+From the extracted LatticeVale folder, optionally verify every shipped source/config file:
+
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1
+
+The installer performs the same source-manifest verification by default before executing the core installer.
+
+The ExecutionPolicy Bypass argument applies only to that launched PowerShell process. It does not change your stored Windows execution policy and is not a substitute for reviewing trusted source.
+
+================================================================================
+3. START THE INSTALLER
+================================================================================
+
+Open PowerShell AS ADMINISTRATOR in the extracted LatticeVale folder and run:
+
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
+
+Optional explicit distro selection:
+
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1 -DistroName <your-distro-name>
+
+Do not assume a distro is named Ubuntu-24.04. Use the name shown by:
+
+  wsl --list --verbose
+
+The installer will detect eligible distros, verify WSL2/Ubuntu/architecture/storage, and ask you to choose an existing Ubuntu user.
+
+================================================================================
+4. CLEAN INSTALL — STEP BY STEP
+================================================================================
+
+1. Select an eligible existing Ubuntu WSL2 distro.
+2. Select the existing non-root Ubuntu user that should own the LatticeVale stack.
+3. Answer the explicit component questionnaire. Suggested values are guidance only; where the installer says an explicit choice is required, pressing Enter alone does not select the suggestion.
+4. Select only features you intend to use. Read the explanation shown with each system/network-affecting choice.
+5. Configure the default Hermes provider/model when Hermes prompts for it.
+6. If adding named profiles, choose each profile name/role and whether it should clone the default provider/model or configure its own.
+7. If enabling Kanban, choose concurrency values appropriate to the machine and intended automation level.
+8. If enabling Matrix, select whether named profiles should receive dedicated Matrix identities/rooms.
+9. If enabling Windows Tailscale exposure, choose the requested private HTTPS ports and review the networking prompt carefully.
+10. If enabling **Obsidian integration**, enter a Windows-local drive path for the vault, not a \\wsl.localhost or SMB path. QMD can be used without Obsidian and does not by itself require a Windows vault path.
+11. If enabling local AI, choose managed WSL/Docker Ollama or an already-installed native Windows Ollama when offered, then choose models/acceleration as prompted.
+12. Review the complete configuration summary.
+13. Confirm installation.
+14. Let the staged installer finish. If interrupted, rerun the same installer and choose Resume / repair instead of deleting state.
+
+================================================================================
+5. EXISTING INSTALL — CHOOSE THE CORRECT MODE
+================================================================================
+
+When a managed stack is detected the installer offers:
+
+1. Resume / repair installation
+   Use for an interrupted, incomplete, stale, or partially unhealthy installation. Reuses saved choices and repairs/verifies the existing stack. It may also perform the age-gated managed refresh when due.
+
+2. Change installed components
+   Use when you want to enable/disable or change selected LatticeVale features. Unselected configuration scopes are retained from the saved installation. Component removal is designed to preserve associated persistent data unless an explicitly destructive recovery path says otherwise.
+
+   Current change scopes are:
+     1) Optional components: Dashboard, SearXNG, QMD, Obsidian
+     2) Kanban enablement/concurrency
+     3) Matrix + Windows Tailscale
+     4) Local AI / Honcho / Ollama backend/models
+     5) Runtime/Windows policy: container limits, Ubuntu Pro, updates, WSL lifetime, auto-start, shortcuts, timezone
+     6) Select all categories
+     7) Finish
+
+3. Verify installation only
+   Read-only verification path for the persistent installation. Use when you want diagnostics without changing stack configuration.
+
+4. Reconfigure providers/profiles
+   Use to rerun Hermes provider/model/profile setup while retaining the rest of the service/data selections.
+
+5. Advanced recovery
+   Use only for the specifically described recovery action. Read the confirmation text. Identity-changing Matrix recovery is intentionally narrow and backs up installer-owned state before replacement.
+
+   Current recovery actions are:
+     1) Reset checkpoints and reverify/reconcile every stage
+     2) Rebuild only installer-owned Matrix bot/room identity
+     3) Rerun provider/profile setup and reset checkpoints
+     4) Return to read-only verification and exit
+
+6. Update / repair installer-managed software
+   Use a newer LatticeVale bundle to immediately apply that bundle's tested/declared installer-managed package/image/source versions. A managed backup must succeed before the forced refresh starts.
+
+If you are unsure and simply need to recover a managed installation, choose option 1.
+
+================================================================================
+6. AFTER INSTALLATION — VERIFY HEALTH
+================================================================================
+
+Open the selected Ubuntu WSL distro and run:
+
+  cd ~/hermes-stack
+  ./manage.sh verify
+  ./manage.sh status
+  ./manage.sh profiles
+  ./manage.sh matrix-info
+
+If the installer reports a pending secondary Matrix profile, also read:
+
+  cat MATRIX-SECONDARY-PROFILES.txt
+
+Then complete only the profile named in that file:
+
+  ./manage.sh matrix-profile-finish <profile>
+
+Do not manually copy Matrix tokens or invent room IDs when the installer has preserved a retryable pending state.
+
+================================================================================
+7. EVERYDAY MANAGEMENT
+================================================================================
+
+From ~/hermes-stack:
+
+  ./manage.sh start
+  ./manage.sh stop
+  ./manage.sh restart
+  ./manage.sh status
+  ./manage.sh verify
+  ./manage.sh profiles
+  ./manage.sh matrix-info
+  ./manage.sh backup
+
+Preferred controlled software update:
+  Rerun the newer Windows installer and choose "Update / repair installer-managed software".
+
+Advanced upstream refresh:
+  ./manage.sh update
+
+The advanced command is not equivalent to the bundle-pinned installer updater and may follow configured upstream references differently.
+
+If Windows Start/Shut Down shortcuts were enabled, test each once after install. The managed shutdown shortcut stops this stack and terminates only its selected WSL distro; it does not intentionally issue global wsl --shutdown.
+
+================================================================================
+8. PROVIDERS, MODELS, AND PROFILES
+================================================================================
+
+Provider/model availability can change independently of LatticeVale. If a provider deprecates a model, restricts a model by region, changes authentication, or your quota expires, reconfigure that profile instead of repeatedly retrying a non-retryable provider error.
+
+To inspect profiles from the container:
+
+  docker exec -u hermes hermes-agent /opt/hermes/.venv/bin/hermes profile list
+
+For a named profile, use Hermes' -p <profile> targeting. Do not assume the secondary profile is named "assistant".
+
+Use installer option 4 when you want the installer to rerun provider/profile setup while preserving the rest of the stack.
+
+================================================================================
+9. KANBAN AND AGENT-MANAGED SKILLS
+================================================================================
+
+Kanban is shared across profiles using the same Hermes data root. Dispatcher workers receive a real task binding; normal chat sessions do not.
+
+Operational rules:
+- create root work through normal Kanban creation/triage rather than pretending an ordinary chat is a claimed worker;
+- do not manually pass the literal text $HERMES_KANBAN_TASK as a task ID;
+- task-scoped complete/block/review/heartbeat operations require an actual bound or explicit task ID;
+- completed task results should be read from retained task results/attachments rather than assuming scratch worker directories still exist;
+- if asking Hermes for "the results," specify whether you want the substantive task output or board/status information when ambiguity matters.
+
+For agent-managed skills:
+- valid skill names are slugs, not arbitrary display names with spaces;
+- malformed SKILL.md/frontmatter must be corrected rather than retried unchanged;
+- existing skills should be viewed before patching when Hermes requires the current contents;
+- tool-loop hard stops should remain enabled.
+
+Fresh installer-managed profiles default `skills.write_approval` to `false` when no explicit setting exists, allowing automatic skill writes. If you want a separate human approval gate, set it to `true`. LatticeVale preserves an existing explicit approval choice during repair/update.
+
+================================================================================
+10. MATRIX / ELEMENT
+================================================================================
+
+LatticeVale can provision Synapse, the default bot, and selected named-profile bot identities/rooms. You are still responsible for protecting Element sessions, recovery keys, bot credentials, and any manually added users/devices.
+
+If a named profile remains pending after installation, use the exact matrix-profile-finish procedure in section 6. Do not rebuild an identity simply because activation is pending.
+
+If exposing Matrix through Windows Tailscale, verify the Tailscale client is signed in and that your tailnet ACLs/grants permit only the access you intend.
+
+================================================================================
+11. OLLAMA / LOCAL AI
+================================================================================
+
+Managed WSL/Docker Ollama:
+- LatticeVale installs/configures the managed container path and selected tested pins.
+- Use the installer to change acceleration/backend choices when needed.
+
+Native Windows Ollama:
+- must already be installed separately;
+- remains a Windows-owned application;
+- LatticeVale does not update it;
+- native Ollama model/resource settings may still need to be changed in Ollama itself depending on your hardware and workload.
+
+If a selected forced GPU mode stops passing prerequisite checks, Resume / repair will ask whether to change the saved managed setting rather than silently substituting another mode.
+
+================================================================================
+12. OBSIDIAN / QMD / HONCHO
+================================================================================
+
+For Obsidian integration use a normal Windows-local path such as:
+
+  D:\Documents\Obsidian Vault
+
+Do not use \\wsl.localhost, \\wsl$, SMB, or another network path for the installer-managed Windows vault bind.
+
+After changing large amounts of vault content, use the normal LatticeVale/Hermes verification/status paths to confirm QMD/indexing services remain healthy.
+
+Honcho data is persistent and repair/update is preservation-first. Do not delete its database merely to solve an unrelated provider or gateway problem.
+
+================================================================================
+13. BACKUP AND UPDATE PRACTICE
+================================================================================
+
+Create a managed backup before manual experiments or destructive recovery:
+
+  cd ~/hermes-stack
+  ./manage.sh backup
+
+Backups may contain API keys, Matrix credentials, provider state, and other secrets. Protect them as sensitive files.
+
+For a newer LatticeVale release:
+1. extract the new ZIP separately;
+2. run its verify-release.ps1 if desired;
+3. run its install.ps1 as Administrator;
+4. select the same managed distro/user;
+5. choose option 6 for an immediate controlled software refresh, or option 1 for ordinary repair/migration behavior;
+6. verify afterward with ./manage.sh verify and ./manage.sh status.
+
+================================================================================
+14. TROUBLESHOOTING / RECOVERY
+================================================================================
+
+If installation or repair is interrupted:
+1. do not delete the WSL distro, Docker volumes, Matrix crypto state, profiles, or databases;
+2. rerun install.ps1;
+3. choose Resume / repair;
+4. follow the first concrete error reported;
+5. use Advanced recovery only when its described action matches the failure.
+
+Remember the execution layers are different:
+- Windows host
+- Ubuntu WSL host
+- hermes-agent container
+- other Compose containers
+
+A command that exists inside the Hermes image may not exist directly on the WSL host. When using bash -lc inside the Hermes container, call /opt/hermes/.venv/bin/hermes explicitly if the login shell does not place it on PATH.
+
+If WSL itself cannot launch reliably, stop and repair WSL outside LatticeVale first.
+
+================================================================================
+15. SECURITY CHECKLIST
+================================================================================
+
+Before unattended/automatic operation:
+- review SECURITY.md;
+- review provider/API credentials and quotas;
+- review Hermes toolsets and approval settings;
+- review Kanban concurrency/automation levels;
+- decide whether agent-managed skill writes require approval;
+- keep the Hermes API/Dashboard/Matrix exposure no broader than intended;
+- if using Tailscale, review tailnet ACLs/grants and device security;
+- protect Matrix recovery material and backup archives;
+- do not publish generated secrets, tokens, passwords, recovery keys, or private diagnostics.
+
+Automatic Kanban dispatch and skill writing are real agent capabilities. They are not a security sandbox.
+
+================================================================================
+16. UNINSTALL OR INTENTIONAL CLEAN-HOST RESET
+================================================================================
+
+NORMAL LATTICEVALE UNINSTALL
+Use the shipped uninstall.ps1 and read every scope/preservation prompt. Normal uninstall is preservation-first: it does not unregister WSL and should be used when you merely want to remove LatticeVale or retain the distro/stack for recovery.
+
+INTENTIONAL FRESH WSL + LATTICEVALE BASELINE
+Use tools\Reset-LatticeVale-CleanHost.ps1 only when you deliberately want an intentionally destructive clean-host rebuild. If `-RemoveWslRuntime` is selected, **ALL WSL distributions registered to the current Windows user are permanently unregistered**, not merely the distro used by LatticeVale. It is separate from uninstall.ps1 so ordinary uninstall/repair cannot accidentally cross this boundary.
+
+1. Copy/extract the LatticeVale release containing the reset tool somewhere OUTSIDE any source folder you intend to delete.
+2. Open PowerShell as Administrator.
+3. Run a dry run first. Example:
+
+   powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\tools\Reset-LatticeVale-CleanHost.ps1 -RemoveWslRuntime -RemoveLegacyHermesFoundry -DeleteLatticeValeSource -LatticeValeSourcePath "C:\path\to\old\LatticeVale"
+
+4. Read every `WOULD:` line. `-RemoveWslRuntime` means ALL WSL distributions registered to the current Windows user will be permanently unregistered, not merely the LatticeVale distro. Stop if that is not what you intend. The dry run must reach its explicit completion message without a PowerShell error before you proceed to `-Execute`; the current release includes the heterogeneous Scheduled Task action compatibility fix introduced in v14.3.43.
+5. When the dry-run inventory is correct, rerun the same command with `-Execute`.
+6. Type the exact confirmation `CLEAN-RESET`.
+7. Reboot Windows after the reset before reinstalling WSL.
+8. Reinstall WSL and a supported Ubuntu WSL2 distro using Microsoft's current supported procedure, create the Linux user, verify the distro launches normally, then run LatticeVale as a fresh install.
+
+The clean-host reset removes only Windows integrations it can attribute to LatticeVale or the explicitly selected legacy pre-LatticeVale Foundry cleanup. It deliberately does NOT disable/uninstall Hyper-V, HypervisorPlatform, VirtualMachinePlatform, HNS, Windows Tailscale, Obsidian, unrelated firewall/HNS objects, or a standalone `%USERPROFILE%\.hermes` directory. Global `.wslconfig*` files are removed only with `-RemoveWslRuntime` so the rebuilt WSL starts without inherited LatticeVale/Foundry host overrides.
+
+================================================================================
+17. VALIDATION LIMITS
+================================================================================
+
+The release includes source/static regression coverage and release-manifest verification, but no installer can prove every third-party provider, Windows security product, Tailscale policy, GPU driver, network topology, or future upstream service behavior in advance. Treat live provider/network/account behavior as an integration boundary and use Verify/Resume rather than destructive resets when one of those external systems changes.

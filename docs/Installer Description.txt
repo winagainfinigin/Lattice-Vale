@@ -1,0 +1,322 @@
+LATTICEVALE v14.4.1 — INSTALLER DESCRIPTION
+
+WHAT THIS FILE IS
+This is the plain-language capability and configuration guide. It explains what LatticeVale installs, what it configures automatically, what Hermes can do after installation, and which decisions may still belong to the user.
+It is intentionally NOT a step-by-step install guide. For commands and procedures, read Instructions.txt.
+For the consolidated current feature/install-option inventory, read FEATURES.md.
+
+================================================================================
+1. WHAT LATTICEVALE IS
+================================================================================
+
+LatticeVale is a preservation-first Windows/WSL installer and lifecycle manager for a self-hosted Hermes Agent stack. It uses an already-working supported Ubuntu WSL2 distro and installs/configures the selected services around Hermes without creating, moving, unregistering, or replacing that distro.
+
+A typical selected stack can include:
+- Hermes Agent
+- Hermes API and Dashboard
+- multiple isolated Hermes profiles
+- Hermes Kanban orchestration/dispatch
+- Matrix Synapse plus PostgreSQL
+- dedicated Matrix bot/room identities for named profiles
+- SearXNG plus Valkey
+- QMD search/indexing
+- Windows Obsidian vault integration
+- Honcho memory services plus PostgreSQL/Redis
+- LatticeVale-managed WSL/Docker Ollama, or integration with separately installed native Windows Ollama
+- Windows Tailscale private exposure for selected local services
+- Docker Engine/CLI/containerd/Buildx/Compose inside the selected Ubuntu distro
+- optional Ubuntu Pro/unattended-updates integration
+- optional Windows logon/start/shutdown helpers
+
+Everything is optional except the core prerequisites and Hermes/Docker layer required by the selected installation mode.
+
+WSL HOST-NETWORKING OWNERSHIP
+LatticeVale discovers the active WSL networking topology but v14.3.41+ does not set or switch global `[wsl2] networkingMode` during clean install, repair, component changes, provider reconfiguration, advanced recovery, or update/repair. NAT/default and VirtioProxy-capable paths use dynamic/scoped relays. If the host/user has already configured mirrored networking and it is healthy, LatticeVale can consume that topology without taking ownership of `.wslconfig`. This boundary exists because a global WSL networking change affects every WSL2 distro and may behave differently after a cold Windows/WSL restart.
+
+================================================================================
+2. WHAT LATTICEVALE CONFIGURES AUTOMATICALLY
+================================================================================
+
+When you select a feature, LatticeVale is designed to create and reconcile the installer-owned plumbing for that feature rather than leaving the whole integration manual.
+
+Examples include:
+- Docker repository/package setup and Compose service definitions;
+- generated environment/config files and safe permissions;
+- service health checks and staged repair checkpoints;
+- Hermes profile directories recorded as installer-managed;
+- provider/profile bootstrap handoff to Hermes;
+- the shared Hermes Kanban board policy, dispatcher configuration, and profile-aware routing safeguards;
+- Matrix Synapse database/service setup, installer-owned bot identities, encrypted rooms, tokens/device metadata, and protected per-profile gateway configuration;
+- SearXNG/Valkey and QMD service wiring;
+- Honcho databases/services and configured embedding path;
+- managed Ollama image/model path and selected acceleration policy;
+- Windows-local Obsidian vault translation/mounting when selected;
+- Windows-side Tailscale Serve/relay state when selected and verifiable;
+- generated management scripts, state audit, backup, and optional desktop shortcuts.
+
+Repair/update runs re-read saved intent and reconcile installer-owned state instead of assuming every current default should overwrite an existing installation.
+
+================================================================================
+3. SETTINGS THAT MAY STILL REQUIRE USER DECISIONS
+================================================================================
+
+LatticeVale can automate infrastructure, but it cannot safely decide every account, model, security, cost, privacy, or workflow preference for every user. The following areas should be reviewed after installation and whenever your needs change.
+
+A. AI PROVIDER AND MODEL SETTINGS — OFTEN REQUIRED
+
+Each Hermes profile needs a working provider/model configuration. Depending on the provider, you may still need to:
+- authenticate or provide an API key/token;
+- choose a model available in your country/region;
+- choose a model that your subscription or provider account permits;
+- choose separate providers/models for separate profiles;
+- change a model after upstream deprecation, renaming, quota exhaustion, or regional restriction;
+- decide reasoning/latency/cost tradeoffs supported by that provider.
+
+LatticeVale cannot guarantee that an external provider/model remains available after release. A provider HTTP 400/403 caused by deprecation, quota, authentication, or region policy is normally a provider configuration issue, not a reason to rebuild the stack.
+
+B. PROFILE DESIGN — USER CHOICE
+
+Named Hermes profiles are intentionally generic. LatticeVale does not require a profile named "assistant", "coder", or any other fixed secondary name.
+
+You may still want to decide:
+- how many profiles you actually need;
+- the role/instructions for each profile;
+- whether a profile clones the default provider/model or uses a different provider/model;
+- which real installed profile should be the Kanban orchestrator;
+- which real installed profile should be the default assignee;
+- which profiles should have dedicated Matrix identities;
+- which profiles should receive more restrictive tools/approvals than others.
+
+Valid user-created Hermes profiles can remain routing targets. LatticeVale does not rewrite arbitrary user-created profile configs merely because they exist.
+
+C. KANBAN AUTOMATION — REVIEW BEFORE UNATTENDED USE
+
+When enabled, Kanban can create/decompose work, honor dependencies, dispatch work across profiles, and retain completed task artifacts. This is real automation, not just a visual board.
+
+Settings worth reviewing include:
+- total concurrent work (`max_in_progress`);
+- per-profile concurrency (`max_in_progress_per_profile`);
+- dispatcher interval;
+- whether automatic decomposition is enabled;
+- decomposition rate/per-tick behavior;
+- default assignee and orchestrator profile;
+- review-dispatch behavior;
+- stale-task/reconciliation policy when exposed by the installed Hermes version.
+
+LatticeVale applies safe task-context rules so ordinary chat is not treated as a claimed worker and so literal placeholders such as `$HERMES_KANBAN_TASK` are not accepted as fake task IDs. Those safeguards do not decide whether the work itself is trustworthy or appropriate.
+
+D. TOOL PERMISSIONS AND APPROVALS — SECURITY DECISION
+
+Hermes can use terminal, browser/web, Kanban, skills, plugins, MCP services, and other tools made available to a profile. Users should decide how much autonomy is appropriate.
+
+Review as applicable:
+- toolsets enabled for each profile;
+- destructive action approvals;
+- skill write approval (`skills.write_approval`);
+- cron/scheduled-work approvals;
+- API exposure and authentication;
+- terminal execution backend/security expectations;
+- permissions granted to plugins or MCP servers;
+- whether unattended Kanban workers should inherit the same tools as interactive chat.
+
+LatticeVale keeps tool-loop hard stops enabled and adds policy against repeatedly submitting the same malformed skill operation. That is correctness protection, not a sandbox.
+
+E. AGENT-MANAGED SKILLS — OPTIONAL BEHAVIOR
+
+Hermes can create and maintain skills. LatticeVale's managed policy teaches profiles to use valid skill slugs, complete YAML frontmatter, current skill contents before patching when required, and strategy changes after validation failures.
+
+Fresh installer-managed profiles default `skills.write_approval` to `false` when no explicit setting exists, allowing automatic agent-managed skill writes. Set it to `true` if a separate human approval gate is required. Repair/update preserves an explicit existing choice.
+
+You may still need to decide:
+- whether agents may write skills automatically;
+- whether writes require approval;
+- which skills should be shared/installed for a specific workflow;
+- whether a skill created by an agent should be reviewed before future automatic use.
+
+F. MATRIX / ELEMENT — ACCOUNT AND TRUST SETTINGS
+
+LatticeVale can configure the server-side stack and installer-owned bot/room state, but users still control human/client trust decisions.
+
+You may still need to:
+- sign into Element or another Matrix client;
+- protect/export recovery keys where appropriate;
+- verify devices according to your security preference;
+- invite/remove human users;
+- manage non-installer-owned rooms;
+- finish a secondary profile activation if the installer leaves it in a protected `pending-manual` state;
+- decide which profiles should have a dedicated Matrix identity at all.
+
+LatticeVale does not intentionally reset unknown/manual Matrix identities merely to make repair easier.
+
+G. TAILSCALE — NETWORK POLICY REMAINS YOURS
+
+If Windows Tailscale exposure is selected, LatticeVale can configure the local Serve/relay side when the Windows client is present and working. It cannot decide your organization/tailnet security policy.
+
+You may still need to:
+- install/sign into the Windows Tailscale client if not already available;
+- approve the device according to your tailnet policy;
+- configure ACLs/grants/tags so only intended users/devices can reach the exposed service;
+- decide which HTTPS ports/services should be exposed;
+- maintain DNS/device naming policy outside LatticeVale.
+
+Private Tailscale exposure is only as restrictive as the tailnet policy and endpoint security you configure.
+
+H. DASHBOARD / LOCAL API EXPOSURE — REVIEW ACCESS BOUNDARIES
+
+LatticeVale normally keeps host-published local service ports on loopback unless a selected integration intentionally exposes them through a private path.
+
+Users should still decide:
+- dashboard credentials when prompted;
+- whether remote access is needed at all;
+- whether firewall/Tailscale policy is sufficiently restrictive;
+- whether any custom Compose override has broadened a loopback bind;
+- whether API consumers are trusted.
+
+A service binding to `0.0.0.0` inside its Docker container is not the same thing as publishing that port to all Windows/LAN interfaces. Review the Compose host publish and any overrides before broadening access.
+
+I. OLLAMA / LOCAL MODEL SETTINGS — HARDWARE DEPENDENT
+
+Managed WSL/Docker Ollama:
+LatticeVale can install/configure the managed path, selected models, and acceleration policy, but model choice remains a workload/hardware decision. You may want to change models later for quality, context, latency, VRAM, RAM, or disk use.
+
+Native Windows Ollama:
+LatticeVale can integrate with an existing native Windows Ollama when a safe WSL path verifies, but native Ollama remains separately owned. You may still need to configure native Ollama itself, including model lifecycle, memory/concurrency behavior, startup behavior, or other Windows-side application settings. LatticeVale does not update native Windows Ollama.
+
+If a forced GPU mode is no longer valid after hardware/driver changes, use repair/reconfiguration instead of assuming the old acceleration setting is still correct.
+
+J. RESOURCE LIMITS — REVIEW FOR YOUR MACHINE
+
+LatticeVale can generate adaptive per-container CPU/RAM ceilings from resources visible inside WSL. These are ceilings, not reservations, and they do not replace Windows/WSL global resource policy.
+
+Users may still want to tune:
+- WSL CPU/RAM allocation outside LatticeVale;
+- per-container overrides in `compose.override.yaml`;
+- Kanban concurrency;
+- Ollama model size/context/concurrency;
+- whether performance or low idle resource use is the priority.
+
+A user `compose.override.yaml` is intentionally applied last and can override generated ceilings. That file is therefore also capable of defeating safe defaults if edited carelessly.
+
+K. OBSIDIAN / QMD — CONTENT CHOICE
+
+If selected, LatticeVale asks for the Windows-local vault path and mounts it for the managed services. It cannot choose what notes/content should be indexed or how you organize the vault.
+
+Users may still need to:
+- choose/change the vault path through the installer;
+- populate or organize the vault;
+- review what content is appropriate for Hermes/QMD to access;
+- account for confidential material before granting agents access to the vault.
+
+L. HONCHO MEMORY — PRIVACY AND WORKFLOW CHOICE
+
+LatticeVale can install and preserve the Honcho memory layer. Users should still decide whether long-lived memory is appropriate for the information handled by their agents and what data should or should not be retained in agent workflows.
+
+M. WINDOWS INTEGRATIONS — OPTIONAL
+
+Depending on choices, LatticeVale can configure desktop Start/Shut Down shortcuts, Windows-logon startup, Windows Tailscale integration, Obsidian paths, and Ubuntu Pro for WSL-related integration.
+
+These are not mandatory for Hermes itself. Users can leave them disabled when they do not want LatticeVale to affect those Windows-side behaviors.
+
+N. UPDATE POLICY — CHOOSE CONTROLLED VS ADVANCED
+
+Ordinary Resume / repair is preservation-first and may perform the managed age-gated refresh when due.
+
+`Update / repair installer-managed software` forces the current LatticeVale bundle's tested/declared managed software refresh after a required managed backup. This is the preferred controlled updater.
+
+`./manage.sh update` is an advanced upstream-refresh path and is not the same thing as applying a newer LatticeVale release's tested fixed pins.
+
+Separately owned software such as native Windows Ollama must be updated through its own owner/application.
+
+================================================================================
+4. SETTINGS THAT USUALLY DO NOT NEED MANUAL EDITING
+================================================================================
+
+For installer-managed components, users normally should NOT manually edit generated credentials, room IDs, internal service URLs, Compose-generated environment wiring, installer checkpoint files, or protected Matrix token/device metadata just to fix a failed repair.
+
+Prefer rerunning the installer in the appropriate existing-install mode. Manual edits to generated internals can make ownership verification ambiguous and can cause repair to preserve rather than overwrite a value it can no longer prove is installer-owned.
+
+================================================================================
+5. WHAT A NORMAL HEALTHY INSTALL STILL DOES NOT PROMISE
+================================================================================
+
+A healthy LatticeVale installation means the selected local stack and managed integrations pass the available checks. It does not guarantee:
+- unlimited or permanent availability of any external AI model/provider;
+- provider quotas or billing status;
+- Tailscale ACL correctness outside the local host configuration;
+- trustworthiness of arbitrary web/task/plugin content;
+- that every agent action is safe merely because it was dispatched through Kanban;
+- enough CPU/RAM/VRAM for every possible local model/workload;
+- that future Windows, WSL, Docker, GPU-driver, Matrix, provider, or upstream Hermes changes cannot require reconfiguration.
+
+Use provider errors, status/audit output, and the installer repair modes to distinguish external-service changes from local stack corruption before deleting persistent data.
+
+================================================================================
+6. PRESERVATION AND OWNERSHIP PRINCIPLES
+================================================================================
+
+LatticeVale is designed to modify only state it can identify as installer-managed and to preserve user-owned/unknown state when ownership is ambiguous.
+
+Normal repair/update aims to preserve:
+- Hermes profiles, sessions, memory, and saved provider configuration;
+- Matrix accounts/rooms/messages/media/tokens/E2EE state;
+- Synapse and Honcho databases;
+- QMD data;
+- Ollama models;
+- vault/workspace content;
+- credentials and local backups;
+- explicit user-owned image/source/config overrides;
+- unrelated Docker projects sharing the same Docker Engine.
+
+Advanced recovery is intentionally separate because some recovery actions can replace narrowly scoped installer-owned identity state. Read those prompts before confirming.
+
+================================================================================
+7. NORMAL UNINSTALL VS. CLEAN-HOST RESET
+================================================================================
+
+Normal `uninstall.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites.
+
+`tools\Reset-LatticeVale-CleanHost.ps1` is a separate administrator utility for a different goal: intentionally returning a host to a fresh WSL/LatticeVale baseline. It is never called automatically by install, repair, update, verify, or normal uninstall. It defaults to a dry run and requires both `-Execute` and the exact interactive confirmation `CLEAN-RESET`.
+
+When explicitly requested, the clean-host reset can remove proven LatticeVale/legacy pre-LatticeVale Foundry Windows tasks, relays, shortcuts, firewall state and PATH residue; disable only Tailscale Serve listeners that still point at known LatticeVale bridge backends; unregister the current user's WSL distributions; remove global `.wslconfig*` state; uninstall the Store/MSI WSL app; and delete a verified LatticeVale source tree.
+
+The utility also treats Windows Scheduled Task action collections as heterogeneous: it reads only properties actually present on each action type and never treats a missing Exec-only field as ownership evidence.
+
+The utility deliberately does not treat every virtualization/networking component as LatticeVale-owned. It preserves Hyper-V, HypervisorPlatform, VirtualMachinePlatform, HNS infrastructure, Windows Tailscale, Obsidian, unrelated firewall/HNS state, and `%USERPROFILE%\.hermes` unless a future tool can prove more specific ownership. This boundary minimizes collateral damage on systems where WSL, Hyper-V, Tailscale or Hermes tooling is shared with other workloads.
+
+================================================================================
+8. COMPATIBILITY BOUNDARY
+================================================================================
+
+The distributed LatticeVale bundle targets:
+- Windows 10/11 x64/AMD64;
+- Microsoft WSL already installed and functioning;
+- Ubuntu 22.04, 24.04, or 26.04 running as WSL2;
+- amd64/x86_64 selected distro;
+- normal non-root Ubuntu user with sudo access.
+
+The installer is capability-based within that supported boundary. It does not require a particular Windows username, drive letter, WSL distro name, Linux username, secondary Hermes profile name, Matrix room ID, AI provider, or model.
+
+================================================================================
+9. LICENSE / CUSTOMIZATION CONTEXT
+================================================================================
+
+LatticeVale's own source and documentation are MIT-licensed and may be inspected, modified, forked, and redistributed subject to the MIT notice. A modified/downstream build should be labeled as modified, should not publish secrets or generated private state, and should regenerate/verify the release manifest after documentation or source changes. Third-party components keep their own licenses and terms. See README.md, CONTRIBUTING.md, and THIRD-PARTY-NOTICES.md for the repository/publication details.
+
+================================================================================
+10. WHERE TO GO NEXT
+================================================================================
+
+For exact installation, repair, update, verification, backup, and recovery steps:
+  Instructions.txt
+
+For security boundaries and reporting:
+  SECURITY.md
+
+For current quick-start/project overview:
+  README.md
+
+For release changes:
+  CHANGELOG.md
+
+For support/diagnostic expectations:
+  SUPPORT.md

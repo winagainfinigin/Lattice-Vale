@@ -1,0 +1,128 @@
+name: Validate release source
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux-regression:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: LatticeVale-Core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install test parser dependency
+        run: python -m pip install --disable-pip-version-check PyYAML
+      - name: Install simulation prerequisites
+        run: sudo apt-get update && sudo apt-get install -y jq
+      - name: Bash syntax
+        run: bash -n linux/bootstrap.sh stack/configure-stack.sh stack/manage.sh stack/qmd-index-cycle.sh stack/native-ollama-relay.sh
+      - name: Python compile
+        run: |
+          python -m py_compile stack/state-audit.py stack/patch-qmd-bind.py stack/native-ollama-relay.py tests/*.py
+          find . -type d -name __pycache__ -prune -exec rm -rf {} +
+          find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
+      - name: Static audit
+        run: python tests/static-audit.py
+      - name: Current v14.4.1 release-layout identity and inherited policy regressions
+        run: |
+          python tests/v14.3.38-kanban-skill-policy-fixtures.py
+          python tests/v14.3.39-existing-install-qc-fixtures.py
+          python tests/v14.3.40-documentation-separation-fixtures.py
+          python tests/v14.3.41-wsl-host-safety-fixtures.py
+          python tests/v14.3.42-clean-host-reset-fixtures.py
+          python tests/v14.3.43-scheduled-task-action-compat-fixtures.py
+          python tests/v14.4.0-documentation-audit-fixtures.py
+          python tests/v14.4.1-release-layout-fixtures.py
+      - name: Release documentation and repository metadata consistency
+        working-directory: .
+        run: |
+          grep -q '^14.4.1$' LatticeVale-Core/VERSION.txt
+          grep -q '^# LatticeVale v14.4.1' README.md
+          grep -q '^LATTICEVALE v14.4.1' docs/Instructions.txt
+          grep -q '^LATTICEVALE v14.4.1' 'docs/Installer Description.txt'
+          grep -q '^## 14.4.1 ' docs/CHANGELOG.md
+          grep -q 'placeholder: 14.4.1' .github/ISSUE_TEMPLATE/bug_report.yml
+          grep -q 'Existing-stack Resume / repair adopts required migrations' .github/PULL_REQUEST_TEMPLATE.md
+          grep -q 'KANBAN-SKILL-POLICY-PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md docs/SUPPORT.md docs/RELEASE.md
+          grep -q 'WSL-HOST-SAFETY-PATCH-NOTES.md' docs/CHANGELOG.md docs/RELEASE.md
+          grep -q 'CLEAN-HOST-RESET-PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md
+      - name: Deterministic regression fixtures
+        run: |
+          set -euo pipefail
+          for test in tests/*-fixtures.py; do
+            echo "==> $test"
+            python "$test"
+          done
+      - name: Mocked resume simulations
+        run: |
+          python tests/minimal-resume-simulation.py
+          python tests/interruption-resume-simulation.py
+      - name: No compiled or opaque release artifacts
+        run: |
+          ! find .. -type f \( -name '*.pyc' -o -name '*.pyo' -o -name '*.exe' -o -name '*.msi' -o -name '*.dll' -o -name '*.deb' -o -name '*.rpm' -o -name '*.tar' -o -name '*.tgz' -o -name '*.tar.gz' -o -name '*.zip' -o -name '*.7z' -o -name '*.bin' -o -name '*.jar' \) -print | grep .
+          ! grep -RInE --exclude-dir=.git --exclude-dir=tests --exclude='validate.yml' --exclude='*.md' --exclude='*.txt' --exclude='SOURCE-SHA256SUMS.txt' \
+            'EncodedCommand|FromBase64String|Invoke-Expression|(^|[^A-Za-z])iex([^A-Za-z]|$)|curl[^|]*\|[[:space:]]*(ba)?sh' ..
+
+  powershell-parse-and-manifest:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Parse PowerShell source with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          $files = @(Get-ChildItem -Path . -Recurse -File | Where-Object {
+            $_.Extension.ToLowerInvariant() -in @('.ps1','.psm1','.psd1') -and
+            $_.FullName -notmatch '[\\/]\.git(?:[\\/]|$)'
+          } | Sort-Object FullName)
+          if ($files.Count -lt 1) { throw 'No PowerShell source files discovered.' }
+          $failed = $false
+          foreach ($item in $files) {
+            $file = $item.FullName
+            $bytes = [IO.File]::ReadAllBytes($file)
+            for ($i = 0; $i -lt $bytes.Length; $i++) {
+              if ($bytes[$i] -gt 0x7F) {
+                $failed = $true
+                Write-Error "$file contains non-ASCII byte 0x$($bytes[$i].ToString('X2')) at offset $i; shipped PowerShell source must be ASCII-only for Windows PowerShell 5.1 compatibility."
+                break
+              }
+            }
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) {
+              $failed = $true
+              Write-Error "$file parser errors:`n$($errors | Out-String)"
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: Parse PowerShell source with PowerShell 7
+        shell: pwsh
+        run: |
+          $files = @(Get-ChildItem -Path . -Recurse -File | Where-Object {
+            $_.Extension.ToLowerInvariant() -in @('.ps1','.psm1','.psd1') -and
+            $_.FullName -notmatch '[\\/]\.git(?:[\\/]|$)'
+          } | Sort-Object FullName)
+          if ($files.Count -lt 1) { throw 'No PowerShell source files discovered.' }
+          $failed = $false
+          foreach ($item in $files) {
+            $file = $item.FullName
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($file, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) {
+              $failed = $true
+              Write-Error "$file parser errors:`n$($errors | Out-String)"
+            }
+          }
+          if ($failed) { exit 1 }
+      - name: Verify source manifest
+        shell: pwsh
+        run: .\installer\verify-release.ps1

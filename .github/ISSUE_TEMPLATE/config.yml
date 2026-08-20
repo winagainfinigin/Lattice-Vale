@@ -1,0 +1,4 @@
+# Keep blank issues available for compatibility questions that do not fit the
+# structured bug template. Sensitive security reports belong in the private
+# vulnerability-reporting path described by SECURITY.md.
+blank_issues_enabled: true

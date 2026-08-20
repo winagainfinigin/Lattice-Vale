@@ -1,0 +1,16 @@
+FROM node:24-bookworm-slim
+ARG QMD_VERSION=2.5.3
+COPY patch-qmd-bind.py /tmp/patch-qmd-bind.py
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates cmake curl python3 \
+    && npm install --global "@tobilu/qmd@${QMD_VERSION}" \
+    && python3 /tmp/patch-qmd-bind.py "$(npm root -g)/@tobilu/qmd" \
+    && rm -f /tmp/patch-qmd-bind.py \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/* \
+    && install -d -o node -g node /home/node/.config/qmd /home/node/.cache/qmd
+USER node
+WORKDIR /home/node
+ENV HOME=/tmp/qmd-home QMD_CONFIG_DIR=/home/node/.config/qmd XDG_CONFIG_HOME=/home/node/.config XDG_CACHE_HOME=/home/node/.cache INDEX_PATH=/home/node/.cache/qmd/index.sqlite QMD_FORCE_CPU=1
+EXPOSE 8181
+CMD ["qmd", "mcp", "--http", "--port", "8181"]

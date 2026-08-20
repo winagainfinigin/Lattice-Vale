@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Installer/runtime state — never commit
+*.log
+*.tmp
+*.bak
+backups/
+secrets/
+data/
+vault/
+workspace/
+.matrix-info
+.matrix-configured
+.matrix-profiles/
+.installer-*.json
+.install-options.json
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

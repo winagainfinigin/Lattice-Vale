@@ -1,0 +1,309 @@
+name: hermesstack
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  logging:
+    driver: local
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  hermes:
+    <<: *service-defaults
+    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:v2026.8.16}
+    container_name: hermes-agent
+    command: ["gateway", "run"]
+    env_file:
+      - ./secrets/hermes-runtime.env
+    environment:
+      TZ: ${TZ:-UTC}
+      HERMES_UID: ${STACK_UID:-1000}
+      HERMES_GID: ${STACK_GID:-1000}
+    shm_size: "1gb"
+    volumes:
+      - ./data/hermes:/opt/data
+      - ${OBSIDIAN_VAULT_HOST_PATH:-./vault}:/vault:rw
+      - ./workspace:/workspace:rw
+    ports:
+      - "127.0.0.1:${HERMES_API_HOST_PORT:-8642}:8642"
+      - "${DASHBOARD_HOST_BIND:-127.0.0.1}:${DASHBOARD_HOST_PORT:-9119}:9119"
+    networks:
+      - backend
+      - edge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "windows.host:${WINDOWS_HOST_IP:-127.0.0.1}"
+
+  synapse-db:
+    <<: *service-defaults
+    profiles: ["matrix"]
+    image: ${POSTGRES_IMAGE:-postgres:16-alpine}
+    container_name: hermes-synapse-db
+    environment:
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: ${SYNAPSE_POSTGRES_PASSWORD:-not-configured}
+      POSTGRES_DB: synapse
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C
+    volumes:
+      - ./data/synapse-db:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse -d synapse"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  synapse:
+    <<: *service-defaults
+    profiles: ["matrix"]
+    image: ${SYNAPSE_IMAGE:-matrixdotorg/synapse:v1.158.0}
+    container_name: hermes-synapse
+    environment:
+      SYNAPSE_CONFIG_PATH: /data/homeserver.yaml
+      UID: ${STACK_UID:-1000}
+      GID: ${STACK_GID:-1000}
+    volumes:
+      - ./data/synapse:/data
+    ports:
+      - "${MATRIX_HOST_BIND:-127.0.0.1}:${MATRIX_HOST_PORT:-8008}:8008"
+    networks:
+      - backend
+      - edge
+    depends_on:
+      synapse-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8008/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  searxng-valkey:
+    <<: *service-defaults
+    profiles: ["search"]
+    image: ${VALKEY_IMAGE:-valkey/valkey:8-alpine}
+    user: "${STACK_UID:-1000}:${STACK_GID:-1000}"
+    container_name: hermes-searxng-valkey
+    command: ["valkey-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - ./data/searxng-valkey:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  searxng:
+    <<: *service-defaults
+    profiles: ["search"]
+    image: ${SEARXNG_IMAGE:-searxng/searxng:2026.8.17-374939b88}
+    container_name: hermes-searxng
+    environment:
+      SEARXNG_BASE_URL: http://localhost:${SEARXNG_HOST_PORT:-8888}/
+      # Keep installer-managed host config owned/writable by the selected Ubuntu user.
+      # Current SearXNG images otherwise default FORCE_OWNERSHIP=true and chown /etc/searxng.
+      FORCE_OWNERSHIP: "false"
+    volumes:
+      - ./config/searxng:/etc/searxng:rw
+    ports:
+      - "127.0.0.1:${SEARXNG_HOST_PORT:-8888}:8080"
+    networks:
+      - backend
+      - edge
+    depends_on:
+      searxng-valkey:
+        condition: service_healthy
+
+  qmd:
+    <<: *service-defaults
+    profiles: ["qmd"]
+    user: "${STACK_UID:-1000}:${STACK_GID:-1000}"
+    build:
+      context: .
+      dockerfile: Dockerfile.qmd
+      args:
+        QMD_VERSION: ${QMD_VERSION:-2.5.3}
+    image: hermes-qmd:local
+    container_name: hermes-qmd
+    command: ["sh", "-lc", "mkdir -p \"$$HOME\" && exec qmd mcp --http --port 8181"]
+    environment:
+      HOME: /tmp/qmd-home
+      QMD_CONFIG_DIR: /home/node/.config/qmd
+      XDG_CONFIG_HOME: /home/node/.config
+      XDG_CACHE_HOME: /home/node/.cache
+      INDEX_PATH: /home/node/.cache/qmd/index.sqlite
+      QMD_FORCE_CPU: ${QMD_FORCE_CPU:-1}
+    volumes:
+      - ./data/qmd/config:/home/node/.config/qmd
+      - ./data/qmd/cache:/home/node/.cache/qmd
+      - ${OBSIDIAN_VAULT_HOST_PATH:-./vault}:/vault:ro
+    # Intentionally no host port: QMD's MCP/search API is unauthenticated.
+    # Hermes reaches it only over the private Docker networks below.
+    networks:
+      - backend
+      - edge
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8181/health >/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+
+  qmd-indexer:
+    <<: *service-defaults
+    profiles: ["qmd"]
+    image: hermes-qmd:local
+    pull_policy: never
+    user: "${STACK_UID:-1000}:${STACK_GID:-1000}"
+    container_name: hermes-qmd-indexer
+    command: ["/usr/local/bin/qmd-index-cycle"]
+    environment:
+      HOME: /tmp/qmd-home
+      QMD_CONFIG_DIR: /home/node/.config/qmd
+      XDG_CONFIG_HOME: /home/node/.config
+      XDG_CACHE_HOME: /home/node/.cache
+      INDEX_PATH: /home/node/.cache/qmd/index.sqlite
+      QMD_FORCE_CPU: ${QMD_FORCE_CPU:-1}
+      QMD_INDEX_INTERVAL: ${QMD_INDEX_INTERVAL:-7200}
+    volumes:
+      - ./data/qmd/config:/home/node/.config/qmd
+      - ./data/qmd/cache:/home/node/.cache/qmd
+      - ${OBSIDIAN_VAULT_HOST_PATH:-./vault}:/vault:ro
+      - ./qmd-index-cycle.sh:/usr/local/bin/qmd-index-cycle:ro
+    networks:
+      - backend
+      - edge
+    depends_on:
+      qmd:
+        condition: service_healthy
+
+  ollama:
+    <<: *service-defaults
+    profiles: ["local-ai"]
+    image: ${OLLAMA_IMAGE:-ollama/ollama:0.32.14}
+    container_name: hermes-ollama
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_NO_CLOUD: "1"
+      OLLAMA_CONTEXT_LENGTH: ${OLLAMA_CONTEXT_LENGTH:-8192}
+      OLLAMA_MAX_LOADED_MODELS: ${OLLAMA_MAX_LOADED_MODELS:-1}
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-1}
+      OLLAMA_KEEP_ALIVE: ${OLLAMA_KEEP_ALIVE:-30s}
+    volumes:
+      - ./data/ollama:/root/.ollama
+    networks:
+      - backend
+      - edge
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 10s
+
+  honcho-db:
+    <<: *service-defaults
+    profiles: ["honcho"]
+    image: ${PGVECTOR_IMAGE:-pgvector/pgvector:pg15}
+    container_name: hermes-honcho-db
+    environment:
+      POSTGRES_USER: honcho
+      POSTGRES_PASSWORD: ${HONCHO_POSTGRES_PASSWORD:-not-configured}
+      POSTGRES_DB: honcho
+      PGDATA: /var/lib/postgresql/data/pgdata
+    command: ["postgres", "-c", "max_connections=200"]
+    volumes:
+      - ./data/honcho-db:/var/lib/postgresql/data
+      - ./vendor/honcho/database/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U honcho -d honcho"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  honcho-redis:
+    <<: *service-defaults
+    profiles: ["honcho"]
+    image: ${REDIS_IMAGE:-redis:8-alpine}
+    user: "${STACK_UID:-1000}:${STACK_GID:-1000}"
+    container_name: hermes-honcho-redis
+    command: ["redis-server", "--appendonly", "yes", "--loglevel", "warning"]
+    volumes:
+      - ./data/honcho-redis:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  honcho-api:
+    <<: *service-defaults
+    profiles: ["honcho"]
+    build:
+      context: ./vendor/honcho
+      dockerfile: Dockerfile
+    image: hermes-honcho:local
+    container_name: hermes-honcho-api
+    entrypoint: ["sh", "docker/entrypoint.sh"]
+    env_file:
+      - ./secrets/honcho.env
+    environment:
+      DB_CONNECTION_URI: postgresql+psycopg://honcho:${HONCHO_POSTGRES_PASSWORD:-not-configured}@honcho-db:5432/honcho
+      CACHE_URL: redis://honcho-redis:6379/0?suppress=true
+    volumes:
+      - ./config/honcho/config.toml:/app/config.toml:ro
+    ports:
+      - "127.0.0.1:${HONCHO_HOST_PORT:-8000}:8000"
+    networks:
+      - backend
+      - edge
+    extra_hosts:
+      - "windows.host:${WINDOWS_HOST_IP:-127.0.0.1}"
+    depends_on:
+      honcho-db:
+        condition: service_healthy
+      honcho-redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3).read()"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  honcho-deriver:
+    <<: *service-defaults
+    profiles: ["honcho"]
+    image: hermes-honcho:local
+    pull_policy: never
+    container_name: hermes-honcho-deriver
+    entrypoint: ["/app/.venv/bin/python", "-m", "src.deriver"]
+    env_file:
+      - ./secrets/honcho.env
+    environment:
+      DB_CONNECTION_URI: postgresql+psycopg://honcho:${HONCHO_POSTGRES_PASSWORD:-not-configured}@honcho-db:5432/honcho
+      CACHE_URL: redis://honcho-redis:6379/0?suppress=true
+    volumes:
+      - ./config/honcho/config.toml:/app/config.toml:ro
+    networks:
+      - backend
+      - edge
+    extra_hosts:
+      - "windows.host:${WINDOWS_HOST_IP:-127.0.0.1}"
+    depends_on:
+      honcho-api:
+        condition: service_healthy
+
+networks:
+  backend:
+    name: hermes-backend
+    internal: true
+  edge:
+    name: hermes-edge

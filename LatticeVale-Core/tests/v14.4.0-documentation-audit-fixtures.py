@@ -1,0 +1,26 @@
+#!/usr/bin/env python3
+from pathlib import Path
+ROOT=Path(__file__).resolve().parents[2]
+CORE=ROOT/'LatticeVale-Core'
+version=(CORE/'VERSION.txt').read_text(encoding='ascii').strip()
+assert version in {'14.4.0','14.4.1'}, version
+readme=(ROOT/'docs/README.md').read_text(encoding='utf-8')
+inst=(ROOT/'docs/Instructions.txt').read_text(encoding='utf-8')
+desc=(ROOT/'docs/Installer Description.txt').read_text(encoding='utf-8')
+features=(ROOT/'docs/FEATURES.md').read_text(encoding='utf-8')
+assert readme.startswith(f'# LatticeVale v{version}')
+assert inst.startswith(f'LATTICEVALE v{version} — INSTRUCTIONS')
+assert desc.startswith(f'LATTICEVALE v{version} — INSTALLER DESCRIPTION')
+assert 'over 50 GiB total capacity' in readme and 'at least 50 GiB free' in readme
+assert 'over 50 GiB total capacity' in inst and 'at least 50 GiB free' in inst
+assert 'adaptive per-container CPU/RAM ceilings' in readme
+assert 'container timezone' in readme
+assert 'QMD can be used without Obsidian' in inst
+assert 'skills.write_approval` to `false`' in readme
+assert 'skills.write_approval` to `false`' in desc
+assert 'Optional components: Dashboard, SearXNG, QMD, Obsidian' in inst
+assert 'Reset checkpoints and reverify/reconcile every stage' in inst
+assert 'ALL WSL distributions registered to the current Windows user' in inst
+assert features.startswith(f'# LatticeVale v{version}')
+assert 'Complete Features and Install Options Reference' in features
+print('v14.4.0 documentation audit fixtures: PASS')

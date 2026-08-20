@@ -1,0 +1,77 @@
+name: Bug report
+description: Report a reproducible LatticeVale install, repair, update, runtime, or compatibility problem
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste passwords, API keys, Matrix access/recovery secrets, Tailscale credentials, private prompts, or backup contents.
+        If you use a modified/downstream build, say so and summarize the relevant changes.
+  - type: input
+    id: version
+    attributes:
+      label: LatticeVale version
+      placeholder: 14.4.1
+    validations:
+      required: true
+  - type: dropdown
+    id: install_mode
+    attributes:
+      label: Installer/runtime path
+      options:
+        - Fresh install
+        - Resume / repair installation
+        - Change installed components
+        - Verify installation only
+        - Reconfigure providers/profiles
+        - Advanced recovery
+        - Update / repair installer-managed software
+        - manage.sh runtime command
+        - Uninstall
+        - Clean-host reset
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows / PowerShell version
+      description: Include Windows build and whether you launched Windows PowerShell 5.1 or PowerShell 7 when relevant.
+    validations:
+      required: true
+  - type: input
+    id: wsl
+    attributes:
+      label: WSL / Ubuntu / architecture
+      description: Include WSL version, distro release, WSL1/WSL2, and amd64/x86_64 vs other architecture.
+      placeholder: "Example: WSL 2.x, Ubuntu 24.04, WSL2, amd64; include current networking mode if the failure follows a reboot."
+    validations:
+      required: true
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant selected features and profile topology
+      description: Include only relevant selections such as Kanban, Matrix, Tailscale, Ollama backend, named profiles, and worker limits. Use sanitized/arbitrary names if needed.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact point where the failure occurs and whether rerunning Resume / repair changes it.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Sanitized output / diagnostics
+      description: For Kanban/skills include the relevant tool error plus task/profile context, but remove secrets, private room IDs/hostnames if sensitive, and private task content not required to reproduce the issue.
+    validations:
+      required: true
