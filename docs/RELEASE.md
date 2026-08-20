@@ -1,5 +1,9 @@
 # Release checklist
 
+## v14.4.2 documentation/release consistency checks
+
+Confirm current-release version metadata and documentation identify v14.4.2; inherited regression fixtures accept v14.4.2 without changing runtime expectations; the package root remains `Lattice-Vale`; the exact manifest covers the entire extracted release; and a freshly extracted ZIP passes `installer/verify-release.ps1`. Installer/runtime source must remain unchanged for this patch.
+
 ## v14.4.1 release-layout checks
 
 Confirm the repository root contains only conventional repository files (`.gitattributes`, `.gitignore`, `README.md`, `LICENSE`) plus directories; public entry points and `SOURCE-SHA256SUMS.txt` are under `installer/`; substantive documentation is under `docs/`; the moved launchers resolve `LatticeVale-Core/` and `tools/` from the parent release root; clean-host source recognition accepts the new layout; the exact manifest covers the entire extracted release; and a freshly extracted ZIP passes `installer/verify-release.ps1`. No stack-runtime source should change solely for this packaging patch.

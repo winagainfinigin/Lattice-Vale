@@ -1,5 +1,12 @@
 # Changelog
 
+## 14.4.2 - 2026-08-20
+
+- Documentation/release-consistency patch over v14.4.1; installer and stack-runtime behavior are unchanged.
+- Aligns current-release documentation and regression expectations with the actual `Lattice-Vale` package folder name.
+- Advances release/version metadata and inherited regression compatibility to v14.4.2.
+- Regenerates the exact source manifest for the updated release tree.
+
 ## 14.4.1 - Release-root organization
 
 - Packaging/layout-only patch over the validated v14.4.0 runtime; no intended stack-runtime behavior change.

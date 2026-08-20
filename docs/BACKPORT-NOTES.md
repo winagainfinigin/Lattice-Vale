@@ -1,4 +1,8 @@
-# LatticeVale 14.4.1 stable promotion / compatibility lineage
+# LatticeVale 14.4.2 stable promotion / compatibility lineage
+
+## v14.4.2 documentation/release consistency patch
+
+v14.4.2 preserves the v14.4.1 package layout and validated v14.4.0 stack runtime while correcting current-release documentation, version/validation metadata, regression compatibility, and release integrity data. No installer or stack-runtime behavior changes are introduced.
 
 ## v14.4.1 release-layout patch
 

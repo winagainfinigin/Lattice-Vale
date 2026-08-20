@@ -6,7 +6,7 @@ CORE=ROOT/'LatticeVale-Core'
 INSTALLER=ROOT/'installer'
 DOCS=ROOT/'docs'
 version=(CORE/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version == '14.4.1', version
+assert version in {'14.4.1','14.4.2'}, version
 
 # Repository root stays conventional and uncluttered.
 root_files={p.name for p in ROOT.iterdir() if p.is_file()}

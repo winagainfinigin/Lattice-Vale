@@ -1,5 +1,9 @@
 # Security Policy
 
+## v14.4.2 documentation/release consistency posture
+
+v14.4.2 changes documentation, version/validation metadata, regression compatibility, and release integrity data only. Installer/runtime privilege, networking, secret handling, and destructive behavior remain unchanged from v14.4.1/v14.4.0.
+
 ## v14.4.1 release-layout security posture
 
 v14.4.1 changes release organization, not runtime privilege/network behavior. `installer/install.ps1`, `installer/uninstall.ps1`, and `installer/verify-release.ps1` resolve the repository root explicitly and continue verifying the complete extracted release tree. Git/GitHub metadata and `LICENSE` remain at repository root; substantive documentation is under `docs/`.

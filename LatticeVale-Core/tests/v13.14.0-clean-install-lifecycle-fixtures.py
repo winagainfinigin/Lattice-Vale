@@ -4,7 +4,7 @@ import subprocess
 import tempfile
 
 root=Path(__file__).resolve().parents[1]
-assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1'}
+assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2'}
 ps=(root/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
 boot=(root/'linux/bootstrap.sh').read_text(encoding='utf-8')
 relay=(root/'windows/LatticeVale-WslNativeRelay.ps1').read_text(encoding='utf-8')
@@ -59,7 +59,7 @@ assert "if ($EnsureStackRunning) { $relayArgs += '-EnsureDistroRunning' }" in ps
 assert "if (-not $EnsureDistroRunning -and -not (Test-WslDistroRunning $DistroName)) { return '' }" in relay
 assert 'Starting relay listeners without a live WSL target' in relay
 assert 'passive relay is waiting for the user to start Hermes' in relay
-assert ('if (Test-RelayTargetForServices $currentIp $services)' in relay) if (root/'VERSION.txt').read_text().strip() in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1'} else ('if (Test-WslIpForServices $currentIp $services)' in relay)
+assert ('if (Test-RelayTargetForServices $currentIp $services)' in relay) if (root/'VERSION.txt').read_text().strip() in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2'} else ('if (Test-WslIpForServices $currentIp $services)' in relay)
 assert 'control_windows_bridge start' in manage
 assert 'control_windows_bridge stop' in manage
 assert 'BRIDGE_AUTOSTART=' in ps

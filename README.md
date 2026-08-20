@@ -8,13 +8,13 @@ Release entry points remain organized under [`installer/`](installer/), while pr
 
 ## Start here
 
-* [Complete project documentation](docs/README.md)
-* [Installation instructions](docs/Instructions.txt)
-* [Complete features/options reference](docs/FEATURES.md)
-* [Installer description](docs/Installer%20Description.txt)
-* [Security policy](docs/SECURITY.md)
-* [Release history](docs/CHANGELOG.md)
-* [License](LICENSE)
+- [Complete project documentation](docs/README.md)
+- [Installation instructions](docs/Instructions.txt)
+- [Complete features/options reference](docs/FEATURES.md)
+- [Installer description](docs/Installer%20Description.txt)
+- [Security policy](docs/SECURITY.md)
+- [Release history](docs/CHANGELOG.md)
+- [License](LICENSE)
 
 Verify the extracted release from an Administrator PowerShell window:
 

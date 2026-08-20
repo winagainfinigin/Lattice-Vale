@@ -2,7 +2,7 @@
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1'}, version
+assert version in {'14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2'}, version
 un=(ROOT/'Uninstall-LatticeVale.ps1').read_text(encoding='ascii')
 cs=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 relay=(ROOT/'stack/native-ollama-relay.sh').read_text(encoding='utf-8')

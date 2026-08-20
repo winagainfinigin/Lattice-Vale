@@ -1,10 +1,10 @@
-# LatticeVale v14.4.1 — Stable
+# LatticeVale v14.4.2 — Stable
 
 **Unofficial, inspectable Windows + WSL2 installer and lifecycle manager for a self-hosted Hermes Agent stack.**
 
 LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubuntu WSL2 distro** using Docker Engine/Compose. Optional integrations include the Hermes Dashboard, named profiles, Kanban orchestration, Matrix/Synapse, SearXNG, QMD/Obsidian, Honcho memory, managed or native-Windows Ollama, private Windows Tailscale access, adaptive container resource ceilings, Ubuntu/WSL maintenance policy, and Windows lifecycle helpers.
 
-**v14.4.1 is a packaging/layout patch over the validated v14.4.0 runtime.** No new runtime behavior is introduced by the promotion. The release incorporates the final documentation audit, adds `FEATURES.md` as the canonical install/options reference, and carries forward the v14.3.43 Scheduled Task compatibility fix, v14.3.42 clean-host reset boundary, v14.3.41 WSL host-safety policy, v14.3.39 shared-Docker repair safety, and v14.3.38 Kanban/skill-management policy.
+**v14.4.2 is a documentation and release-layout consistency patch over v14.4.1.** Installer and runtime behavior are unchanged. It corrects package-folder documentation/regression expectations, refreshes current-release version metadata, and regenerates release integrity data while retaining the validated v14.4.0 runtime line.
 
 For detailed history, use `CHANGELOG.md`. For the stable documentation remediation record, use `DOCUMENTATION-AUDIT-v14.4.0.md`. For implementation/audit lineage, use `BACKPORT-NOTES.md` and the retained `*PATCH-NOTES.md` files.
 

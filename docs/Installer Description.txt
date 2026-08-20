@@ -1,4 +1,4 @@
-LATTICEVALE v14.4.1 — INSTALLER DESCRIPTION
+LATTICEVALE v14.4.2 — INSTALLER DESCRIPTION
 
 WHAT THIS FILE IS
 This is the plain-language capability and configuration guide. It explains what LatticeVale installs, what it configures automatically, what Hermes can do after installation, and which decisions may still belong to the user.

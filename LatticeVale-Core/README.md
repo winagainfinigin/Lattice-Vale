@@ -1,5 +1,6 @@
-# LatticeVale v14.4.1 — Technical README
+# LatticeVale v14.4.2 — Technical README
 
+- v14.4.2 is a documentation/release-consistency patch over v14.4.1. Installer and stack-runtime behavior are intentionally unchanged; current documentation/version-validation metadata, inherited regression compatibility, and release integrity data are refreshed.
 - v14.4.1 is a packaging/layout patch over the stable promotion of the audited v14.3.43 runtime line. Runtime behavior is intentionally unchanged; the promotion applies the documentation audit, adds the canonical `../docs/FEATURES.md`, updates release/test metadata, and regenerates release integrity data.
 - v14.3.43 fixes only the explicit clean-host reset Scheduled Task scanner so heterogeneous/non-Exec task actions cannot abort dry-run ownership discovery under StrictMode; normal installer/runtime behavior is unchanged.
 

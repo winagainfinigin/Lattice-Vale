@@ -1,4 +1,4 @@
-LATTICEVALE v14.4.1 — INSTRUCTIONS
+LATTICEVALE v14.4.2 — INSTRUCTIONS
 
 PURPOSE OF THIS FILE
 This file is the procedural operator guide: what to do, in what order, and how to verify or recover the installation.

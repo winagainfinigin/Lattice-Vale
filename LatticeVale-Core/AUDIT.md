@@ -1,4 +1,8 @@
-# v14.4.1 release-layout audit
+# v14.4.2 documentation/release consistency audit
+
+v14.4.2 updates documentation, current version/validation metadata, inherited regression compatibility, and release integrity data only. Installer and stack-runtime behavior remain unchanged from v14.4.1/v14.4.0; all inherited safety boundaries remain in force.
+
+## v14.4.1 release-layout audit
 
 v14.4.1 is a packaging/layout-only patch over the validated v14.4.0 runtime. Public entry points move to `../installer/`, substantive project documentation is consolidated under `../docs/`, and path resolution/tests/manifests are updated accordingly. No intended stack-runtime behavior is added; all inherited safety boundaries remain in force.
 

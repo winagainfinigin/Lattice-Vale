@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[2]
 CORE=ROOT/'LatticeVale-Core'
 version=(CORE/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.4.0','14.4.1'}, version
+assert version in {'14.4.0','14.4.1','14.4.2'}, version
 readme=(ROOT/'docs/README.md').read_text(encoding='utf-8')
 inst=(ROOT/'docs/Instructions.txt').read_text(encoding='utf-8')
 desc=(ROOT/'docs/Installer Description.txt').read_text(encoding='utf-8')

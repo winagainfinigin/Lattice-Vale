@@ -1,4 +1,4 @@
-> **v14.4.1 quality checklist:** preserve the v14.3.40 documentation split, v14.3.39 shared-Docker/existing-install safety boundary, v14.3.38 Kanban/skill migration, the v14.3.41 rule that normal installer/runtime code never writes global WSL `networkingMode`.
+> **v14.4.2 quality checklist:** preserve the v14.3.40 documentation split, v14.3.39 shared-Docker/existing-install safety boundary, v14.3.38 Kanban/skill migration, the v14.3.41 rule that normal installer/runtime code never writes global WSL `networkingMode`.
 
 ## Summary
 

@@ -31,7 +31,7 @@ jobs:
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
       - name: Static audit
         run: python tests/static-audit.py
-      - name: Current v14.4.1 release-layout identity and inherited policy regressions
+      - name: Current v14.4.2 release identity and inherited policy regressions
         run: |
           python tests/v14.3.38-kanban-skill-policy-fixtures.py
           python tests/v14.3.39-existing-install-qc-fixtures.py
@@ -44,12 +44,12 @@ jobs:
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |
-          grep -q '^14.4.1$' LatticeVale-Core/VERSION.txt
-          grep -q '^# LatticeVale v14.4.1' README.md
-          grep -q '^LATTICEVALE v14.4.1' docs/Instructions.txt
-          grep -q '^LATTICEVALE v14.4.1' 'docs/Installer Description.txt'
-          grep -q '^## 14.4.1 ' docs/CHANGELOG.md
-          grep -q 'placeholder: 14.4.1' .github/ISSUE_TEMPLATE/bug_report.yml
+          grep -q '^14.4.2$' LatticeVale-Core/VERSION.txt
+          grep -q '^# LatticeVale v14.4.2' README.md
+          grep -q '^LATTICEVALE v14.4.2' docs/Instructions.txt
+          grep -q '^LATTICEVALE v14.4.2' 'docs/Installer Description.txt'
+          grep -q '^## 14.4.2 ' docs/CHANGELOG.md
+          grep -q 'placeholder: 14.4.2' .github/ISSUE_TEMPLATE/bug_report.yml
           grep -q 'Existing-stack Resume / repair adopts required migrations' .github/PULL_REQUEST_TEMPLATE.md
           grep -q 'KANBAN-SKILL-POLICY-PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md docs/SUPPORT.md docs/RELEASE.md
           grep -q 'WSL-HOST-SAFETY-PATCH-NOTES.md' docs/CHANGELOG.md docs/RELEASE.md

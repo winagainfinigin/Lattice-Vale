@@ -1,5 +1,9 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.4.2 source-policy note
+
+v14.4.2 adds no third-party runtime dependency or bundled binary. It updates documentation/version-validation metadata and regenerates the exact release manifest; dependency/source ownership remains unchanged from v14.4.1.
+
 ## v14.4.1 source-policy note
 
 v14.4.1 adds no third-party runtime dependency or bundled binary. It reorganizes LatticeVale-owned source/documentation and moves the exact release manifest to `installer/SOURCE-SHA256SUMS.txt`; dependency/source ownership remains unchanged from v14.4.0.
@@ -22,7 +26,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.1 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.4.2 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 
