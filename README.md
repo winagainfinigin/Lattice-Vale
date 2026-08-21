@@ -284,6 +284,14 @@ Start with:
 2. [`docs/Instructions.txt`](docs/Instructions.txt)
 3. [`docs/FEATURES.md`](docs/FEATURES.md)
 
+### Verify
+
+Before installation, verify the shipped source manifest from the repository/release root:
+
+```powershell
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1
+```
+
 ### Install
 
 From an Administrator PowerShell window at the repository/release root:
@@ -293,6 +301,14 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\inst
 ```
 
 For an existing installation, the installer provides state-aware verification, Resume / repair, reconfiguration, advanced recovery, and managed-update options.
+
+### Uninstall
+
+From an Administrator PowerShell window at the repository/release root:
+
+```powershell
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\uninstall.ps1
+```
 
 ## License
 
