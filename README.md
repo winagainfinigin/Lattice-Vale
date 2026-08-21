@@ -1,3 +1,5 @@
+NOTICE: reverted to v14.4.6 for now. v14.4.7 is bugged. v14.4.8 will be out soon
+
 # LatticeVale v14.4.7
 
 > **Patch Release — v14.4.7**  
