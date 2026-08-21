@@ -1,5 +1,16 @@
 # Changelog
 
+## 14.4.7 - 2026-08-21
+
+- Fixes the default Hermes web-research integration gap: SearXNG remains the keyless `web_search` backend while managed profiles receive a generated `latticevale-local` `web_extract` provider for public HTTP(S) text content.
+- Adds no container, image, package, API key, listener, Windows networking change, or resource reservation. This avoids the substantial service/resource footprint of self-hosted extraction stacks while retaining the existing stable SearXNG topology.
+- Preserves explicit user `web.backend` / `web.extract_backend` choices. The local extractor is selected only when the effective shared/extract choice is empty or SearXNG.
+- Hardens local extraction against SSRF-style access: non-HTTP(S), credential-bearing, loopback/private/link-local/reserved/non-global destinations are rejected; each redirect is revalidated; environment proxy inheritance is disabled; redirect, response-byte, timeout, and output sizes are bounded.
+- Advances only the installer-owned integrations checkpoint revision from 2 to 3 so Resume / repair can migrate existing managed profiles without forcing package/image/source refresh.
+- Adds `v14.4.7-web-extraction-fixtures.py` and documents the implementation/security/migration contract in [`WEB-EXTRACTION-PATCH-NOTES.md`](WEB-EXTRACTION-PATCH-NOTES.md).
+- Clarifies repair/update preparation across current documentation: fully stop the selected LatticeVale WSL distro before launching Option 1 Resume / repair or Option 6 Update / repair. When installed, **Shut Down LatticeVale** is the recommended method because it stops the managed stack and terminates only that distro; global `wsl --shutdown` is not required.
+- Documents the remaining SearXNG operational boundary: external engines may temporarily rate-limit/CAPTCHA/suspend automated requests, so a successful `web_search` call can return zero results without indicating a broken LatticeVale installation. Known public URLs remain independently readable through v14.4.7 `web_extract`; support/test guidance now distinguishes upstream empty-result conditions from local provider/service failures.
+
 ## 14.4.6 - 2026-08-20
 
 - Fixes `state-audit.py` adaptive-resource CPU fingerprinting on processor-limited WSL instances.

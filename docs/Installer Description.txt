@@ -1,4 +1,8 @@
-LATTICEVALE v14.4.6 — INSTALLER DESCRIPTION
+LATTICEVALE v14.4.7 — INSTALLER DESCRIPTION
+
+V14.4.7 WEB EXTRACTION PATCH: SearXNG remains the keyless search backend; managed profiles also receive a bounded keyless public-page extractor unless an explicit extract-capable provider is already configured. No extra container, service, API key, or package is added.
+
+SearXNG service health and upstream search-result availability are intentionally distinct. LatticeVale can verify the local SearXNG/Valkey service and Hermes provider wiring, but the external engines queried by SearXNG can independently rate-limit, CAPTCHA, suspend, or return no usable results. A successful local search request with an empty result set is therefore an operational/upstream condition, not by itself evidence that the LatticeVale installation requires repair. v14.4.7 keeps known-URL page extraction independent through `latticevale-local`.
 
 WHAT THIS FILE IS
 This is the plain-language capability and configuration guide. It explains what LatticeVale installs, what it configures automatically, what Hermes can do after installation, and which decisions may still belong to the user.
@@ -218,6 +222,8 @@ M. WINDOWS INTEGRATIONS — OPTIONAL
 Depending on choices, LatticeVale can configure desktop Start/Shut Down shortcuts, Windows-logon startup, Windows Tailscale integration, Obsidian paths, and Ubuntu Pro for WSL-related integration.
 
 These are not mandatory for Hermes itself. Users can leave them disabled when they do not want LatticeVale to affect those Windows-side behaviors.
+
+For existing-install repair/update runs, the selected LatticeVale WSL distro should be fully stopped before launching the Windows installer. If the Windows lifecycle shortcuts are installed, **Shut Down LatticeVale** is the recommended way to prepare: it stops the managed stack and then terminates only the selected distro. Global `wsl --shutdown` is not required.
 
 N. UPDATE POLICY — CHOOSE CONTROLLED VS ADVANCED
 

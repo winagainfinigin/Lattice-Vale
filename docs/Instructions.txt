@@ -1,4 +1,8 @@
-LATTICEVALE v14.4.6 — INSTRUCTIONS
+LATTICEVALE v14.4.7 — INSTRUCTIONS
+
+V14.4.7 WEB RESEARCH: When SearXNG is selected and no explicit extraction provider is configured, LatticeVale also configures its keyless public HTTP(S) page extractor. Existing explicit Firecrawl/Tavily/Exa/Parallel/custom provider choices are preserved.
+
+SEARXNG OPERATIONAL NOTE: SearXNG is local, but the search engines it queries are external. `web_search` can execute successfully and still temporarily return no results when upstream engines rate-limit, CAPTCHA, or suspend automated requests. Do not treat an isolated zero-result search as proof that LatticeVale needs repair. Retry later or broaden the query; if you already know the authoritative public URL, use `web_extract` directly. Repair/troubleshoot the installation when the local SearXNG API/provider path itself fails or known public URL extraction is consistently unavailable.
 
 PURPOSE OF THIS FILE
 This file is the procedural operator guide: what to do, in what order, and how to verify or recover the installation.
@@ -84,6 +88,8 @@ During Resume / repair, LatticeVale may reconcile ownership on live installer-ow
 ================================================================================
 5. EXISTING INSTALL — CHOOSE THE CORRECT MODE
 ================================================================================
+
+Before launching the Windows installer for a repair or controlled update/repair run, fully stop the selected LatticeVale WSL distro. If the LatticeVale Windows shortcuts are installed, use **Shut Down LatticeVale** first. That shortcut stops the managed stack and then terminates only the selected distro; global `wsl --shutdown` is not required.
 
 When a managed stack is detected the installer offers:
 
@@ -281,10 +287,11 @@ For a newer LatticeVale release:
 
 If installation or repair is interrupted:
 1. do not delete the WSL distro, Docker volumes, Matrix crypto state, profiles, or databases;
-2. rerun `installer\install.ps1`;
-3. choose Resume / repair;
-4. follow the first concrete error reported;
-5. use Advanced recovery only when its described action matches the failure.
+2. fully stop the selected LatticeVale WSL distro before rerunning the Windows repair installer; when available, **Shut Down LatticeVale** is the recommended method because it stops the managed stack and terminates only that distro;
+3. rerun `installer\install.ps1`;
+4. choose Resume / repair;
+5. follow the first concrete error reported;
+6. use Advanced recovery only when its described action matches the failure.
 
 Remember the execution layers are different:
 - Windows host

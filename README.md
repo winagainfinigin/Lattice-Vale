@@ -1,6 +1,6 @@
-# LatticeVale v14.4.6
+# LatticeVale v14.4.7
 
-> **Main Release — v14.4.6**  
+> **Patch Release — v14.4.7**  
 > Current recommended release and cumulative upgrade target from the public **v14.4.2 Main Release**.
 
 LatticeVale is a source-visible **Windows + WSL2 installer, integration layer, and lifecycle manager for a self-hosted Hermes Agent stack**.
@@ -41,7 +41,7 @@ Depending on the selected installation options, LatticeVale can provide:
 - Kanban triage, decomposition, dispatch, review, dependencies, and concurrency controls
 - Matrix/Synapse provisioning and cross-signing persistence
 - Honcho local contextual-memory infrastructure
-- SearXNG search
+- SearXNG search plus keyless public-page extraction for Hermes research
 - QMD indexing, including optional Windows Obsidian vault access
 - LatticeVale-managed or supported Windows-native Ollama integration
 - adaptive Docker/WSL RAM policy
@@ -50,6 +50,16 @@ Depending on the selected installation options, LatticeVale can provide:
 - verification, audit, repair, update, backup, and controlled uninstall
 
 Persistent Hermes profiles, sessions, memory, Matrix state, Honcho data, Ollama models, QMD data, credentials, backups, Obsidian data, and explicit Compose overrides are preserved during normal repair and update operations.
+
+## v14.4.7 web extraction patch
+
+v14.4.7 closes the default Hermes research gap discovered in the v14.4.6 stack: SearXNG remains the local, keyless `web_search` backend, while LatticeVale now supplies a small keyless `web_extract` provider for public HTTP(S) text pages. The provider runs inside the existing Hermes container and adds no service, image, daemon, port, API key, package install, or resource reservation.
+
+A healthy local SearXNG/Hermes integration can still occasionally return **zero search results** when upstream search engines rate-limit, CAPTCHA, or temporarily suspend automated requests. That condition is external to LatticeVale and does not by itself mean the installation needs repair. Retry later or broaden the query; when an authoritative URL is already known, Hermes can use `web_extract` directly without depending on search discovery. A repair investigation is warranted when the local SearXNG API/provider configuration itself fails, not merely because one successful search call returned an empty result set.
+
+The migration is preservation-first. If a managed profile already names an explicit extract-capable/shared backend such as Firecrawl, Tavily, Exa, Parallel, or another custom provider, LatticeVale leaves that choice intact. Resume / repair advances only the installer-owned integrations checkpoint so existing v14.4.6 installs can adopt the extraction provider without forcing a managed image/package refresh. By default, Hermes URL-safety policy rejects private/internal targets; cloud-metadata targets remain blocked even when a user explicitly enables Hermes private-URL access. Credential-bearing URLs are rejected, redirects are revalidated, connect-time DNS rebinding is guarded by Hermes's own SSRF-safe client, and downloads/output are bounded.
+
+See [`docs/WEB-EXTRACTION-PATCH-NOTES.md`](docs/WEB-EXTRACTION-PATCH-NOTES.md).
 
 ## Lifecycle management
 
@@ -80,6 +90,8 @@ Completed installer checkpoints are not blindly trusted when live verification s
 ### Resume / repair
 
 **Option 1 — Resume / repair installation** is the normal upgrade and repair path.
+
+Before launching a repair install, fully stop the selected LatticeVale WSL distro. If the Windows lifecycle shortcuts are installed, **Shut Down LatticeVale** is the recommended preparation step: it stops the managed LatticeVale stack and then terminates only the selected distro. A global `wsl --shutdown` is not required.
 
 It reuses existing selections, preserves persistent state, repairs incomplete or stale managed stages, applies required release migrations, regenerates stale runtime policy, and reconciles affected containers when necessary.
 
@@ -165,6 +177,8 @@ Intermediate v14.4.3–v14.4.5 installations are not required.
 
 ## Release history
 
+- **v14.4.7 — Web extraction patch:** keeps SearXNG search and adds bounded keyless public-page extraction without a new service or API key.
+
 | Version | Type | Primary change |
 | --- | --- | --- |
 | **v14.4.1** | Patch | Repository/release layout cleanup |
@@ -172,7 +186,8 @@ Intermediate v14.4.3–v14.4.5 installations are not required.
 | **v14.4.3** | Patch | RAM efficiency and uninstaller hardening |
 | **v14.4.4** | Patch | Repair-time SQLite/metadata race hardening |
 | **v14.4.5** | Patch | Runtime-policy and repair convergence |
-| **v14.4.6** | **Main Release** | Current cumulative release |
+| **v14.4.6** | **Main Release** | Prior cumulative main release |
+| **v14.4.7** | Patch | Current recommended release; keyless web extraction |
 
 ### v14.4.1
 
@@ -205,7 +220,7 @@ When required, LatticeVale regenerates the policy, invalidates affected repair s
 
 ### v14.4.6 — Main Release
 
-Current cumulative release. Includes the v14.4.3–v14.4.5 fixes plus corrected WSL CPU resource fingerprinting and refined managed-update triggering.
+Prior cumulative main release. Includes the v14.4.3–v14.4.5 fixes plus corrected WSL CPU resource fingerprinting and refined managed-update triggering.
 
 ```text
 v14.4.1  release-layout patch
@@ -218,7 +233,9 @@ v14.4.4  repair-race patch
     ↓
 v14.4.5  runtime-policy repair patch
     ↓
-v14.4.6  MAIN RELEASE / current release
+v14.4.6  MAIN RELEASE / prior cumulative main release
+    ↓
+v14.4.7  web-extraction patch / current recommended release
 ```
 
 ## Ownership and safety boundaries
@@ -284,14 +301,6 @@ Start with:
 2. [`docs/Instructions.txt`](docs/Instructions.txt)
 3. [`docs/FEATURES.md`](docs/FEATURES.md)
 
-### Verify
-
-Before installation, verify the shipped source manifest from the repository/release root:
-
-```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1
-```
-
 ### Install
 
 From an Administrator PowerShell window at the repository/release root:
@@ -300,15 +309,19 @@ From an Administrator PowerShell window at the repository/release root:
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
 ```
 
-For an existing installation, the installer provides state-aware verification, Resume / repair, reconfiguration, advanced recovery, and managed-update options.
+### Verify release
+
+```powershell
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1
+```
 
 ### Uninstall
-
-From an Administrator PowerShell window at the repository/release root:
 
 ```powershell
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\uninstall.ps1
 ```
+
+For an existing installation, the installer provides state-aware verification, Resume / repair, reconfiguration, advanced recovery, and managed-update options.
 
 ## License
 

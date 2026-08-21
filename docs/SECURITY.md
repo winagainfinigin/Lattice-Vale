@@ -1,5 +1,10 @@
 # Security Policy
 
+## v14.4.7 local web extraction boundary
+
+The LatticeVale local extraction provider is intentionally limited to HTTP(S) text-oriented retrieval and inherits Hermes's URL-safety controls. By default Hermes blocks loopback/private/link-local/reserved/internal destinations, and its cloud-metadata safety floor remains blocked even if a user explicitly opts into `security.allow_private_urls`. The provider rejects embedded credentials and credential-like query parameters, revalidates redirects, and uses Hermes's connect-time SSRF-safe HTTP client so direct connections are made only to vetted addresses while preserving Host/SNI/certificate validation. Fetch duration, redirect count, response bytes, and returned text are bounded. It does not add an authenticated browser or a new network service. See [`WEB-EXTRACTION-PATCH-NOTES.md`](WEB-EXTRACTION-PATCH-NOTES.md).
+
+
 ## v14.4.6 resource-audit security posture
 
 v14.4.6 changes read-only CPU detection in `state-audit.py` and narrows automatic managed-update triggering. It does not broaden privileges, ownership, networking, destructive scope, or WSL global configuration. Real policy-version, CPU-allocation, and RAM-allocation changes continue to be reported as stale. A bundle-version change alone no longer broadens update activity; managed component refresh still requires the age/revision/legacy-state gate or explicit Option 6.
@@ -87,7 +92,7 @@ Enterprise Group Policy can still override the process-level policy. Do not weak
 
 When selected, LatticeVale creates current-user `.lnk` files plus a small JSON config under `%LOCALAPPDATA%\LatticeVale`. The executable logic remains the repository's readable `LatticeVale-Core\windows\LatticeVale-Shortcut.ps1`; no hidden binary launcher is generated.
 
-The shortcut invokes Windows PowerShell with `-ExecutionPolicy Bypass` **for that child process only**. Start is bound to the selected distro/Linux user/stack and ultimately uses `manage.sh start`, so it follows the saved install options. Shut Down checks that the target distro is already running, requests `manage.sh stop`, then uses `wsl.exe --terminate <that-distro>`; it does not use global `wsl --shutdown`.
+The shortcut invokes Windows PowerShell with `-ExecutionPolicy Bypass` **for that child process only**. Start is bound to the selected distro/Linux user/stack and ultimately uses `manage.sh start`, so it follows the saved install options. Shut Down checks that the target distro is already running, requests `manage.sh stop`, then uses `wsl.exe --terminate <that-distro>`; it does not use global `wsl --shutdown`. Because repair installs should begin with the selected LatticeVale distro fully stopped, **Shut Down LatticeVale** is the recommended preparation method when the shortcut is installed.
 
 LatticeVale will update/remove only shortcut files it can prove point to its own helper and the exact generated config. A same-name unowned shortcut is preserved and reported as partial Windows follow-up.
 

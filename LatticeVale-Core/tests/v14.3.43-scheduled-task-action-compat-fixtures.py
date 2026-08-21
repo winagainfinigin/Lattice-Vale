@@ -5,7 +5,7 @@ ROOT=Path(__file__).resolve().parents[1]
 REL=ROOT.parent
 reset=(REL/'tools/Reset-LatticeVale-CleanHost.ps1').read_text(encoding='ascii')
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6'}, version
+assert version in {'14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7'}, version
 assert 'function Get-OptionalPropertyString' in reset
 assert 'function Get-ScheduledTaskActionText' in reset
 assert "$Object.PSObject.Properties[$Name]" in reset

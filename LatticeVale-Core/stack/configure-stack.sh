@@ -1327,7 +1327,7 @@ checkpoint_revision() {
   case "$1" in
     matrix_profiles|matrix_profile_cross_signing) printf '3' ;;
     kanban_gateway|finalize) printf '2' ;;
-    integrations) printf '2' ;;
+    integrations) printf '3' ;;
     prepare_config|infrastructure|matrix_bootstrap|provider_setup|profiles|matrix_cross_signing|reconcile) printf '1' ;;
     *) printf '1' ;;
   esac
@@ -2175,8 +2175,9 @@ for p in paths:
     soul=p.parent/'SOUL.md'
     soul_text=soul.read_text(encoding='utf-8') if soul.exists() else ''
     if '<!-- HERMES_SKILL_MANAGEMENT_POLICY_START -->' not in soul_text or '<!-- HERMES_SKILL_MANAGEMENT_POLICY_END -->' not in soul_text: raise SystemExit(1)
-    plugins=cfg.get('plugins') or {}; enabled=plugins.get('enabled') or []
+    plugins=cfg.get('plugins') or {}; enabled=plugins.get('enabled') or []; disabled=plugins.get('disabled') or []
     if isinstance(enabled,str): enabled=[enabled]
+    if isinstance(disabled,str): disabled=[disabled]
     if opts.get('kanban'):
         kb=cfg.get('kanban') or {}
         if kb.get('dispatch_in_gateway') is not True: raise SystemExit(1)
@@ -2202,6 +2203,23 @@ for p in paths:
     if 'browser' not in tools: raise SystemExit(1)
     web=cfg.get('web') or {}
     if bool(web.get('search_backend')=='searxng') != bool(opts.get('searxng')): raise SystemExit(1)
+    shared=str(web.get('backend') or '').strip()
+    extract=str(web.get('extract_backend') or '').strip()
+    if opts.get('searxng') and shared in {'','searxng'} and extract in {'','searxng'}: raise SystemExit(1)
+    if opts.get('searxng') and shared not in {'','searxng'} and extract=='latticevale-local': raise SystemExit(1)
+    if not opts.get('searxng') and extract=='latticevale-local': raise SystemExit(1)
+    if extract=='latticevale-local':
+        if 'web/latticevale-web-extract' not in enabled or 'latticevale-web-extract' in disabled: raise SystemExit(1)
+        plugin=p.parent/'plugins'/'web'/'latticevale-web-extract'
+        manifest=(plugin/'plugin.yaml').read_text(encoding='utf-8') if (plugin/'plugin.yaml').exists() else ''
+        init=(plugin/'__init__.py').read_text(encoding='utf-8') if (plugin/'__init__.py').exists() else ''
+        provider=(plugin/'provider.py').read_text(encoding='utf-8') if (plugin/'provider.py').exists() else ''
+        if 'name: latticevale-web-extract' not in manifest or 'latticevale-local' not in manifest: raise SystemExit(1)
+        if 'register_web_search_provider' not in init: raise SystemExit(1)
+        if 'class LatticeValeLocalExtractProvider' not in provider or 'supports_extract' not in provider: raise SystemExit(1)
+        if 'create_ssrf_safe_client' not in provider or 'normalize_url_for_request' not in provider or 'sensitive_query_param_name' not in provider or 'is_safe_url' not in provider or 'follow_redirects=False' not in provider: raise SystemExit(1)
+    elif 'web/latticevale-web-extract' in enabled:
+        raise SystemExit(1)
     mcp=cfg.get('mcp_servers') or {}
     if ('qmd' in mcp) != bool(opts.get('qmd')): raise SystemExit(1)
     mem=cfg.get('memory') or {}
@@ -4187,11 +4205,37 @@ for name,p in profiles:
         cfg['kanban']=kanban
     elif isinstance(cfg.get('kanban'),dict):
         cfg['kanban']['dispatch_in_gateway']=False
+    # SearXNG is Hermes' keyless search backend, but upstream Hermes explicitly
+    # marks it search-only.  When LatticeVale owns the SearXNG selection and the
+    # user has not chosen another extract-capable provider, pair it with the
+    # lightweight LatticeVale local extractor generated below.  Preserve explicit
+    # web.backend / web.extract_backend choices so repair never replaces a user's
+    # Firecrawl/Tavily/Exa/Parallel/custom provider.
+    web=cfg.get('web')
+    if not isinstance(web,dict): web={}
     if opts.get('searxng'):
-        cfg.setdefault('web',{})['search_backend']='searxng'
-    elif isinstance(cfg.get('web'),dict) and cfg['web'].get('search_backend')=='searxng':
-        cfg['web'].pop('search_backend',None)
-        if not cfg['web']: cfg.pop('web',None)
+        web['search_backend']='searxng'
+        shared=str(web.get('backend') or '').strip()
+        extract=str(web.get('extract_backend') or '').strip()
+        if shared in {'','searxng'} and extract in {'','searxng','latticevale-local'}:
+            web['extract_backend']='latticevale-local'
+        elif shared not in {'','searxng'} and extract=='latticevale-local':
+            # An explicit shared provider supersedes LatticeVale's installer-owned
+            # default extractor; remove only our selection so Hermes can use it.
+            web.pop('extract_backend',None)
+    else:
+        if web.get('search_backend')=='searxng': web.pop('search_backend',None)
+        if web.get('extract_backend')=='latticevale-local': web.pop('extract_backend',None)
+    if web: cfg['web']=web
+    else: cfg.pop('web',None)
+    local_extract=isinstance(cfg.get('web'),dict) and cfg['web'].get('extract_backend')=='latticevale-local'
+    if local_extract:
+        if 'web/latticevale-web-extract' not in enabled: enabled.append('web/latticevale-web-extract')
+        disabled=[x for x in disabled if x not in {'web/latticevale-web-extract','latticevale-web-extract'}]
+    else:
+        enabled=[x for x in enabled if x not in {'web/latticevale-web-extract','latticevale-web-extract'}]
+        disabled=[x for x in disabled if x not in {'web/latticevale-web-extract','latticevale-web-extract'}]
+    plugins['enabled']=enabled; plugins['disabled']=disabled
     if opts.get('qmd'):
         cfg.setdefault('mcp_servers',{})['qmd']={'url':'http://qmd:8181/mcp','timeout':30}
     elif isinstance(cfg.get('mcp_servers'),dict):
@@ -4431,6 +4475,34 @@ for home in homes:
     elif d.exists():
         shutil.rmtree(d)
 PY_KANBAN_POLICY_PLUGIN
+# LatticeVale supplies a small keyless extraction provider because Hermes' bundled
+# SearXNG backend is intentionally search-only.  This adds no container, package,
+# daemon, listener, API key, or host-network mutation.  It is generated only when
+# the effective managed-profile config selects latticevale-local.
+python3 - data/hermes .installer-managed-profiles <<'PY_LATTICEVALE_WEB_EXTRACT_PLUGIN'
+from pathlib import Path
+import shutil,sys,yaml
+root=Path(sys.argv[1]); managed=Path(sys.argv[2])
+names=[x.strip() for x in managed.read_text(encoding='utf-8').splitlines() if x.strip()] if managed.exists() else []
+homes=[root]+[root/'profiles'/n for n in names if (root/'profiles'/n).is_dir()]
+manifest='name: latticevale-web-extract\nversion: "14.4.7"\ndescription: Keyless HTTP(S) page extraction for LatticeVale-managed Hermes.\nauthor: LatticeVale\nkind: backend\nprovides_web_providers:\n  - latticevale-local\n'
+init_code='from .provider import LatticeValeLocalExtractProvider\n\n\ndef register(ctx):\n    ctx.register_web_search_provider(LatticeValeLocalExtractProvider())\n'
+provider_code='from __future__ import annotations\n\nimport json\nimport re\nfrom html.parser import HTMLParser\nfrom typing import Any, Dict, List, Tuple\nfrom urllib.parse import urljoin, urlsplit\nfrom xml.etree import ElementTree\n\nfrom agent.web_search_provider import WebSearchProvider\nfrom tools.url_safety import (\n    create_ssrf_safe_client,\n    is_safe_url,\n    normalize_url_for_request,\n    sensitive_query_param_name,\n)\n\n\n_MAX_RESPONSE_BYTES = 2_000_000\n_MAX_REDIRECTS = 5\n_DEFAULT_MAX_CHARS = 100_000\n_MAX_OUTPUT_CHARS = 250_000\n_USER_AGENT = "LatticeVale-WebExtract/14.4.7 (Hermes Agent local extraction)"\n_REDIRECT_CODES = {301, 302, 303, 307, 308}\n_SKIP_TAGS = {"script", "style", "noscript", "template", "svg", "canvas"}\n\n\nclass _HTMLTextExtractor(HTMLParser):\n    def __init__(self) -> None:\n        super().__init__(convert_charrefs=True)\n        self.parts: List[str] = []\n        self.title_parts: List[str] = []\n        self._skip_depth = 0\n        self._in_title = False\n\n    def handle_starttag(self, tag: str, attrs: List[Tuple[str, str | None]]) -> None:\n        tag = tag.lower()\n        if tag in _SKIP_TAGS:\n            self._skip_depth += 1\n        if tag == "title" and not self._skip_depth:\n            self._in_title = True\n        if tag in {\n            "p", "div", "section", "article", "main", "header", "footer",\n            "nav", "aside", "li", "br", "tr", "h1", "h2", "h3", "h4",\n            "h5", "h6",\n        } and not self._skip_depth:\n            self.parts.append("\\n")\n\n    def handle_endtag(self, tag: str) -> None:\n        tag = tag.lower()\n        if tag == "title":\n            self._in_title = False\n        if tag in _SKIP_TAGS and self._skip_depth:\n            self._skip_depth -= 1\n        if tag in {\n            "p", "div", "section", "article", "main", "li", "tr", "h1",\n            "h2", "h3", "h4", "h5", "h6",\n        } and not self._skip_depth:\n            self.parts.append("\\n")\n\n    def handle_data(self, data: str) -> None:\n        if self._skip_depth:\n            return\n        if self._in_title:\n            self.title_parts.append(data)\n        self.parts.append(data)\n\n\ndef _clean_text(value: str) -> str:\n    value = value.replace("\\r\\n", "\\n").replace("\\r", "\\n")\n    value = re.sub(r"[ \\t\\f\\v]+", " ", value)\n    value = re.sub(r" *\\n *", "\\n", value)\n    value = re.sub(r"\\n{3,}", "\\n\\n", value)\n    return value.strip()\n\n\ndef _normalized_safe_url(url: str) -> str:\n    raw = str(url).strip()\n    parsed = urlsplit(raw)\n    if parsed.scheme.lower() not in {"http", "https"}:\n        raise ValueError("only HTTP(S) URLs are supported")\n    if not parsed.hostname:\n        raise ValueError("URL has no hostname")\n    if parsed.username is not None or parsed.password is not None:\n        raise ValueError("URLs containing credentials are not allowed")\n    normalized = normalize_url_for_request(raw)\n    sensitive = sensitive_query_param_name(normalized)\n    if sensitive:\n        raise ValueError(f"URL contains a credential-like query parameter: {sensitive}")\n    if not is_safe_url(normalized):\n        raise ValueError("URL targets a private or internal network address")\n    return normalized\n\n\ndef _text_content_type(content_type: str) -> bool:\n    base = (content_type or "").split(";", 1)[0].strip().lower()\n    if not base:\n        return True\n    return (\n        base.startswith("text/")\n        or base in {\n            "application/json",\n            "application/ld+json",\n            "application/xml",\n            "application/xhtml+xml",\n            "application/rss+xml",\n            "application/atom+xml",\n        }\n        or base.endswith("+json")\n        or base.endswith("+xml")\n    )\n\n\ndef _decode_body(raw: bytes, encoding: str | None) -> str:\n    return raw.decode(encoding or "utf-8", errors="replace")\n\n\ndef _extract_text(raw_text: str, content_type: str) -> Tuple[str, str]:\n    base = (content_type or "").split(";", 1)[0].strip().lower()\n    if "html" in base or (not base and "<html" in raw_text[:1000].lower()):\n        parser = _HTMLTextExtractor()\n        parser.feed(raw_text)\n        parser.close()\n        title = _clean_text(" ".join(parser.title_parts))\n        return title, _clean_text("".join(parser.parts))\n    if "json" in base:\n        try:\n            obj = json.loads(raw_text)\n            return "", json.dumps(obj, indent=2, ensure_ascii=False)\n        except Exception:\n            return "", _clean_text(raw_text)\n    if "xml" in base or "rss" in base or "atom" in base:\n        try:\n            root = ElementTree.fromstring(raw_text)\n            return "", _clean_text(" ".join(t for t in root.itertext()))\n        except Exception:\n            return "", _clean_text(raw_text)\n    return "", _clean_text(raw_text)\n\n\ndef _fetch_text(url: str, max_chars: int) -> Dict[str, Any]:\n    import httpx\n\n    current = _normalized_safe_url(url)\n    timeout = httpx.Timeout(20.0, connect=5.0)\n    headers = {\n        "User-Agent": _USER_AGENT,\n        "Accept": (\n            "text/html,application/xhtml+xml,application/json,application/xml,"\n            "text/plain;q=0.9,*/*;q=0.1"\n        ),\n    }\n    with create_ssrf_safe_client(\n        timeout=timeout,\n        follow_redirects=False,\n        headers=headers,\n    ) as client:\n        for redirect_count in range(_MAX_REDIRECTS + 1):\n            current = _normalized_safe_url(current)\n            with client.stream("GET", current) as response:\n                if response.status_code in _REDIRECT_CODES:\n                    if redirect_count >= _MAX_REDIRECTS:\n                        raise ValueError("too many redirects")\n                    location = response.headers.get("location", "").strip()\n                    if not location:\n                        raise ValueError("redirect response had no Location header")\n                    current = _normalized_safe_url(urljoin(current, location))\n                    continue\n                response.raise_for_status()\n                content_type = response.headers.get("content-type", "")\n                if not _text_content_type(content_type):\n                    raise ValueError(\n                        f"unsupported content type: {content_type or \'unknown\'}"\n                    )\n                body = bytearray()\n                truncated_bytes = False\n                for chunk in response.iter_bytes():\n                    remaining = _MAX_RESPONSE_BYTES - len(body)\n                    if remaining <= 0:\n                        truncated_bytes = True\n                        break\n                    if len(chunk) > remaining:\n                        body.extend(chunk[:remaining])\n                        truncated_bytes = True\n                        break\n                    body.extend(chunk)\n                raw_text = _decode_body(bytes(body), response.encoding)\n                title, content = _extract_text(raw_text, content_type)\n                truncated_chars = len(content) > max_chars or len(raw_text) > max_chars\n                return {\n                    "url": str(url),\n                    "title": title,\n                    "content": content[:max_chars],\n                    "raw_content": raw_text[:max_chars],\n                    "metadata": {\n                        "provider": "latticevale-local",\n                        "final_url": current,\n                        "status_code": response.status_code,\n                        "content_type": content_type,\n                        "truncated": bool(truncated_bytes or truncated_chars),\n                    },\n                }\n    raise ValueError("request did not complete")\n\n\nclass LatticeValeLocalExtractProvider(WebSearchProvider):\n    @property\n    def name(self) -> str:\n        return "latticevale-local"\n\n    @property\n    def display_name(self) -> str:\n        return "LatticeVale Local Extract"\n\n    def is_available(self) -> bool:\n        return True\n\n    def supports_search(self) -> bool:\n        return False\n\n    def supports_extract(self) -> bool:\n        return True\n\n    def extract(self, urls: List[str], **kwargs: Any) -> List[Dict[str, Any]]:\n        try:\n            requested = int(kwargs.get("max_chars") or _DEFAULT_MAX_CHARS)\n        except (TypeError, ValueError):\n            requested = _DEFAULT_MAX_CHARS\n        max_chars = min(max(requested, 2_000), _MAX_OUTPUT_CHARS)\n        results: List[Dict[str, Any]] = []\n        for url in urls:\n            try:\n                results.append(_fetch_text(str(url), max_chars))\n            except Exception as exc:\n                results.append({\n                    "url": str(url),\n                    "title": "",\n                    "content": "",\n                    "raw_content": "",\n                    "metadata": {"provider": "latticevale-local"},\n                    "error": str(exc),\n                })\n        return results\n\n    def get_setup_schema(self) -> Dict[str, Any]:\n        return {\n            "name": "LatticeVale Local Extract",\n            "badge": "free · local",\n            "tag": (\n                "Keyless extraction for HTTP(S) text pages using Hermes\' "\n                "URL-safety policy; no additional service required."\n            ),\n            "env_vars": [],\n        }\n'
+for home in homes:
+    cfg_path=home/'config.yaml'
+    cfg=yaml.safe_load(cfg_path.read_text(encoding='utf-8')) if cfg_path.exists() else {}
+    cfg=cfg or {}
+    web=cfg.get('web') if isinstance(cfg.get('web'),dict) else {}
+    selected=web.get('extract_backend')=='latticevale-local'
+    d=home/'plugins'/'web'/'latticevale-web-extract'
+    if selected:
+        d.mkdir(parents=True,exist_ok=True)
+        (d/'plugin.yaml').write_text(manifest,encoding='utf-8')
+        (d/'__init__.py').write_text(init_code,encoding='utf-8')
+        (d/'provider.py').write_text(provider_code,encoding='utf-8')
+    elif d.exists():
+        shutil.rmtree(d)
+PY_LATTICEVALE_WEB_EXTRACT_PLUGIN
 # Environment values shared by every profile are written to each profile's private .env.
 profile_envs=(data/hermes/.env)
 while IFS= read -r name; do

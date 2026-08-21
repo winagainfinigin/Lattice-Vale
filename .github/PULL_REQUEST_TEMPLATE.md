@@ -1,4 +1,4 @@
-> **v14.4.6 quality checklist:** preserve all v14.4.3 RAM/uninstaller and earlier ownership boundaries; live metadata repair may ignore only entries that actually vanished; resource audit must use WSL/process-visible CPU count; and a version-only bundle bump must not force managed image/source rebuilds unless the managed-refresh revision/age/legacy-state gate or explicit Option 6 requires it. Direct public 14.4.2→14.4.6 repair must still converge through refresh revision 1→2 and resource policy v2→v3.
+> **v14.4.7 quality checklist:** preserve all v14.4.3 RAM/uninstaller and earlier ownership boundaries; live metadata repair may ignore only entries that actually vanished; resource audit must use WSL/process-visible CPU count; and a version-only bundle bump must not force managed image/source rebuilds unless the managed-refresh revision/age/legacy-state gate or explicit Option 6 requires it. Direct public 14.4.2→14.4.7 repair must still converge through refresh revision 1→2 and resource policy v2→v3.
 
 ## Summary
 

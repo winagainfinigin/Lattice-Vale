@@ -1,4 +1,6 @@
-# LatticeVale v14.4.6 — Stable
+# LatticeVale v14.4.7 — Stable
+
+> **v14.4.7:** SearXNG search is now paired with LatticeVale's bounded keyless public-page extraction provider for Hermes research. A healthy SearXNG service can still temporarily return zero results when upstream engines rate-limit/CAPTCHA automated traffic; that alone is not a LatticeVale repair condition, and known public URLs can still be read through `web_extract`. See [`WEB-EXTRACTION-PATCH-NOTES.md`](WEB-EXTRACTION-PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
 
 **Unofficial, inspectable Windows + WSL2 installer and lifecycle manager for a self-hosted Hermes Agent stack.**
 
@@ -6,7 +8,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.6 retains those mechanics while replacing v14.4.5's version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.7 retains those mechanics and v14.4.6's replacement of the version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
 
 For detailed history, use `CHANGELOG.md`. For the v14.4.6 CPU-fingerprint audit fix, use `RESOURCE-FINGERPRINT-AUDIT-PATCH-NOTES.md`. For the v14.4.5 repair convergence fix, use `REPAIR-RUNTIME-POLICY-UPDATE-PATCH-NOTES.md`. For the inherited v14.4.4 repair-race fix, use `REPAIR-METADATA-RACE-PATCH-NOTES.md`. For v14.4.3 RAM/uninstaller implementation details, use `RAM-UNINSTALL-HARDENING-PATCH-NOTES.md`. For the stable documentation remediation record, use `DOCUMENTATION-AUDIT-v14.4.0.md`. For implementation/audit lineage, use `BACKPORT-NOTES.md` and the retained `*PATCH-NOTES.md` files.
 
@@ -193,6 +195,8 @@ If a profile is named `coder`, `researcher`, or anything else valid, Matrix prov
 **v14.3.38 integration-policy migration:** clean installs write the current managed Kanban/skill policy immediately. Existing managed stacks re-run the integrations stage on the next mutating installer run even if an older integrations checkpoint was complete. This migration edits only the default profile plus profiles recorded as LatticeVale-managed; user-created profile configuration files are not rewritten, although valid user-created profile names remain eligible routing targets.
 
 **Fresh install** creates a new LatticeVale-managed stack in the chosen user's Linux home.
+
+Before starting a Windows **Resume / repair** or **Update / repair** install, fully stop the selected LatticeVale WSL distro. If the Windows lifecycle shortcuts are installed, use **Shut Down LatticeVale**: it stops the managed stack and then terminates only the selected distro. Global `wsl --shutdown` is not required.
 
 **Resume / repair** is preservation-first, but it is not guaranteed to be update-free. It reconciles generated configuration, ownership, Compose state, selected services, Matrix/Tailscale integration, bounded maintenance, and health checks while preserving persistent application state. Between managed refresh windows it remains local-first and prefers already-installed images/builds. Every 30 days—and once when an older managed stack first adopts the managed-refresh policy, or when that policy revision changes—it performs a targeted refresh of LatticeVale-owned prerequisite/Docker packages and selected installer-owned image/build/source state. Explicit user-owned overrides and unrelated Ubuntu packages remain untouched.
 

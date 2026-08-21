@@ -1,10 +1,12 @@
-# LatticeVale v14.4.6 — Complete Features and Install Options Reference
+# LatticeVale v14.4.7 — Complete Features and Install Options Reference
+
+> **v14.4.7:** managed SearXNG profiles get end-to-end keyless web research: SearXNG for discovery plus a local public-page text extractor, unless the user already selected another extract-capable provider.
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.4.6 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.4.7 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.6 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.7 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -332,7 +334,10 @@ Tailnet ACLs/grants/tags/device policy remain the user's responsibility.
 - Fresh suggestion: **Yes**
 - installs self-hosted SearXNG plus Valkey
 - Hermes managed web configuration switches its search backend to SearXNG when selected
+- v14.4.7 pairs that search backend with the keyless `latticevale-local` public-page extractor unless an explicit extraction/shared provider is already configured
 - local port target: **8888**, collision-aware on fresh install
+- upstream engine availability remains external: a locally healthy SearXNG request can occasionally return zero usable results when search engines rate-limit, CAPTCHA, or suspend automated traffic
+- a zero-result search alone is therefore not proof that LatticeVale, Hermes, SearXNG, or Valkey is broken; known public URLs can still be read independently through `web_extract`
 - removing/disabling the feature removes the managed active service selection while preserving appropriate persistent state
 
 ## 3.11 QMD
@@ -628,6 +633,8 @@ These prompts are intended to prevent LatticeVale from silently taking ownership
 
 # 5. Existing-install menu — all six modes
 
+Before using **Resume / repair installation** or **Update / repair installer-managed software**, fully stop the selected LatticeVale WSL distro before launching the Windows installer. When available, **Shut Down LatticeVale** is the recommended method: it stops the managed stack and terminates only the selected distro. It does not require global `wsl --shutdown`.
+
 When a recognized installer-managed stack exists, LatticeVale offers six top-level modes.
 
 ## 5.1 Resume / repair installation
@@ -786,7 +793,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.4.6
+# 8. Current managed software/source pins documented by v14.4.7
 
 The release's declared managed references include:
 
@@ -853,7 +860,7 @@ Current normal installer flows **do not set or switch `[wsl2] networkingMode`**.
 
 # 11. WSL networking behavior
 
-Current v14.4.6 policy:
+Current v14.4.7 policy:
 
 - discover active topology
 - preserve working NAT/default/VirtioProxy-capable paths
@@ -1030,7 +1037,7 @@ Current primary documentation and current source take precedence over archived v
 
 # 18. Documentation files reviewed for this consolidation
 
-## v14.4.0 audit source set, mapped to the current v14.4.6 layout (28)
+## v14.4.0 audit source set, mapped to the current v14.4.7 layout (28)
 
 - `.github/PULL_REQUEST_TEMPLATE.md`
 - `docs/AUDIT-PATCH-NOTES.md`

@@ -1,4 +1,16 @@
-# v14.4.6 adaptive resource fingerprint audit
+# LatticeVale v14.4.7 audit
+
+## v14.4.7 web extraction audit
+
+- Confirmed against Hermes Agent v0.20.2 / image tag v2026.8.16: `WebSearchProvider` supports separate search/extract providers and user plugins can register a web provider through `PluginContext.register_web_search_provider()`.
+- Confirmed the bundled SearXNG provider advertises search only (`supports_extract() == False`).
+- LatticeVale keeps SearXNG as the search backend and selects `latticevale-local` only when no explicit extract-capable/shared provider is already configured.
+- The generated extractor accepts HTTP(S) text-oriented responses, rejects credential-bearing inputs, validates every redirect, uses Hermes's connect-time SSRF-safe HTTP client and URL-safety policy (including the non-negotiable cloud-metadata block), and bounds redirects, response bytes, and returned characters.
+- No Compose service, image pin, WSL networking policy, Windows integration, host power/resource policy, or managed package/source refresh revision changes in this patch.
+- Integration checkpoint revision 3 migrates managed profiles on Resume / repair while preserving explicit user provider choices.
+
+
+## v14.4.6 adaptive resource fingerprint audit
 
 v14.4.6 fixes a false-stale runtime-policy report found on a WSL instance configured for 4 processors on an 8-logical-CPU Windows host. The adaptive generator and `manage.sh` use `nproc`, which reflects CPUs available to the WSL process, but `state-audit.py` used Python `os.cpu_count()`, which can report a broader host/logical count. That made `.latticevale-resource-state` (`CPUS=4`) disagree with audit even when the live WSL CPU count and RAM fingerprint exactly matched. Audit now derives process-visible CPU count from `os.sched_getaffinity(0)`, falls back to `nproc`, and only then to `os.cpu_count()`. RAM comparison remains exact; this patch does not hide real WSL memory-allocation drift. v14.4.6 also removes bundle-version-only managed refresh: `INSTALLER_VERSION` remains provenance, while the 30-day gate, `MANAGED_REPAIR_REFRESH_REVISION`, missing legacy state, or explicit Option 6 determine whether package/image/source refresh runs. This preserves direct public 14.4.2→14.4.6 convergence through revision 1→2 and policy v2→v3 while avoiding redundant 14.4.5→14.4.6 rebuilds.
 

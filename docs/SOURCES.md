@@ -1,5 +1,9 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.4.7 source-policy note
+
+v14.4.7 adds no third-party runtime package, service, container image, or bundled binary. Its generated Hermes extraction plugin uses Python standard-library parsing plus `httpx` and Hermes's existing `tools.url_safety` connect-time SSRF-safe client, all already present in the pinned Hermes Agent image. The design was checked against Hermes Agent v2026.8.16's public `WebSearchProvider` / user-plugin registration contract, canonical `plugins/web/<name>` layout, web-tool dispatch path, URL-safety helpers, and the bundled SearXNG provider's search-only capability.
+
 ## v14.4.6 source-policy note
 
 v14.4.6 adds no third-party dependency, network source, or bundled binary. It uses Python's standard `os.sched_getaffinity()` when available and the already-required `nproc` utility as a fallback so audit CPU fingerprinting matches the existing resource generator.
@@ -38,7 +42,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.6 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.4.7 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 

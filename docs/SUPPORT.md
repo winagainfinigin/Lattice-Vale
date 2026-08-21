@@ -1,5 +1,32 @@
 # Support
 
+## v14.4.7 web search versus extraction
+
+With SearXNG selected, `web_search` should resolve through SearXNG and `web_extract` should resolve through `latticevale-local` unless you deliberately configured another extract-capable/shared provider.
+
+These are separate capabilities:
+
+- `web_search` asks the local SearXNG service to query external search engines.
+- `web_extract` reads a known public HTTP(S) URL through LatticeVale's local extractor.
+- Browser automation is a separate optional Hermes capability and is not required for ordinary `web_search` + public-page extraction.
+
+A successful `web_search` call can still return **zero results** when SearXNG's upstream engines temporarily rate-limit, CAPTCHA, suspend, or otherwise refuse automated traffic. That can happen even while the SearXNG container, Valkey, JSON search API, Hermes provider configuration, and network path are all healthy. A zero-result response by itself is therefore **not** a reason to run LatticeVale repair.
+
+For a successful search call with no usable results:
+
+1. retry later, especially after engine suspension/rate-limit windows have expired;
+2. broaden or simplify an unusually narrow query;
+3. inspect SearXNG's `unresponsive_engines` response/logs to distinguish upstream blocking from a local service failure;
+4. if the authoritative URL is already known, use `web_extract` directly instead of relying on search discovery.
+
+Investigate the LatticeVale installation when the local SearXNG API itself fails, Hermes cannot resolve/use the configured SearXNG provider, managed profiles lose the expected web configuration, Valkey/SearXNG is unhealthy, or known public URLs consistently cannot be extracted after v14.4.7. Do not try to solve upstream CAPTCHA/429 behavior by repeatedly hammering blocked engines or by treating every empty result set as installation corruption.
+
+For design, migration, and diagnostic expectations see [`WEB-EXTRACTION-PATCH-NOTES.md`](WEB-EXTRACTION-PATCH-NOTES.md).
+
+## Repair-install preparation
+
+Before reproducing or repairing an existing-install problem with **Resume / repair** or **Update / repair**, fully stop the selected LatticeVale WSL distro before launching the Windows installer. If installed, use **Shut Down LatticeVale**; it stops the managed stack and terminates only the selected distro. Global `wsl --shutdown` is not required.
+
 ## v14.4.6 adaptive resource fingerprint support note
 
 If `./manage.sh audit` reports `runtimePolicy PARTIAL` even though `.latticevale-resource-state` matches `nproc` and `/proc/meminfo`, use v14.4.6 or newer. Earlier v14.4.5 audit code could compare the saved WSL CPU fingerprint to `os.cpu_count()`, which may reflect the Windows host logical-CPU count instead of the processor set available to WSL. v14.4.6 aligns audit with the generator/manager CPU semantics. A real CPU or RAM allocation change still marks the policy stale and triggers normal regeneration.
@@ -8,7 +35,7 @@ If `./manage.sh audit` reports `runtimePolicy PARTIAL` even though `.latticevale
 
 If `./manage.sh audit` reports `runtimePolicy PARTIAL` after an older repair, rerun Resume / repair with v14.4.5 or newer. The installer now treats adaptive policy convergence as an explicit repair step and will not report final success until the selected policy-v3 fingerprint and RAM controls verify. When that overlay changes, affected containers are reconciled through Compose so the settings become live.
 
-v14.4.6 refines the managed-update trigger introduced in v14.4.5: a bundle-version change alone no longer forces package/image/source refresh. Resume / repair refreshes that layer when the 30-day gate is due, the managed-refresh policy revision changes, or valid legacy refresh state is missing. Use explicit **Update / repair installer-managed software** when you intentionally want to force the current bundle's managed refresh immediately. Public 14.4.2→14.4.6 still refreshes because the revision advances from 1 to 2.
+v14.4.6 refines the managed-update trigger introduced in v14.4.5: a bundle-version change alone no longer forces package/image/source refresh. Resume / repair refreshes that layer when the 30-day gate is due, the managed-refresh policy revision changes, or valid legacy refresh state is missing. Use explicit **Update / repair installer-managed software** when you intentionally want to force the current bundle's managed refresh immediately. Public 14.4.2→14.4.7 still refreshes because the managed-refresh revision advances from 1 to 2; the additional v14.4.7 integrations migration does not itself force that refresh.
 
 ## v14.4.4 repair metadata-race support note
 
