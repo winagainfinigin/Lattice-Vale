@@ -1,12 +1,14 @@
-# LatticeVale v14.4.2 — Stable
+# LatticeVale v14.4.6 — Stable
 
 **Unofficial, inspectable Windows + WSL2 installer and lifecycle manager for a self-hosted Hermes Agent stack.**
 
 LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubuntu WSL2 distro** using Docker Engine/Compose. Optional integrations include the Hermes Dashboard, named profiles, Kanban orchestration, Matrix/Synapse, SearXNG, QMD/Obsidian, Honcho memory, managed or native-Windows Ollama, private Windows Tailscale access, adaptive container resource ceilings, Ubuntu/WSL maintenance policy, and Windows lifecycle helpers.
 
-**v14.4.2 is a documentation and release-layout consistency patch over v14.4.1.** Installer and runtime behavior are unchanged. It corrects package-folder documentation/regression expectations, refreshes current-release version metadata, and regenerates release integrity data while retaining the validated v14.4.0 runtime line.
+**v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-For detailed history, use `CHANGELOG.md`. For the stable documentation remediation record, use `DOCUMENTATION-AUDIT-v14.4.0.md`. For implementation/audit lineage, use `BACKPORT-NOTES.md` and the retained `*PATCH-NOTES.md` files.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.6 retains those mechanics while replacing v14.4.5's version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
+
+For detailed history, use `CHANGELOG.md`. For the v14.4.6 CPU-fingerprint audit fix, use `RESOURCE-FINGERPRINT-AUDIT-PATCH-NOTES.md`. For the v14.4.5 repair convergence fix, use `REPAIR-RUNTIME-POLICY-UPDATE-PATCH-NOTES.md`. For the inherited v14.4.4 repair-race fix, use `REPAIR-METADATA-RACE-PATCH-NOTES.md`. For v14.4.3 RAM/uninstaller implementation details, use `RAM-UNINSTALL-HARDENING-PATCH-NOTES.md`. For the stable documentation remediation record, use `DOCUMENTATION-AUDIT-v14.4.0.md`. For implementation/audit lineage, use `BACKPORT-NOTES.md` and the retained `*PATCH-NOTES.md` files.
 
 ### Release layout (v14.4.1+)
 
@@ -20,6 +22,22 @@ The extracted release root is intentionally kept clean:
 - `README.md` and `LICENSE` — conventional GitHub landing/legal files kept at repository root.
 
 Run public entry points from the repository root using `./installer/...` as shown below.
+
+### Inherited v14.4.3 RAM-efficiency policy
+
+When adaptive container resource limits are enabled, policy v3:
+
+- derives ceilings from CPU/RAM actually visible inside WSL while reserving 30% on <=6 GiB, 25% on <=12 GiB, 20% on <=24 GiB, and 15% above that, with bounded reserve floors/caps;
+- applies `MALLOC_ARENA_MAX` to long-lived glibc/Python services to limit allocator arena growth;
+- lowers Synapse's supported `SYNAPSE_CACHE_FACTOR` on smaller WSL VMs;
+- uses 64 MiB PostgreSQL `shared_buffers` on <=12 GiB WSL VMs and 128 MiB above that while preserving Honcho PostgreSQL's existing `max_connections=200`;
+- keeps user `compose.override.yaml` last and authoritative.
+
+The policy is applied on clean install and regenerated on repair/start when an older resource-policy revision or changed WSL CPU/RAM fingerprint is detected. LatticeVale does not set a global WSL memory cap or `autoMemoryReclaim`; current WSL memory-reclaim behavior remains host/user-owned.
+
+### Inherited v14.4.3 uninstall hardening
+
+Normal uninstall now refuses to continue if stack metadata indicates Docker runtime may still exist but the Docker daemon cannot be inspected. This avoids deleting Windows integration/state while restartable containers are left behind. It also preserves stack-specific helpers/configs still referenced by a retained task or shortcut, restores installer-owned `OLLAMA_HOST` state with a Windows environment-change broadcast, and removes shared Linux dockerd logging only when no other recognizable LatticeVale stack remains in the distro.
 
 ## Major capabilities
 
@@ -235,6 +253,10 @@ The Dashboard normally remains on `http://localhost:9119`. Matrix/Synapse is loc
 ## Repair-state authority
 
 Repair checkpoints are recorded in `.installer-state.json`, but they never override live validation. **The state file is only a hint**: repair stages still verify the components they own and rerun required migrations when the installed release changes.
+
+In v14.4.5, adaptive runtime/RAM policy is reconciled outside the old `prepare_config` checkpoint. If policy v3 is missing/stale or the WSL-visible CPU/RAM fingerprint changed, repair regenerates the installer-owned overlay, marks infrastructure/full-stack reconciliation pending, and requires a final live policy verification before declaring success.
+
+Managed software refresh is policy-aware rather than version-number-driven. Normal Resume / repair runs the bounded installer-owned package/image/source refresh when the 30-day age gate is due, the `MANAGED_REPAIR_REFRESH_REVISION` changes, or a legacy install lacks valid refresh state. The marker still records the installer version for provenance, but a version change alone does not trigger another pull/build cycle. An interrupted refresh with the same refresh-policy revision resumes its user-level phase without repeating completed root package work; a revision mismatch reruns the bounded root phase. Explicit Update / repair always forces the current bundle's managed refresh.
 
 ## Uninstall
 

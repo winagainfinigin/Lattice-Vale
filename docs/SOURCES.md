@@ -1,8 +1,20 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.4.6 source-policy note
+
+v14.4.6 adds no third-party dependency, network source, or bundled binary. It uses Python's standard `os.sched_getaffinity()` when available and the already-required `nproc` utility as a fallback so audit CPU fingerprinting matches the existing resource generator.
+
+## v14.4.5 source-policy note
+
+v14.4.5 added no third-party runtime dependency or bundled binary; it changed repair convergence and introduced a temporary version-only trigger for the existing bounded managed package/image/source refresh. v14.4.6 supersedes that trigger: automatic refresh is now age/revision/legacy-state gated, while explicit Option 6 forces it. Docker Compose reconciliation still relies on documented Compose behavior that changed service configuration/image references cause affected containers to be recreated while mounted volumes are preserved.
+
+## v14.4.4 source-policy note
+
+v14.4.4 adds no third-party runtime dependency or bundled binary. The repair fix uses existing GNU/Linux tools already required by the Ubuntu bootstrap (`find`, `chown`, `chmod`, `mktemp`) and does not add a network, package, or binary source. v14.4.3 RAM-efficiency/uninstaller source policy remains unchanged.
+
 ## v14.4.2 source-policy note
 
-v14.4.2 adds no third-party runtime dependency or bundled binary. It updates documentation/version-validation metadata and regenerates the exact release manifest; dependency/source ownership remains unchanged from v14.4.1.
+v14.4.2 added no third-party runtime dependency or bundled binary. It updated documentation/version-validation metadata and regenerated the exact release manifest; dependency/source ownership remained unchanged from v14.4.1.
 
 ## v14.4.1 source-policy note
 
@@ -26,7 +38,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.2 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.4.6 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 
@@ -62,7 +74,7 @@ Compose references are pulled online from their upstream registries when a clean
 | `redis:8-alpine` | `https://hub.docker.com/_/redis` |
 | QMD build base `node:24-bookworm-slim` | `https://hub.docker.com/_/node` |
 
-LatticeVale's distributed defaults do not use floating `latest` tags for Ollama or SearXNG. Ordinary Resume / repair remains local-first between managed refresh windows and preserves explicit image overrides, but it may refresh the installer-owned package/image/source layer when the periodic policy is due. The Windows **Update / repair installer-managed software** choice forces that same bundle-aligned managed refresh immediately after a required backup. `./manage.sh update` remains a separate advanced upstream-refresh workflow and is not the bundle-pinned updater.
+LatticeVale's distributed defaults do not use floating `latest` tags for Ollama or SearXNG. Resume / repair preserves explicit image/source overrides and refreshes installer-owned package/image/source state only when the 30-day gate is due, the managed-refresh policy revision changes, valid legacy state is missing, or explicit Update / repair forces it. A bundle-version change alone stays local-first. The Windows **Update / repair installer-managed software** choice forces the current bundle-aligned managed refresh after a required backup. `./manage.sh update` remains a separate advanced upstream-refresh workflow and is not the bundle-pinned updater.
 
 ## Optional NVIDIA GPU runtime
 
@@ -95,6 +107,17 @@ Native Windows Ollama relay selection follows current Microsoft WSL networking b
 - `https://learn.microsoft.com/windows/wsl/networking`
 - `https://learn.microsoft.com/windows/wsl/wsl-config`
 - `https://docs.docker.com/reference/cli/docker/container/run/` (`host-gateway` special value)
+
+## RAM-efficiency implementation references
+
+The v14.4.4 tuning policy was checked against the relevant upstream configuration surfaces:
+
+- Microsoft WSL configuration and memory reclaim: `https://learn.microsoft.com/windows/wsl/wsl-config`
+- PostgreSQL resource configuration / `shared_buffers`: `https://www.postgresql.org/docs/current/runtime-config-resource.html`
+- Synapse configuration / cache-factor controls: `https://matrix-org.github.io/synapse/latest/usage/configuration/config_documentation.html`
+- GNU libc memory-allocation tunables / arena limits: `https://sourceware.org/glibc/manual/latest/html_node/Memory-Allocation-Tunables.html`
+
+These are configuration references only; LatticeVale does not download software from these documentation URLs.
 
 ## Repository/source rule
 

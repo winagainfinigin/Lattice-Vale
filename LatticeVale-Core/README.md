@@ -1,6 +1,8 @@
-# LatticeVale v14.4.2 — Technical README
+# LatticeVale v14.4.6 — Technical README
 
-- v14.4.2 is a documentation/release-consistency patch over v14.4.1. Installer and stack-runtime behavior are intentionally unchanged; current documentation/version-validation metadata, inherited regression compatibility, and release integrity data are refreshed.
+- v14.4.6 fixes a WSL CPU-fingerprint audit mismatch and refines managed-refresh triggering. Adaptive resource generation/start use `nproc` semantics, while the audit previously used `os.cpu_count()` and could see the Windows host logical-CPU total despite a lower WSL processor allocation. Audit now uses process-visible CPU affinity first, then `nproc`; RAM fingerprinting remains exact. Resume / repair no longer treats a bundle-version change alone as a reason to pull/rebuild managed components. Managed package/image/source refresh is driven by the 30-day gate, `MANAGED_REPAIR_REFRESH_REVISION`, missing legacy state, or explicit Option 6. Public 14.4.2→14.4.6 still refreshes because the revision advances 1→2; 14.4.5→14.4.6 stays local-first when its recent revision-2 refresh is already complete.
+- v14.4.5 introduced repair convergence for adaptive RAM policy v3: Resume / repair explicitly regenerates a stale/missing policy-v3 overlay even when `prepare_config` was checkpointed complete, forces affected containers through Compose reconciliation, and refuses final success while that policy remains stale. Its version-only managed-refresh trigger is superseded by v14.4.6's explicit refresh-revision/age/force model. v14.4.4 live metadata-race and v14.4.3 preservation/RAM hardening remain inherited.
+- v14.4.2 is the documentation/release-consistency patch over v14.4.1 that aligned package-layout documentation and integrity metadata.
 - v14.4.1 is a packaging/layout patch over the stable promotion of the audited v14.3.43 runtime line. Runtime behavior is intentionally unchanged; the promotion applies the documentation audit, adds the canonical `../docs/FEATURES.md`, updates release/test metadata, and regenerates release integrity data.
 - v14.3.43 fixes only the explicit clean-host reset Scheduled Task scanner so heterogeneous/non-Exec task actions cannot abort dry-run ownership discovery under StrictMode; normal installer/runtime behavior is unchanged.
 
@@ -92,7 +94,7 @@ This directory contains the complete inspectable installer implementation. The r
 
 ## v14.3.10 changes
 
-- Recognized managed repairs now have a 30-day targeted package/image refresh interval, independent of how old the prior LatticeVale release is. Legacy stacks without a refresh marker refresh once on adoption; a separate refresh-policy revision can force an immediate pass when package-layer policy changes.
+- Recognized managed repairs use a 30-day targeted package/image refresh interval plus an explicit managed-refresh policy revision. Legacy stacks without a valid refresh marker refresh once on adoption, and a revision change forces an immediate bounded pass when package/image/source policy changes. A bundle-version change alone does not force refresh; this prevents audit/docs-only releases from rebuilding healthy components.
 - Due refreshes update APT metadata and only LatticeVale prerequisite + official Docker packages; no blanket Ubuntu upgrade is performed.
 - A pending refresh forces current installer-owned config/image pins, selected infrastructure pulls/builds, Hermes image pull, and Hermes profile/container replay even when the old runtime is healthy.
 - Root package and user-level image refresh are interruption-safe phases; a pending marker lets Resume finish the latter without repeating the former, and success is timestamped only after infrastructure/Hermes verification.
@@ -173,7 +175,7 @@ This directory contains the complete inspectable installer implementation. The r
 - `manage.sh backup` prints a sensitive-backup/encryption reminder without adding a new crypto dependency or secret-handling surface.
 
 - Added persisted Ollama acceleration policy: Auto, CPU, NVIDIA, or AMD/ROCm. Auto falls back to CPU when acceleration prerequisites cannot be verified; forced GPU modes fail closed.
-- Added adaptive per-service CPU/RAM ceilings for newly configured installs. Legacy repairs preserve unrestricted behavior unless the setting already exists, and `compose.override.yaml` remains the final user override layer.
+- Adaptive per-service CPU/RAM ceilings are optional and `compose.override.yaml` remains the final user override layer. v14.4.5 policy v3 reserves more WSL/Docker/host headroom on constrained VMs, adds `MALLOC_ARENA_MAX`, RAM-scaled Synapse cache factor, and RAM-scaled PostgreSQL `shared_buffers`, and automatically refreshes enabled older resource-policy overlays during repair/start.
 - Replaced floating Ollama/SearXNG defaults with tested versioned image tags while preserving explicit image choices on ordinary repair.
 - Consolidated release path-safety/source-manifest verification into repository-root `tools/ReleaseManifest.ps1`, shared by the launcher, verifier, and manifest generator.
 - Added explicit Honcho AGPL-3.0 network-use guidance to `../docs/THIRD-PARTY-NOTICES.md`.
@@ -222,7 +224,7 @@ The LatticeVale source and documentation are MIT-licensed and may be modified or
 
 - `Install-LatticeVale.ps1` — Windows questionnaire, prerequisite checks, repair detection, state handoff, Windows integrations.
 - `../tools/Reset-LatticeVale-CleanHost.ps1` — explicit Administrator-only, dry-run-first clean WSL/LatticeVale host reset; never invoked automatically.
-- `Uninstall-LatticeVale.ps1` — conservative removal of installer-owned runtime/integrations, with preserve-data and explicitly confirmed full-purge modes.
+- `Uninstall-LatticeVale.ps1` — conservative removal of installer-owned runtime/integrations, with preserve-data and explicitly confirmed full-purge modes. v14.4.5 retains the v14.4.4 behavior that aborts if runtime may remain while Docker is unavailable, preserves helper/config files referenced by retained tasks/shortcuts, broadcasts restored installer-owned `OLLAMA_HOST`, and avoids deleting shared distro-level state while another recognizable LatticeVale stack remains.
 - `linux/bootstrap.sh` — WSL bootstrap/recovery entry.
 - `stack/configure-stack.sh` — deterministic stack creation/reconciliation and staged repair logic.
 - `stack/compose.yaml` — managed Compose topology.
@@ -235,7 +237,7 @@ The LatticeVale source and documentation are MIT-licensed and may be modified or
 
 ## Repair and update policy
 
-Resume / repair is broad reconciliation but preservation-first. It can repair generated config, permissions, helpers, Compose state, Matrix/Tailscale integration, bounded Docker/APT residue, log retention, and database maintenance. It does not routinely delete profiles, memories, sessions, Matrix state, databases, Docker volumes, models, or vault files. Ordinary repair is local-first between managed refresh windows, but it may update the installer-owned package/image/source layer when the periodic refresh is due or its policy revision changes.
+Resume / repair is broad reconciliation but preservation-first. It can repair generated config, permissions, helpers, Compose state, Matrix/Tailscale integration, bounded Docker/APT residue, log retention, database maintenance, and stale adaptive runtime/RAM policy. It does not routinely delete profiles, memories, sessions, Matrix state, databases, Docker volumes, models, or vault files. Managed package/image/source refresh occurs when the periodic refresh is due, the managed-refresh policy revision changes, legacy refresh state is missing, or explicit Update / repair forces it; a bundle-version change alone remains local-first. If adaptive policy is regenerated, Compose reconciliation is forced before repair can report success.
 
 The Windows installer also exposes **Update / repair installer-managed software** for an existing managed stack. That mode requires a successful pre-update `manage.sh backup`, bypasses the age gate, forces the current bundle's managed refresh, and then executes the normal stage verifiers. It is the reproducible way to apply component-version changes shipped by a newer LatticeVale bundle. Fixed pins such as Hermes/Synapse only advance when the bundle declares a different pin; installer-owned SearXNG/Ollama pins and the audited Honcho commit advance only across proven ownership boundaries. Explicit user overrides and separately owned native Windows Ollama remain outside that updater.
 
@@ -335,3 +337,6 @@ LatticeVale binds only its documented host ports and uses the installer-owned Co
 ## Historical repair baseline
 
 The **v13.16.0 repair maintenance** design remains part of v14: bounded cleanup/logging/database maintenance is preservation-first, and later v13.16.x hardening remains the compatibility baseline rather than being replaced by the new profile-Matrix features.
+
+
+For v14.4.6 resource fingerprint audit behavior, see `../docs/RESOURCE-FINGERPRINT-AUDIT-PATCH-NOTES.md`. For v14.4.5 repair runtime-policy/update convergence, see `../docs/REPAIR-RUNTIME-POLICY-UPDATE-PATCH-NOTES.md`. For inherited v14.4.4 live metadata-race behavior, see `../docs/REPAIR-METADATA-RACE-PATCH-NOTES.md`.

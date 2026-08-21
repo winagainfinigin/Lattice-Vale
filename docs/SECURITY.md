@@ -1,5 +1,19 @@
 # Security Policy
 
+## v14.4.6 resource-audit security posture
+
+v14.4.6 changes read-only CPU detection in `state-audit.py` and narrows automatic managed-update triggering. It does not broaden privileges, ownership, networking, destructive scope, or WSL global configuration. Real policy-version, CPU-allocation, and RAM-allocation changes continue to be reported as stale. A bundle-version change alone no longer broadens update activity; managed component refresh still requires the age/revision/legacy-state gate or explicit Option 6.
+
+## v14.4.5 repair-convergence security posture
+
+v14.4.5 introduced the repair-time runtime-policy step, which edits only the installer-owned adaptive overlay/fingerprint and preserves `compose.override.yaml` as the final user layer. Runtime reconciliation uses the existing Compose model and persistent volumes; it does not delete application data. Its temporary bundle-version-only managed-refresh trigger is superseded by v14.4.6; current automatic refresh scope is age/revision/legacy-state gated, while explicit Option 6 remains the force-refresh path.
+
+## v14.4.4 repair metadata-race posture
+
+v14.4.4 adds no network listener, privilege boundary, dependency, global WSL policy writer, or broader destructive scope. The repair-only change replaces recursive metadata mutation on live installer-owned user-data trees with a mount-bounded, non-following walk. A failed `chown`/`chmod` is ignored only when the exact entry has vanished; a still-existing entry remains a hard failure. Nested symlinks are not chmod targets and nested mounts are not crossed.
+
+All v14.4.3 RAM-efficiency and preservation-first uninstall security boundaries remain unchanged, including user ownership of global WSL memory/reclaim policy and `compose.override.yaml`.
+
 ## v14.4.2 documentation/release consistency posture
 
 v14.4.2 changes documentation, version/validation metadata, regression compatibility, and release integrity data only. Installer/runtime privilege, networking, secret handling, and destructive behavior remain unchanged from v14.4.1/v14.4.0.
@@ -128,7 +142,7 @@ Adaptive resource limits are persisted installer policy. They are **per-containe
 
 ## Supply-chain boundary
 
-LatticeVale itself is inspectable source, but selected installation features download third-party software, container images, Git sources, Ubuntu packages, and local AI models. The installer pins important components where practical. Repair performs a bounded periodic refresh of installer-owned prerequisite/Docker packages and selected managed images/builds, while blanket OS-wide and broader upstream source updates remain explicit operations. Upstream compromise and registry/package risks cannot be eliminated by this project.
+LatticeVale itself is inspectable source, but selected installation features download third-party software, container images, Git sources, Ubuntu packages, and local AI models. The installer pins important components where practical. Repair performs a bounded installer-owned prerequisite/Docker-package and selected image/build/source refresh when the bundle changes or the periodic/policy gate is due; it does not perform a blanket OS-wide upgrade or unrestricted upstream update. Upstream compromise and registry/package risks cannot be eliminated by this project.
 
 Before publishing releases, maintainers should:
 

@@ -1,4 +1,4 @@
-> **v14.4.2 quality checklist:** preserve the v14.3.40 documentation split, v14.3.39 shared-Docker/existing-install safety boundary, v14.3.38 Kanban/skill migration, the v14.3.41 rule that normal installer/runtime code never writes global WSL `networkingMode`.
+> **v14.4.6 quality checklist:** preserve all v14.4.3 RAM/uninstaller and earlier ownership boundaries; live metadata repair may ignore only entries that actually vanished; resource audit must use WSL/process-visible CPU count; and a version-only bundle bump must not force managed image/source rebuilds unless the managed-refresh revision/age/legacy-state gate or explicit Option 6 requires it. Direct public 14.4.2→14.4.6 repair must still converge through refresh revision 1→2 and resource policy v2→v3.
 
 ## Summary
 
@@ -18,6 +18,8 @@ For profile/Kanban changes, use arbitrary profile names in tests. Do not assume 
 - [ ] Clean-host reset remains separate, dry-run-first, ownership-gated, and never automatic; normal uninstall does not become more destructive.
 - [ ] Scheduled Task cleanup tolerates heterogeneous/non-Exec action types and never assumes `Execute`/`Arguments`/`WorkingDirectory` exist.
 - [ ] Normal installer/runtime code does not write global WSL `[wsl2] networkingMode`; host-global networking recovery remains explicit, backed up, and reversible.
+- [ ] RAM/resource-policy changes do not silently take ownership of global WSL `memory`/`autoMemoryReclaim`, and user `compose.override.yaml` remains the final override layer.
+- [ ] Normal uninstall fails closed when runtime may still exist but Docker cannot be inspected, and retained unowned tasks/shortcuts keep any support files they still reference.
 - [ ] Persistent user state is preserved unless the change is an explicitly documented destructive recovery action.
 - [ ] User-owned Hermes profile configuration is not rewritten unless ownership is explicitly established.
 - [ ] Valid user-created profile names remain usable as routing targets where supported.

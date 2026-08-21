@@ -1,4 +1,4 @@
-LATTICEVALE v14.4.2 — INSTRUCTIONS
+LATTICEVALE v14.4.6 — INSTRUCTIONS
 
 PURPOSE OF THIS FILE
 This file is the procedural operator guide: what to do, in what order, and how to verify or recover the installation.
@@ -75,6 +75,10 @@ The installer will detect eligible distros, verify WSL2/Ubuntu/architecture/stor
 11. If enabling local AI, choose managed WSL/Docker Ollama or an already-installed native Windows Ollama when offered, then choose models/acceleration as prompted.
 12. Review the complete configuration summary.
 13. Confirm installation.
+
+V14.4.5 REPAIR RACE HARDENING
+During Resume / repair, LatticeVale may reconcile ownership on live installer-owned Hermes/QMD/log trees. SQLite WAL/SHM files and rotated logs can disappear normally while services are active. v14.4.5 tolerates only those exact vanished entries; an ownership or permission failure for a path that still exists remains fatal. Do not manually delete the Hermes data tree to work around this class of error.
+
 14. Let the staged installer finish. If interrupted, rerun the same installer and choose Resume / repair instead of deleting state.
 
 ================================================================================
@@ -84,7 +88,7 @@ The installer will detect eligible distros, verify WSL2/Ubuntu/architecture/stor
 When a managed stack is detected the installer offers:
 
 1. Resume / repair installation
-   Use for an interrupted, incomplete, stale, or partially unhealthy installation. Reuses saved choices and repairs/verifies the existing stack. It may also perform the age-gated managed refresh when due.
+   Use for an interrupted, incomplete, stale, or partially unhealthy installation. Reuses saved choices and repairs/verifies the existing stack. It explicitly repairs stale adaptive runtime/RAM policy and performs the bounded installer-owned component refresh when the periodic age gate is due, the managed-refresh policy revision changes, or legacy refresh state is missing. A bundle-version change alone remains local-first; choose Option 6 to force package/image/source refresh immediately.
 
 2. Change installed components
    Use when you want to enable/disable or change selected LatticeVale features. Unselected configuration scopes are retained from the saved installation. Component removal is designed to preserve associated persistent data unless an explicitly destructive recovery path says otherwise.
@@ -178,6 +182,18 @@ To inspect profiles from the container:
 For a named profile, use Hermes' -p <profile> targeting. Do not assume the secondary profile is named "assistant".
 
 Use installer option 4 when you want the installer to rerun provider/profile setup while preserving the rest of the stack.
+
+================================================================================
+8A. RAM / ADAPTIVE RESOURCE POLICY
+================================================================================
+
+If you selected adaptive CPU/RAM ceilings, v14.4.6 retains resource policy v3. The audit now measures CPUs available to the WSL process using the same effective semantics as `nproc`; this prevents a processor-limited WSL instance from being falsely marked stale merely because the Windows host has more logical CPUs. RAM fingerprint comparison remains exact.
+
+If you selected adaptive CPU/RAM ceilings, v14.4.5 introduced resource policy v3. It derives an aggregate container budget from CPU/RAM actually visible inside WSL, leaves additional host/kernel/Docker headroom on smaller WSL VMs, and applies conservative allocator/Synapse/PostgreSQL memory tuning. These values are ceilings/tuning defaults, not a Windows or WSL global RAM reservation.
+
+Clean installs receive policy v3 directly. Existing adaptive installs are refreshed when the saved resource-policy revision is older or WSL-visible CPU/RAM changes. A user `compose.override.yaml` remains last and authoritative.
+
+LatticeVale does not write global WSL `memory` or `autoMemoryReclaim` for this policy. If you manually manage those values in `%USERPROFILE%\.wslconfig`, they remain your host-wide settings and affect more than this stack.
 
 ================================================================================
 9. KANBAN AND AGENT-MANAGED SKILLS
@@ -303,6 +319,8 @@ Automatic Kanban dispatch and skill writing are real agent capabilities. They ar
 
 NORMAL LATTICEVALE UNINSTALL
 Use the shipped `installer\uninstall.ps1` and read every scope/preservation prompt. Normal uninstall is preservation-first: it does not unregister WSL and should be used when you merely want to remove LatticeVale or retain the distro/stack for recovery.
+
+v14.4.5 intentionally aborts normal uninstall if stack metadata indicates Docker runtime may still exist but the Docker daemon cannot be inspected. Start/repair Docker in the selected distro and rerun the uninstaller; do not work around this by manually deleting Windows integration files first. If an ownership-modified task or shortcut is retained, the uninstaller also retains support files it still references rather than breaking that retained object.
 
 INTENTIONAL FRESH WSL + LATTICEVALE BASELINE
 Use tools\Reset-LatticeVale-CleanHost.ps1 only when you deliberately want an intentionally destructive clean-host rebuild. If `-RemoveWslRuntime` is selected, **ALL WSL distributions registered to the current Windows user are permanently unregistered**, not merely the distro used by LatticeVale. It is separate from `installer\uninstall.ps1` so ordinary uninstall/repair cannot accidentally cross this boundary.

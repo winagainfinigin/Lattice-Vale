@@ -435,8 +435,13 @@ write_latticevale_compose_overlay() {
   # actually enabled. This avoids the old per-service percentage scheme whose
   # theoretical maxima could substantially overcommit a small WSL VM.
   local reserve_pct reserve_mib budget_mib
-  if (( mem_mib <= 6144 )); then reserve_pct=25
-  elif (( mem_mib <= 12288 )); then reserve_pct=20
+  # v14.4.3 RAM-efficiency patch: leave a larger non-container reserve on
+  # memory-constrained WSL VMs. Container limits are ceilings, not allocations, but
+  # tighter aggregate ceilings prevent burst workloads from needlessly ballooning the
+  # WSL VM and leave Windows/Docker/kernel page-cache headroom.
+  if (( mem_mib <= 6144 )); then reserve_pct=30
+  elif (( mem_mib <= 12288 )); then reserve_pct=25
+  elif (( mem_mib <= 24576 )); then reserve_pct=20
   else reserve_pct=15
   fi
   reserve_mib=$((mem_mib*reserve_pct/100))
@@ -446,10 +451,24 @@ write_latticevale_compose_overlay() {
   (( budget_mib >= 384 )) || { echo "WSL exposes only ${mem_mib} MiB RAM, leaving too little memory for a safe adaptive LatticeVale container budget." >&2; return 1; }
 
   local hermes_cpu heavy_cpu medium_cpu light_cpu
+  local malloc_arena_max synapse_cache_factor pg_shared_buffers
   hermes_cpu=$(((cpus*3+3)/4)); (( hermes_cpu < 1 )) && hermes_cpu=1; (( hermes_cpu > cpus )) && hermes_cpu=$cpus
   heavy_cpu=$cpus
   medium_cpu=$(((cpus+1)/2)); (( medium_cpu < 1 )) && medium_cpu=1
   light_cpu=$(((cpus+3)/4)); (( light_cpu < 1 )) && light_cpu=1
+
+  # Conservative application-level RAM defaults layered on top of hard ceilings.
+  # Synapse documents SYNAPSE_CACHE_FACTOR as its supported cache/RAM tradeoff.
+  # PostgreSQL typically defaults shared_buffers to 128MB; 64MB is appropriate for
+  # these local stores on smaller WSL VMs. MALLOC_ARENA_MAX limits glibc allocator
+  # arenas and reduces RSS growth from fragmentation in long-lived Python services.
+  if (( mem_mib <= 6144 )); then
+    malloc_arena_max=2; synapse_cache_factor=0.25; pg_shared_buffers=64MB
+  elif (( mem_mib <= 12288 )); then
+    malloc_arena_max=2; synapse_cache_factor=0.35; pg_shared_buffers=64MB
+  else
+    malloc_arena_max=4; synapse_cache_factor=0.50; pg_shared_buffers=128MB
+  fi
 
   declare -A mem_limits=()
   local resource_plan active_count=0
@@ -510,10 +529,10 @@ PY_RESOURCE_PLAN
     {
       echo 'services:'
       if [[ "$limits" == true ]]; then
-        printf '  hermes:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$hermes_cpu" "${mem_limits[hermes]}"
+        printf '  hermes:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$hermes_cpu" "${mem_limits[hermes]}" "$malloc_arena_max"
         if [[ "$(opt_bool matrix)" == true ]]; then
-          printf '  synapse-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$medium_cpu" "${mem_limits[synapse-db]}"
-          printf '  synapse:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$medium_cpu" "${mem_limits[synapse]}"
+          printf '  synapse-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "shared_buffers=%s"]\n' "$medium_cpu" "${mem_limits[synapse-db]}" "$pg_shared_buffers"
+          printf '  synapse:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n      SYNAPSE_CACHE_FACTOR: "%s"\n' "$medium_cpu" "${mem_limits[synapse]}" "$malloc_arena_max" "$synapse_cache_factor"
         fi
         if [[ "$(opt_bool searxng)" == true ]]; then
           printf '  searxng-valkey:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$light_cpu" "${mem_limits[searxng-valkey]}"
@@ -544,10 +563,10 @@ PY_RESOURCE_PLAN
           fi
         fi
         if [[ "$(opt_bool honcho)" == true ]]; then
-          printf '  honcho-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$medium_cpu" "${mem_limits[honcho-db]}"
+          printf '  honcho-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=%s"]\n' "$medium_cpu" "${mem_limits[honcho-db]}" "$pg_shared_buffers"
           printf '  honcho-redis:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$light_cpu" "${mem_limits[honcho-redis]}"
-          printf '  honcho-api:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$medium_cpu" "${mem_limits[honcho-api]}"
-          printf '  honcho-deriver:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$medium_cpu" "${mem_limits[honcho-deriver]}"
+          printf '  honcho-api:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$medium_cpu" "${mem_limits[honcho-api]}" "$malloc_arena_max"
+          printf '  honcho-deriver:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$medium_cpu" "${mem_limits[honcho-deriver]}" "$malloc_arena_max"
         fi
       elif managed_ollama_enabled; then
         echo '  ollama:'
@@ -577,14 +596,60 @@ PY_RESOURCE_PLAN
   [[ -s compose.override.yaml ]] && compose_files+=':compose.override.yaml'
   set_env .env COMPOSE_FILE "$compose_files"
   if [[ "$limits" == true ]]; then
-    printf 'POLICY_VERSION=2\nCPUS=%s\nMEM_MIB=%s\nRESERVE_MIB=%s\nBUDGET_MIB=%s\n' "$cpus" "$mem_mib" "$reserve_mib" "$budget_mib" > .latticevale-resource-state
+    printf 'POLICY_VERSION=3\nCPUS=%s\nMEM_MIB=%s\nRESERVE_MIB=%s\nBUDGET_MIB=%s\n' "$cpus" "$mem_mib" "$reserve_mib" "$budget_mib" > .latticevale-resource-state
     chmod 0600 .latticevale-resource-state
-    echo "Adaptive container ceilings: WSL CPUs=$cpus, RAM=${mem_mib}MiB, reserved=${reserve_mib}MiB, container budget=${budget_mib}MiB across ${active_count} enabled services; user compose.override.yaml is applied last."
+    echo "Adaptive container ceilings: WSL CPUs=$cpus, RAM=${mem_mib}MiB, reserved=${reserve_mib}MiB, container budget=${budget_mib}MiB across ${active_count} enabled services; RAM-efficiency tuning: malloc arenas=${malloc_arena_max}, Synapse cache factor=${synapse_cache_factor}, PostgreSQL shared_buffers=${pg_shared_buffers}; user compose.override.yaml is applied last."
   else
     rm -f .latticevale-resource-state
     echo 'Adaptive container ceilings: disabled; any existing user compose.override.yaml remains authoritative.'
   fi
   echo "Ollama acceleration resolved: $accel"
+}
+
+verify_adaptive_runtime_policy() {
+  [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
+  local cpus mem_mib saved_version saved_cpus saved_mem compose_selector overlay
+  cpus="$(nproc 2>/dev/null || true)"
+  mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
+  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 && "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || return 1
+  [[ -s .latticevale-resource-state && ! -L .latticevale-resource-state ]] || return 1
+  saved_version="$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_cpus="$(sed -n 's/^CPUS=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_mem="$(sed -n 's/^MEM_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  [[ "$saved_version" == 3 && "$saved_cpus" == "$cpus" && "$saved_mem" == "$mem_mib" ]] || return 1
+  [[ -s compose.latticevale.yaml && ! -L compose.latticevale.yaml ]] || return 1
+  overlay="$(cat compose.latticevale.yaml 2>/dev/null)" || return 1
+  grep -q 'MALLOC_ARENA_MAX:' <<<"$overlay" || return 1
+  if [[ "$(opt_bool matrix)" == true ]]; then
+    grep -q 'SYNAPSE_CACHE_FACTOR:' <<<"$overlay" || return 1
+    grep -q 'shared_buffers=' <<<"$overlay" || return 1
+  fi
+  if [[ "$(opt_bool honcho)" == true ]]; then
+    grep -q 'max_connections=200' <<<"$overlay" || return 1
+    grep -q 'shared_buffers=' <<<"$overlay" || return 1
+  fi
+  compose_selector="$(sed -n 's/^COMPOSE_FILE=//p' .env 2>/dev/null | head -n1)"
+  [[ ":$compose_selector:" == *':compose.latticevale.yaml:'* ]] || return 1
+  return 0
+}
+
+repair_runtime_policy_reconcile() {
+  [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
+  if verify_adaptive_runtime_policy; then
+    echo 'Adaptive runtime/RAM policy is already current.'
+    return 0
+  fi
+  local accel=cpu
+  if managed_ollama_enabled; then accel="$(resolve_ollama_acceleration)" || return 1; fi
+  echo 'Adaptive runtime/RAM policy is stale or incomplete; regenerating the installer-owned overlay from the CPU/RAM currently visible to WSL.'
+  write_latticevale_compose_overlay "$accel" true
+  verify_adaptive_runtime_policy || { echo 'Adaptive runtime/RAM policy regeneration completed but failed live verification.' >&2; return 1; }
+  # The overlay is persistent configuration, but existing containers do not consume
+  # changed mem_limit/environment/command values until Compose reconciles them. Mark
+  # the owning runtime stages pending so Resume / repair cannot report success with a
+  # correct file on disk but stale live containers.
+  state_mark infrastructure pending 'adaptive runtime/RAM policy changed; selected infrastructure containers require Compose reconciliation'
+  state_mark reconcile pending 'adaptive runtime/RAM policy changed; complete stack requires Compose reconciliation'
 }
 
 choose_ollama_context_length() {
@@ -1105,7 +1170,7 @@ complete_repair_package_refresh() {
   if [[ "$(opt_bool forceManagedUpdate)" == true ]]; then
     echo 'Explicit Update / repair managed package/image/source refresh completed. Future ordinary repairs return to the normal age-gated refresh policy.'
   else
-    echo 'Periodic managed package/image refresh completed; the next automatic repair refresh is age-gated by compatibility.conf.'
+    echo 'Managed package/image/source refresh completed; ordinary repairs return to the periodic compatibility.conf age/policy gate. A bundle-version change alone does not force another managed component refresh.'
   fi
 }
 
@@ -4576,6 +4641,7 @@ fi
 # migrated only after live verification, while explicit recovery flags force their stages.
 assert_docker_namespace_safe
 run_stage prepare_config 'Prepare installer-owned configuration' verify_prepare_config stage_prepare_config
+run_uncheckpointed_repair_step repair_runtime_policy 'Reconcile adaptive runtime/RAM policy' repair_runtime_policy_reconcile
 run_uncheckpointed_repair_step repair_storage_maintenance 'Repair age/storage drift and reclaim LatticeVale-owned disposable cache' repair_storage_maintenance
 run_stage infrastructure 'Start and verify selected supporting infrastructure' verify_infrastructure stage_infrastructure
 run_uncheckpointed_repair_step repair_database_maintenance 'Maintain aged installer-managed databases safely' repair_database_maintenance
@@ -4590,6 +4656,12 @@ run_stage integrations 'Apply and verify Hermes integrations' verify_integration
 run_stage reconcile 'Reconcile and health-check the complete Docker stack' verify_reconcile stage_reconcile
 run_stage kanban_gateway 'Initialize Kanban and reload the Hermes gateway' verify_kanban_gateway stage_kanban_gateway
 run_stage finalize 'Write final installer metadata' verify_finalize stage_finalize
+if ! verify_adaptive_runtime_policy; then
+  CURRENT_STAGE=repair_runtime_policy
+  state_mark repair_runtime_policy broken 'adaptive runtime/RAM policy is still stale or incomplete after repair'
+  echo 'Final repair verification failed: adaptive runtime/RAM policy is still stale or incomplete. The installer will not report success while runtimePolicy remains PARTIAL.' >&2
+  exit 1
+fi
 state_finish
 
 echo

@@ -20,7 +20,11 @@ for forbidden in ('repair_user_tree data/synapse-db','repair_user_tree data/honc
                   'chown -R "$linux_uid:$linux_gid" "$stack_dir"'):
     assert forbidden not in boot, forbidden
 assert 'data/synapse-db, data/honcho-db, and data/ollama' in boot
-assert 'chown -hR -P --preserve-root' in boot
+assert 'find -P "$path" -xdev -ignore_readdir_race -print0' in boot
+assert 'chown -h "$linux_uid:$linux_gid" -- "$item"' in boot
+assert 'if [[ ! -e "$item" && ! -L "$item" ]]; then' in boot
+assert 'if [[ ! -L "$item" ]]; then' in boot
+assert 'chown -hR -P --preserve-root' not in boot
 assert 'Selected Ubuntu user cannot write required installer paths:' in boot
 assert 'verify_write_dirs=(' in boot
 assert 'verify_write_files=(' in boot

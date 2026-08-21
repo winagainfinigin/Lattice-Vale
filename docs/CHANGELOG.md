@@ -1,5 +1,50 @@
 # Changelog
 
+## 14.4.6 - 2026-08-20
+
+- Fixes `state-audit.py` adaptive-resource CPU fingerprinting on processor-limited WSL instances.
+- Uses process-visible CPU affinity (`os.sched_getaffinity(0)`) first, then `nproc`, matching the CPU semantics used by the policy-v3 generator and `manage.sh` refresh path.
+- Prevents false `runtimePolicy PARTIAL` / `NEEDS_REPAIR` when the Windows host exposes more logical CPUs than WSL is configured to use.
+- Keeps RAM fingerprint comparison exact; the observed failure reproduced with identical saved/live RAM and was CPU-count divergence, not memory jitter.
+- Refines v14.4.5 managed-update behavior so a bundle-version change alone no longer forces APT refreshes, image pulls, or QMD/Honcho rebuilds. Automatic Resume / repair refresh is controlled by the 30-day gate, `MANAGED_REPAIR_REFRESH_REVISION`, missing legacy refresh state, or explicit Option 6.
+- Keeps `INSTALLER_VERSION` in successful/pending refresh markers for provenance, but a pending marker at the current refresh revision can resume across a version-only bundle change without repeating completed root package work. A revision mismatch still reruns the bounded root phase.
+- Preserves direct public 14.4.2→14.4.6 upgrade behavior: 14.4.2 uses refresh revision 1/resource policy v2, while 14.4.6 uses revision 2/policy v3, so Option 1 performs the required cumulative managed refresh and RAM-policy reconciliation. A recently refreshed 14.4.5→14.4.6 upgrade remains local-first unless another real trigger applies.
+- Adds deterministic regression coverage for both the CPU-count mismatch and the 14.4.2-vs-14.4.5 upgrade-trigger distinction.
+- Inherits v14.4.5 runtime-policy convergence and all prior preservation boundaries.
+
+## 14.4.5 - 2026-08-20
+
+- Fixes Resume / repair leaving adaptive RAM/resource policy v3 `PARTIAL` when an older completed `prepare_config` checkpoint caused the policy generator to be skipped.
+- Adds an explicit uncheckpointed repair-time runtime-policy reconciliation that verifies the policy-v3 CPU/RAM fingerprint and RAM-specific allocator, Synapse-cache, and PostgreSQL-buffer controls.
+- When the adaptive overlay changes, marks infrastructure and complete-stack reconciliation pending so Compose recreates affected containers and the new limits/environment/commands become live rather than merely existing on disk.
+- Adds a final fail-closed runtime-policy verification so configuration cannot report success while the selected adaptive policy is still stale or incomplete.
+- Corrects `manage.sh` startup refresh to compare against policy version 3 rather than the obsolete policy-version-2 constant.
+- Improves managed component repair semantics: Resume / repair from a different LatticeVale bundle now triggers the bounded installer-owned package/image/source refresh immediately, while repeated repairs on the same bundle remain local-first until the periodic refresh window/policy requires an update. Explicit user-owned image/source and `compose.override.yaml` values remain preserved.
+- Advances managed repair refresh-policy revision to 2 and adds v14.4.5 regression coverage for runtime-policy convergence, live-container reconciliation, bundle-version-driven component refresh, and override ordering.
+- Makes interrupted managed-refresh markers bundle-aware, so resuming an old pending refresh with a newer bundle safely reruns the bounded root package phase instead of assuming the older bundle already satisfied it.
+- **Superseded in v14.4.6:** the version-only refresh predicate from this historical release is replaced by the explicit refresh-revision/age/force model; the v14.4.5 runtime-policy convergence remains current.
+- Makes `./manage.sh restart` reconcile Compose when its pre-restart adaptive-policy refresh changed the overlay, preventing a regenerated RAM policy from remaining file-only until a later `up`.
+- Retains v14.4.4 live metadata-race hardening and all v14.4.3 RAM/uninstaller preservation behavior.
+
+## 14.4.4 - 2026-08-20
+
+- Fixes Resume / repair aborts caused by transient SQLite WAL/SHM or rotated-log entries disappearing while bootstrap ownership/permission reconciliation is running.
+- Replaces the live-tree recursive `chown -R`/`chmod -R` metadata repair with a mount-bounded, symlink-safe snapshot walk that tolerates a failure only when that exact entry has vanished; real ownership/permission failures remain fatal.
+- Keeps clean installs unchanged while making existing-stack repair safe when Hermes or another selected service is still writing installer-owned user-data trees.
+- Adds deterministic regression coverage for the observed `kanban.db-shm` disappearance race and for fail-closed handling of a still-existing entry whose ownership cannot be changed.
+- Advances current release metadata, documentation, CI checks, and the exact source manifest to v14.4.4.
+
+## 14.4.3 - 2026-08-20
+
+- Adds adaptive resource policy v3 for lower avoidable RAM pressure while preserving active-work headroom. WSL-visible memory reserves are increased on constrained hosts, long-lived glibc/Python services receive bounded `MALLOC_ARENA_MAX`, Synapse receives RAM-scaled `SYNAPSE_CACHE_FACTOR`, and managed PostgreSQL stores receive RAM-scaled `shared_buffers`.
+- Preserves Honcho PostgreSQL's existing `max_connections=200`; the RAM patch changes only its buffer tuning.
+- Applies policy v3 directly on clean installs and migrates enabled older adaptive overlays on repair/start when policy revision or WSL-visible CPU/RAM changes. User `compose.override.yaml` remains the final override layer.
+- Deliberately does not write global WSL `memory` or `autoMemoryReclaim` settings; those remain host/user-owned.
+- Hardens normal uninstall so it refuses a partial removal when Docker runtime may still exist but the Docker daemon is unavailable.
+- Preserves stack-specific shortcut/task helper/config files when an unremoved Windows shortcut or scheduled task still references them, rather than breaking retained state after an ownership check fails.
+- Restores installer-owned `OLLAMA_HOST` with an environment-change broadcast, tightens firewall-removal ownership checks, reads uninstall metadata through the root WSL context, supports nonstandard normal Linux home paths when checking for other LatticeVale stacks, and removes the shared dockerd log only when no other recognizable stack remains.
+- Updates current documentation, release checks, regression compatibility, and source integrity data for v14.4.3.
+
 ## 14.4.2 - 2026-08-20
 
 - Documentation/release-consistency patch over v14.4.1; installer and stack-runtime behavior are unchanged.

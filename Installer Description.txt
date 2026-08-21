@@ -1,4 +1,4 @@
-LATTICEVALE v14.4.2 — INSTALLER DESCRIPTION
+LATTICEVALE v14.4.6 — INSTALLER DESCRIPTION
 
 WHAT THIS FILE IS
 This is the plain-language capability and configuration guide. It explains what LatticeVale installs, what it configures automatically, what Hermes can do after installation, and which decisions may still belong to the user.
@@ -186,7 +186,9 @@ If a forced GPU mode is no longer valid after hardware/driver changes, use repai
 
 J. RESOURCE LIMITS — REVIEW FOR YOUR MACHINE
 
-LatticeVale can generate adaptive per-container CPU/RAM ceilings from resources visible inside WSL. These are ceilings, not reservations, and they do not replace Windows/WSL global resource policy.
+LatticeVale can generate adaptive per-container CPU/RAM ceilings from resources visible inside WSL. In v14.4.6, read-only audit CPU fingerprinting uses the CPUs actually available to the WSL process (matching the generator/`nproc` view) rather than a potentially broader host logical-CPU count. This keeps a valid processor-limited WSL policy from being falsely marked stale; genuine CPU or RAM allocation changes are still detected.
+
+LatticeVale can generate adaptive per-container CPU/RAM ceilings from resources visible inside WSL. In v14.4.5, adaptive policy v3 leaves more non-container headroom on smaller WSL VMs and adds conservative glibc allocator, Synapse-cache, and PostgreSQL-buffer tuning to reduce avoidable resident-memory pressure. Clean installs receive policy v3 directly and repair/start migrates enabled older overlays when needed. These are ceilings/tuning defaults, not reservations, and they do not replace Windows/WSL global resource policy. LatticeVale does not write global WSL `memory` or `autoMemoryReclaim`; user `compose.override.yaml` remains the final service-level override.
 
 Users may still want to tune:
 - WSL CPU/RAM allocation outside LatticeVale;
@@ -219,7 +221,11 @@ These are not mandatory for Hermes itself. Users can leave them disabled when th
 
 N. UPDATE POLICY — CHOOSE CONTROLLED VS ADVANCED
 
-Ordinary Resume / repair is preservation-first and may perform the managed age-gated refresh when due.
+
+V14.4.5 REPAIR CONVERGENCE AND INHERITED METADATA HARDENING
+Resume / repair treats stale adaptive runtime/RAM policy as an explicit repair obligation even when an older prepare-config checkpoint is already complete. When the installer-owned resource overlay changes, infrastructure and full-stack Compose reconciliation are rerun so the settings become live, and final success is refused while runtime policy remains stale. Managed package/image/source refresh is controlled by the 30-day gate, `MANAGED_REPAIR_REFRESH_REVISION`, missing legacy refresh state, or explicit Update / repair; a bundle-version change alone does not force another pull/build cycle.
+
+The inherited v14.4.4 root-assisted ownership reconciliation remains safe against transient live-file disappearance: the installer snapshots the managed tree without following symlinks or crossing nested mounts, ignores a failed metadata operation only when that exact path has vanished, and preserves fail-closed behavior for genuine still-existing filesystem failures.
 
 `Update / repair installer-managed software` forces the current LatticeVale bundle's tested/declared managed software refresh after a required managed backup. This is the preferred controlled updater.
 
@@ -273,7 +279,7 @@ Advanced recovery is intentionally separate because some recovery actions can re
 7. NORMAL UNINSTALL VS. CLEAN-HOST RESET
 ================================================================================
 
-Normal `installer\uninstall.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites.
+Normal `installer\uninstall.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites. v14.4.5 refuses to continue when Docker runtime may still exist but the Docker daemon is unavailable, because deleting only the Windows side could leave restartable containers behind. If an ownership-modified scheduled task or shortcut is retained, support files it still references are retained too. Installer-owned direct-Ollama environment restoration is applied only when the recorded value is still owned and is followed by a Windows environment-change broadcast.
 
 `tools\Reset-LatticeVale-CleanHost.ps1` is a separate administrator utility for a different goal: intentionally returning a host to a fresh WSL/LatticeVale baseline. It is never called automatically by install, repair, update, verify, or normal uninstall. It defaults to a dry run and requires both `-Execute` and the exact interactive confirmation `CLEAN-RESET`.
 

@@ -1,10 +1,10 @@
-# LatticeVale v14.4.2 — Complete Features and Install Options Reference
+# LatticeVale v14.4.6 — Complete Features and Install Options Reference
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.4.2 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.4.6 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.2 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.6 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -505,14 +505,17 @@ Saved forced modes that become invalid after hardware/driver changes are reconci
 When enabled LatticeVale:
 
 - measures CPU/RAM actually visible inside WSL
-- reserves WSL/Docker headroom
+- reserves WSL/Docker/Windows-facing headroom with larger reserves on smaller WSL VMs
 - computes a safe managed container memory budget
 - assigns ceilings only to enabled services
-- recalculates when relevant WSL-visible resources change
+- applies conservative allocator tuning (`MALLOC_ARENA_MAX`) to long-lived glibc/Python services
+- scales Synapse's supported `SYNAPSE_CACHE_FACTOR` down on constrained WSL VMs
+- uses 64 MiB PostgreSQL `shared_buffers` on <=12 GiB WSL VMs and 128 MiB above that, while retaining Honcho PostgreSQL `max_connections=200`
+- recalculates when relevant WSL-visible resources change or an older adaptive-policy revision must be migrated
 
-These are **ceilings, not reservations**, and are not a global WSL memory cap.
+Policy v3 reserves 30% of WSL-visible RAM on <=6 GiB, 25% on <=12 GiB, 20% on <=24 GiB, and 15% above that, with bounded minimum/maximum reserve values. These are **ceilings, not reservations**, and are not a global WSL memory cap.
 
-A user `compose.override.yaml` is applied last and remains authoritative.
+LatticeVale does not set global WSL `memory` or `autoMemoryReclaim` for this feature. Those are host/user-owned WSL policies. A user `compose.override.yaml` is applied last and remains authoritative.
 
 ## 3.20 Ubuntu Pro for WSL
 
@@ -638,12 +641,14 @@ Behavior:
 - repairs/reconciles failed, incomplete or stale stages
 - preserves persistent application/user data
 - can apply required managed integration-policy migrations
-- performs targeted age-gated managed refresh when due
-- does not blindly rerun every stage just because the installer version changed
+- explicitly reconciles stale/missing adaptive runtime/RAM policy and applies changed Compose settings to live containers
+- refreshes installer-owned package/image/source state when the 30-day gate is due, the managed-refresh policy revision changes, legacy refresh state is missing, or explicit Update / repair forces it
+- performs the targeted periodic managed refresh when the 30-day gate is due or the refresh-policy revision changes
+- does not blindly rerun unrelated healthy stages just because the installer version changed
 
-Current periodic managed refresh window: **30 days**.
+Current periodic managed refresh window: **30 days**. `MANAGED_REPAIR_REFRESH_REVISION` is the explicit compatibility trigger for a release that requires immediate managed package/image/source convergence. A bundle-version change alone does not force a refresh.
 
-Resume/repair is preservation-first but is not guaranteed to be completely update-free when the managed refresh window/policy requires convergence.
+Resume/repair is preservation-first but is not guaranteed to be update-free: it performs bounded installer-owned component refresh when the age/revision/legacy-state trigger applies, while preserving explicit user-owned overrides. Option 6 forces the current bundle's managed refresh immediately.
 
 ## 5.2 Change installed components
 
@@ -781,7 +786,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.4.2
+# 8. Current managed software/source pins documented by v14.4.6
 
 The release's declared managed references include:
 
@@ -848,7 +853,7 @@ Current normal installer flows **do not set or switch `[wsl2] networkingMode`**.
 
 # 11. WSL networking behavior
 
-Current v14.4.2 policy:
+Current v14.4.6 policy:
 
 - discover active topology
 - preserve working NAT/default/VirtioProxy-capable paths
@@ -907,6 +912,10 @@ It can:
 - stop/remove LatticeVale runtime state
 - remove installer-owned Windows integrations
 - optionally perform a full stack-directory purge after explicit `PURGE` confirmation
+
+Before removing Windows integration state, v14.4.5 requires Docker runtime cleanup to be inspectable when stack metadata indicates runtime may still exist. If Docker is unavailable in that case, uninstall stops rather than performing a partial removal.
+
+Ownership failures are preservation boundaries: a same-name task/shortcut that no longer proves LatticeVale ownership is left untouched, and helper/config files still referenced by retained tasks/shortcuts are also preserved. Installer-owned direct-Ollama `OLLAMA_HOST` restoration broadcasts the Windows environment change.
 
 By default/policy it preserves shared prerequisites and externally/user-owned applications such as:
 
@@ -1021,7 +1030,7 @@ Current primary documentation and current source take precedence over archived v
 
 # 18. Documentation files reviewed for this consolidation
 
-## v14.4.0 audit source set, mapped to the current v14.4.2 layout (28)
+## v14.4.0 audit source set, mapped to the current v14.4.6 layout (28)
 
 - `.github/PULL_REQUEST_TEMPLATE.md`
 - `docs/AUDIT-PATCH-NOTES.md`

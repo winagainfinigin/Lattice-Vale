@@ -786,6 +786,7 @@ start_selected_matrix_profile_gateways() {
 }
 
 refresh_adaptive_resource_policy() {
+  RESOURCE_POLICY_CHANGED=false
   [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
   local cpus mem_mib saved_cpus saved_mem saved_version
   cpus="$(nproc 2>/dev/null || true)"
@@ -794,9 +795,10 @@ refresh_adaptive_resource_policy() {
   saved_version="$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_cpus="$(sed -n 's/^CPUS=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_mem="$(sed -n 's/^MEM_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
-  if [[ "$saved_version" != 2 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then
+  if [[ "$saved_version" != 3 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then
     echo "WSL resource allocation changed or has not been fingerprinted (CPUs=${cpus}, RAM=${mem_mib}MiB); recalculating adaptive LatticeVale ceilings."
     timeout --foreground --kill-after=10s 90s ./configure-stack.sh --refresh-resource-policy
+    RESOURCE_POLICY_CHANGED=true
   fi
 }
 
@@ -849,8 +851,8 @@ case "$cmd" in
   audit) python3 ./state-audit.py --stack . ;;
   repair-info)
     echo 'Rerun Install-LatticeVale.ps1 from the Windows bundle.'
-    echo 'Resume / repair preserves completed work and reruns failed/incomplete/stale stages; it also performs the age-gated managed refresh when due.'
-    echo "Choose Update / repair installer-managed software when you want to force this bundle's declared component versions/channels now instead of waiting for the periodic refresh window."
+    echo 'Resume / repair preserves completed work and reruns failed/incomplete/stale stages; it refreshes installer-owned components when the periodic gate is due or the managed-refresh policy revision changes. A bundle-version change alone stays local-first.'
+    echo "Choose Update / repair installer-managed software when you want to force the current bundle's declared component versions/channels immediately, including after a version-only bundle change that does not advance the managed-refresh policy revision."
     echo './manage.sh update is a separate advanced upstream-refresh command: it pulls the currently configured image refs and may advance Honcho to repository HEAD, so it is not equivalent to the tested bundle updater.' ;;
   start) ensure_docker_for_user; refresh_adaptive_resource_policy; control_windows_native_services start; docker compose up -d --pull never --no-build; start_selected_matrix_profile_gateways; control_windows_bridge start; status ;;
   stop) docker compose stop; control_windows_bridge stop; control_windows_native_services stop ;;
@@ -859,6 +861,10 @@ case "$cmd" in
   restart)
     refresh_adaptive_resource_policy
     control_windows_native_services start
+    if [[ "${RESOURCE_POLICY_CHANGED:-false}" == true ]]; then
+      echo 'Adaptive resource policy changed; reconciling Compose before restart so new memory/environment/command settings become live.'
+      docker compose up -d --pull never --no-build
+    fi
     if [[ -n "${2:-}" ]]; then docker compose restart "$2"; else docker compose restart; fi
     if [[ -z "${2:-}" || "${2:-}" == hermes ]]; then start_selected_matrix_profile_gateways; fi
     control_windows_bridge start ;;

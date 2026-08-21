@@ -38,6 +38,26 @@ def run(cmd: list[str], cwd: Path | None = None, timeout: int = 8) -> tuple[int,
         return 127, ""
 
 
+def visible_cpu_count() -> int:
+    """Return CPUs available to this WSL process, matching `nproc` semantics.
+
+    os.cpu_count() can report the host/logical CPU total even when WSL or the process
+    is constrained by processor allocation/affinity. The adaptive resource generator
+    fingerprints `nproc`, so audit must compare against the same process-visible CPU
+    set or it can falsely mark a freshly generated policy as stale.
+    """
+    try:
+        affinity = os.sched_getaffinity(0)
+        if affinity:
+            return len(affinity)
+    except (AttributeError, OSError):
+        pass
+    rc, out = run(["nproc"])
+    if rc == 0 and out.isdigit() and int(out) > 0:
+        return int(out)
+    return os.cpu_count() or 0
+
+
 def read_json(path: Path, default: Any) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
@@ -666,6 +686,12 @@ def main() -> int:
                 overlay_text = overlay_path.read_text(encoding="utf-8", errors="replace")
                 if "cpus:" not in overlay_text or "mem_limit:" not in overlay_text:
                     policy_issues.append("adaptive resource overlay is incomplete")
+                if "MALLOC_ARENA_MAX:" not in overlay_text:
+                    policy_issues.append("adaptive RAM-efficiency allocator tuning is missing")
+                if selected("matrix") and "SYNAPSE_CACHE_FACTOR:" not in overlay_text:
+                    policy_issues.append("adaptive Synapse cache tuning is missing")
+                if (selected("matrix") or selected("honcho")) and "shared_buffers=" not in overlay_text:
+                    policy_issues.append("adaptive PostgreSQL shared-buffer tuning is missing")
             except Exception:
                 policy_issues.append("adaptive resource overlay is unreadable")
         if "compose.latticevale.yaml" not in compose_selector.split(":"):
@@ -679,14 +705,14 @@ def main() -> int:
                 for line in resource_state.read_text(encoding="utf-8", errors="replace").splitlines():
                     if "=" in line:
                         k,v=line.split("=",1); values[k.strip()]=v.strip()
-                current_cpus = os.cpu_count() or 0
+                current_cpus = visible_cpu_count()
                 mem_kib = 0
                 for line in Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace").splitlines():
                     if line.startswith("MemTotal:"):
                         mem_kib=int(line.split()[1]); break
                 current_mem_mib=mem_kib//1024
-                if values.get("POLICY_VERSION") != "2" or str(current_cpus) != values.get("CPUS") or str(current_mem_mib) != values.get("MEM_MIB"):
-                    policy_issues.append("WSL CPU/RAM allocation changed since adaptive ceilings were generated; next LatticeVale start or repair will recalculate them")
+                if values.get("POLICY_VERSION") != "3" or str(current_cpus) != values.get("CPUS") or str(current_mem_mib) != values.get("MEM_MIB"):
+                    policy_issues.append("adaptive resource policy revision or WSL CPU/RAM allocation changed; next LatticeVale start or repair will recalculate the overlay")
             except Exception:
                 policy_issues.append("adaptive resource fingerprint is unreadable")
 

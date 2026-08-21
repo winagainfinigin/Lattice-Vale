@@ -1,4 +1,16 @@
-# v14.4.2 documentation/release consistency audit
+# v14.4.6 adaptive resource fingerprint audit
+
+v14.4.6 fixes a false-stale runtime-policy report found on a WSL instance configured for 4 processors on an 8-logical-CPU Windows host. The adaptive generator and `manage.sh` use `nproc`, which reflects CPUs available to the WSL process, but `state-audit.py` used Python `os.cpu_count()`, which can report a broader host/logical count. That made `.latticevale-resource-state` (`CPUS=4`) disagree with audit even when the live WSL CPU count and RAM fingerprint exactly matched. Audit now derives process-visible CPU count from `os.sched_getaffinity(0)`, falls back to `nproc`, and only then to `os.cpu_count()`. RAM comparison remains exact; this patch does not hide real WSL memory-allocation drift. v14.4.6 also removes bundle-version-only managed refresh: `INSTALLER_VERSION` remains provenance, while the 30-day gate, `MANAGED_REPAIR_REFRESH_REVISION`, missing legacy state, or explicit Option 6 determine whether package/image/source refresh runs. This preserves direct public 14.4.2→14.4.6 convergence through revision 1→2 and policy v2→v3 while avoiding redundant 14.4.5→14.4.6 rebuilds.
+
+# v14.4.5 repair runtime-policy/update convergence audit
+
+v14.4.5 fixes the repair-convergence gap found during a real v14.4.4 Resume / repair: adaptive resource policy v3 could remain `PARTIAL` because the generator lived in `prepare_config` while an older completed checkpoint allowed that stage to be skipped. Repair now performs an explicit uncheckpointed adaptive runtime-policy reconciliation, fingerprints policy v3 against current WSL CPU/RAM, verifies the RAM-specific overlay controls, marks infrastructure/full-stack reconciliation pending when the overlay changes, and fails final configuration rather than reporting success with stale runtime policy. v14.4.5 also briefly introduced bundle-version-driven managed refresh; v14.4.6 supersedes that trigger with the explicit refresh-revision/age/force model while preserving user-owned overrides.
+
+v14.4.4's metadata-race hardening remains inherited: root-assisted reconciliation uses a `find -P -xdev` bounded walk, skips chmod on symlinks, tolerates only an operation failure whose exact path vanished, and remains fatal for still-existing entries.
+
+v14.4.3 adaptive RAM policy v3 and preservation-first uninstaller hardening are inherited unchanged, including Honcho PostgreSQL `max_connections=200`, user-owned global WSL memory policy, final-layer `compose.override.yaml`, Docker-runtime fail-closed uninstall, and retained-task/shortcut support-file preservation.
+
+## v14.4.2 documentation/release consistency audit
 
 v14.4.2 updates documentation, current version/validation metadata, inherited regression compatibility, and release integrity data only. Installer and stack-runtime behavior remain unchanged from v14.4.1/v14.4.0; all inherited safety boundaries remain in force.
 

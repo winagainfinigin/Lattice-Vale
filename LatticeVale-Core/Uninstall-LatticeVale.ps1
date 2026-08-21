@@ -239,6 +239,18 @@ function Get-ArtifactPaths([string]$Name,[string]$User,[string]$StackLinuxPath) 
         StartShortcut=(Join-Path $desktop "Start LatticeVale - $safeName ($safeUser).lnk"); ShutdownShortcut=(Join-Path $desktop "Shut Down LatticeVale - $safeName ($safeUser).lnk")
     }
 }
+function Test-AnyScheduledTaskReferencesPath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    try {
+        foreach ($task in @(Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+            foreach ($a in @($task.Actions)) {
+                $blob=([string]$a.Execute)+' '+([string]$a.Arguments)
+                if ($blob.IndexOf($Path,[StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+            }
+        }
+    } catch { return $true }
+    return $false
+}
 function Remove-TaskIfOwned([string]$TaskName,[string[]]$Needles) {
     $task=Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if (-not $task) { return }
@@ -257,6 +269,24 @@ function Test-ShortcutOwned([string]$Path,[string]$Helper,[string]$Config) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $false }
     try { $s=(New-Object -ComObject WScript.Shell).CreateShortcut($Path); return (([string]$s.Arguments).IndexOf($Helper,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and ([string]$s.Arguments).IndexOf($Config,[StringComparison]::OrdinalIgnoreCase) -ge 0) } catch { return $false }
 }
+function Test-AnyDesktopShortcutReferencesPath([string]$Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    $desktop=[Environment]::GetFolderPath('Desktop')
+    if ([string]::IsNullOrWhiteSpace($desktop) -or -not (Test-Path -LiteralPath $desktop -PathType Container)) { return $false }
+    try {
+        $shell=New-Object -ComObject WScript.Shell
+        $inspectionFailed=$false
+        foreach ($link in @(Get-ChildItem -LiteralPath $desktop -Filter '*.lnk' -File -Recurse -ErrorAction SilentlyContinue)) {
+            try {
+                $shortcut=$shell.CreateShortcut($link.FullName)
+                $blob=([string]$shortcut.TargetPath)+' '+([string]$shortcut.Arguments)
+                if ($blob.IndexOf($Path,[StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+            } catch { $inspectionFailed=$true }
+        }
+        if ($inspectionFailed) { return $true }
+    } catch { return $true }
+    return $false
+}
 function Remove-Shortcuts([object]$Paths) {
     foreach ($p in @($Paths.StartShortcut,$Paths.ShutdownShortcut)) {
         if (Test-Path -LiteralPath $p -PathType Leaf) {
@@ -264,26 +294,54 @@ function Remove-Shortcuts([object]$Paths) {
             else { Write-Warning "Shortcut '$p' is not provably LatticeVale-owned; it was left untouched." }
         }
     }
-    Remove-Item -LiteralPath $Paths.ShortcutConfig,$Paths.ShortcutHelper,$Paths.ShortcutLog -Force -ErrorAction SilentlyContinue
+    $stillReferenced=(Test-AnyDesktopShortcutReferencesPath $Paths.ShortcutHelper) -or (Test-AnyDesktopShortcutReferencesPath $Paths.ShortcutConfig)
+    if ($stillReferenced) {
+        Write-Warning 'A desktop shortcut still references this stack-specific LatticeVale shortcut helper/config, so those supporting files were preserved.'
+    } else {
+        Remove-Item -LiteralPath $Paths.ShortcutConfig,$Paths.ShortcutHelper,$Paths.ShortcutLog -Force -ErrorAction SilentlyContinue
+    }
 }
 function Remove-NativeFirewall([object]$Paths) {
-    if (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) {
+    if ((Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) -and (Get-Command Remove-NetFirewallRule -ErrorAction SilentlyContinue)) {
         foreach ($r in @(Get-NetFirewallRule -Group 'LatticeVale' -ErrorAction SilentlyContinue | Where-Object {([string]$_.Name) -like "LatticeValeNativeBridge-$($Paths.NativeKey)-*"})) { $r | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
     }
     if ((Get-Command Get-NetFirewallHyperVRule -ErrorAction SilentlyContinue) -and (Get-Command Remove-NetFirewallHyperVRule -ErrorAction SilentlyContinue)) {
         foreach ($r in @(Get-NetFirewallHyperVRule -ErrorAction SilentlyContinue | Where-Object {([string]$_.Name) -like "LatticeValeNativeBridge-HyperV-$($Paths.NativeKey)-*"})) { $r | Remove-NetFirewallHyperVRule -ErrorAction SilentlyContinue }
     }
 }
+function Send-LatticeValeEnvironmentChanged {
+    try {
+        if (-not ('LatticeValeEnvironmentBroadcast' -as [type])) {
+            Add-Type -Language CSharp -ErrorAction Stop -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class LatticeValeEnvironmentBroadcast {
+    [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)]
+    public static extern IntPtr SendMessageTimeout(IntPtr hWnd, uint Msg, UIntPtr wParam, string lParam, uint flags, uint timeout, out UIntPtr result);
+}
+'@
+        }
+        $result=[UIntPtr]::Zero
+        [void][LatticeValeEnvironmentBroadcast]::SendMessageTimeout([IntPtr]0xffff,0x1A,[UIntPtr]::Zero,'Environment',2,5000,[ref]$result)
+    } catch { Write-Warning "Restored the Windows environment value, but the environment-change broadcast failed: $($_.Exception.Message)" }
+}
 function Restore-DirectOllamaState([object]$Paths) {
     if (-not (Test-Path -LiteralPath $Paths.DirectState -PathType Leaf)) { return }
     try { $s=Get-Content -LiteralPath $Paths.DirectState -Raw | ConvertFrom-Json } catch { Write-Warning 'Could not parse installer-owned direct Ollama state; leaving environment/firewall state untouched.'; return }
-    if ($s.firewallRuleName) { Get-NetFirewallRule -Name ([string]$s.firewallRuleName) -ErrorAction SilentlyContinue | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
-    if ($s.hyperVFirewallRuleName -and (Get-Command Get-NetFirewallHyperVRule -ErrorAction SilentlyContinue)) { Get-NetFirewallHyperVRule -Name ([string]$s.hyperVFirewallRuleName) -ErrorAction SilentlyContinue | Remove-NetFirewallHyperVRule -ErrorAction SilentlyContinue }
+    if ($s.firewallRuleName -and (Get-Command Get-NetFirewallRule -ErrorAction SilentlyContinue) -and (Get-Command Remove-NetFirewallRule -ErrorAction SilentlyContinue)) {
+        $rule=Get-NetFirewallRule -Name ([string]$s.firewallRuleName) -ErrorAction SilentlyContinue
+        if ($rule -and [string]$rule.Group -eq 'LatticeVale') { $rule | Remove-NetFirewallRule -ErrorAction SilentlyContinue }
+        elseif ($rule) { Write-Warning 'The saved direct-Ollama firewall rule name now belongs to a non-LatticeVale rule, so it was preserved.' }
+    }
+    if ($s.hyperVFirewallRuleName -and (Get-Command Get-NetFirewallHyperVRule -ErrorAction SilentlyContinue) -and (Get-Command Remove-NetFirewallHyperVRule -ErrorAction SilentlyContinue)) {
+        Get-NetFirewallHyperVRule -Name ([string]$s.hyperVFirewallRuleName) -ErrorAction SilentlyContinue | Remove-NetFirewallHyperVRule -ErrorAction SilentlyContinue
+    }
     $target=if ([string]$s.environmentScope -eq 'Machine') {[EnvironmentVariableTarget]::Machine} else {[EnvironmentVariableTarget]::User}
     $current=[Environment]::GetEnvironmentVariable('OLLAMA_HOST',$target)
     if ([string]$current -eq [string]$s.configuredHost) {
         $restore=if ([bool]$s.previousHostWasSet) {[string]$s.previousHost} else {$null}
         [Environment]::SetEnvironmentVariable('OLLAMA_HOST',$restore,$target)
+        Send-LatticeValeEnvironmentChanged
         Write-Info "Restored the pre-LatticeVale OLLAMA_HOST value at $($s.environmentScope) scope. Native Ollama will consume the restored value the next time it is restarted."
     } else { Write-Warning 'OLLAMA_HOST no longer matches the installer-owned value, so the current setting was preserved.' }
     Remove-Item -LiteralPath $Paths.DirectState -Force -ErrorAction SilentlyContinue
@@ -300,7 +358,8 @@ for f in .tailscale-info .windows-native-info install-options.json .install-info
   fi
 done
 '@
-    $r=Invoke-Wsl $Name $User 'bash' @('-lc',$script,'bash',$Stack) 20
+    $r=Invoke-Wsl $Name 'root' 'bash' @('-lc',$script,'bash',$Stack) 20
+    if (-not $r.Success) { throw "Could not read uninstall metadata from '$Stack': $($r.Text)" }
     return $r.Text
 }
 function Get-MetadataBlock([string]$Text,[string]$Name) {
@@ -404,10 +463,27 @@ if [ ! -d "$stack" ]; then exit 0; fi
 cd "$stack" || exit 2
 if [ -x ./manage.sh ] && [ -f .configured ]; then timeout --foreground --kill-after=10s 90s ./manage.sh stop >/dev/null 2>&1 || true; fi
 if [ -x ./native-ollama-relay.sh ]; then ./native-ollama-relay.sh stop >/dev/null 2>&1 || true; fi
-if command -v docker >/dev/null 2>&1 && [ -f compose.yaml ] && timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1; then
-  if ! timeout --foreground --kill-after=10s 120s docker compose down --remove-orphans >/dev/null 2>&1; then
-    echo 'Docker is running, but the LatticeVale Compose runtime could not be removed safely. Stack data was preserved.' >&2
-    exit 4
+if [ -f compose.yaml ]; then
+  runtime_may_exist=false
+  if [ -f .configured ] || [ -f .install-info ]; then runtime_may_exist=true; fi
+  if [ -s .installer-state.json ] && command -v python3 >/dev/null 2>&1; then
+    if python3 - .installer-state.json <<'PY_RUNTIME_EVIDENCE' >/dev/null 2>&1
+import json,sys
+try: d=json.load(open(sys.argv[1],encoding='utf-8'))
+except Exception: raise SystemExit(1)
+st=(d.get('stages') or {}).get('infrastructure') or {}
+raise SystemExit(0 if st.get('status') in ('running','done','broken') else 1)
+PY_RUNTIME_EVIDENCE
+    then runtime_may_exist=true; fi
+  fi
+  if command -v docker >/dev/null 2>&1 && timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1; then
+    if ! timeout --foreground --kill-after=10s 120s docker compose down --remove-orphans >/dev/null 2>&1; then
+      echo 'Docker is running, but the LatticeVale Compose runtime could not be removed safely. Stack data was preserved.' >&2
+      exit 4
+    fi
+  elif [ "$runtime_may_exist" = true ]; then
+    echo 'The selected stack may still have Docker runtime state, but the Docker daemon is unavailable. Refusing a partial uninstall/purge that could leave restartable containers behind. Start/repair Docker, then rerun the uninstaller.' >&2
+    exit 5
   fi
 fi
 if [ "$purge" = true ]; then
@@ -440,14 +516,21 @@ if [ -f "$relay_unit" ] && grep -Fq "$stack/native-ollama-relay.sh" "$relay_unit
 fi
 policy=/etc/apt/apt.conf.d/52hermes-unattended-upgrades
 other_stack=false
-for candidate in /home/*/hermes-stack; do
+while IFS=: read -r candidate_user _ candidate_uid _ _ candidate_home candidate_shell; do
+  case "$candidate_uid" in ''|*[!0-9]*) continue;; esac
+  [ "$candidate_uid" -ge 1000 ] && [ "$candidate_uid" -le 65534 ] || continue
+  case "$candidate_shell" in *nologin|*/false) continue;; esac
+  case "$candidate_home" in /*) ;; *) continue;; esac
+  candidate="${candidate_home%/}/hermes-stack"
   [ -d "$candidate" ] || continue
   [ "$candidate" = "$stack" ] && continue
   if [ -f "$candidate/install-options.json" ] || [ -f "$candidate/.installer-state.json" ] || [ -f "$candidate/.install-info" ] || [ -f "$candidate/.configured" ]; then other_stack=true; break; fi
   if [ -f "$candidate/compose.yaml" ] && [ -f "$candidate/configure-stack.sh" ] && [ -f "$candidate/manage.sh" ]; then other_stack=true; break; fi
-done
-if [ "$other_stack" = false ] && [ -f "$policy" ] && grep -Fq 'Installer-owned policy' "$policy"; then rm -f "$policy"; fi
-rm -f /var/log/hermes-dockerd.log 2>/dev/null || true
+done < <(getent passwd 2>/dev/null || true)
+if [ "$other_stack" = false ]; then
+  if [ -f "$policy" ] && grep -Fq 'Installer-owned policy' "$policy"; then rm -f "$policy"; fi
+  rm -f /var/log/hermes-dockerd.log 2>/dev/null || true
+fi
 # Shared Docker/prerequisite packages, repositories, Ubuntu Pro, GPU runtime, and the distro itself are deliberately preserved.
 '@
     $r=Invoke-Wsl $Name 'root' 'bash' @('-lc',$script,'bash',$Stack,($(if($Purge){'true'}else{'false'}))) 30
@@ -466,15 +549,35 @@ chmod 0600 "$stack/.latticevale-uninstalled"
     if (-not $r.Success) { Write-Warning "Could not mark the preserved stack as uninstalled: $($r.Text)" }
 }
 function Cleanup-AppData([object]$Paths) {
-    Remove-Item -LiteralPath $Paths.RelayConfig,$Paths.NativeConfig -Force -ErrorAction SilentlyContinue
+    foreach ($ownedConfig in @($Paths.RelayConfig,$Paths.NativeConfig)) {
+        if (-not (Test-Path -LiteralPath $ownedConfig -PathType Leaf)) { continue }
+        if (Test-AnyScheduledTaskReferencesPath $ownedConfig) {
+            Write-Warning "A scheduled task still references '$ownedConfig', so that installer-owned config was preserved instead of breaking the remaining task."
+        } else {
+            Remove-Item -LiteralPath $ownedConfig -Force -ErrorAction SilentlyContinue
+        }
+    }
     if (Test-Path -LiteralPath $Paths.Directory -PathType Container) {
         $specific=@(Get-ChildItem -LiteralPath $Paths.Directory -File -ErrorAction SilentlyContinue | Where-Object {
             $_.Name -like "*-$($Paths.RelayKey).*" -or $_.Name -like "*-$($Paths.NativeKey).*"
         })
-        foreach ($f in $specific) { Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue }
+        foreach ($f in $specific) {
+            if (Test-AnyScheduledTaskReferencesPath $f.FullName) {
+                Write-Warning "A scheduled task still references '$($f.FullName)', so that stack-specific integration file was preserved."
+            } else {
+                Remove-Item -LiteralPath $f.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
         $configs=@(Get-ChildItem -LiteralPath $Paths.Directory -File -Filter 'bridge-*.json' -ErrorAction SilentlyContinue)+@(Get-ChildItem -LiteralPath $Paths.Directory -File -Filter 'native-services-*.json' -ErrorAction SilentlyContinue)
         if ($configs.Count -eq 0) {
-            foreach ($shared in @('LatticeVale-WslNativeRelay.ps1','LatticeVale-WindowsNativeServiceRelay.ps1','native-relay.log','windows-native-service-relay.log','Refresh-HermesWslBridge.ps1')) { Remove-Item -LiteralPath (Join-Path $Paths.Directory $shared) -Force -ErrorAction SilentlyContinue }
+            foreach ($shared in @('LatticeVale-WslNativeRelay.ps1','LatticeVale-WindowsNativeServiceRelay.ps1','native-relay.log','windows-native-service-relay.log','Refresh-HermesWslBridge.ps1')) {
+                $sharedPath=Join-Path $Paths.Directory $shared
+                if ((Test-Path -LiteralPath $sharedPath -PathType Leaf) -and (Test-AnyScheduledTaskReferencesPath $sharedPath)) {
+                    Write-Warning "A scheduled task still references '$sharedPath', so the shared relay file was preserved."
+                } else {
+                    Remove-Item -LiteralPath $sharedPath -Force -ErrorAction SilentlyContinue
+                }
+            }
         }
         if (@(Get-ChildItem -LiteralPath $Paths.Directory -Force -ErrorAction SilentlyContinue).Count -eq 0) { Remove-Item -LiteralPath $Paths.Directory -Force -ErrorAction SilentlyContinue }
     }

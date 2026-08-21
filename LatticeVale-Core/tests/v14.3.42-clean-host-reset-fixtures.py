@@ -7,7 +7,7 @@ reset=(REL/'tools/Reset-LatticeVale-CleanHost.ps1').read_text(encoding='ascii')
 install=(REL/'installer/install.ps1').read_text(encoding='ascii')+(ROOT/'Install-LatticeVale.ps1').read_text(encoding='ascii')
 uninstall=(REL/'installer/uninstall.ps1').read_text(encoding='ascii')+(ROOT/'Uninstall-LatticeVale.ps1').read_text(encoding='ascii')
 version=(ROOT/'VERSION.txt').read_text().strip()
-assert version in {'14.3.42','14.3.43','14.4.0','14.4.1','14.4.2'}
+assert version in {'14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6'}
 assert '[switch]$Execute' in reset and "Type CLEAN-RESET to continue" in reset
 assert '[switch]$RemoveWslRuntime' in reset and "@('--unregister',$d)" in reset
 assert "'.wslconfig*'" in reset and "Microsoft.WSL" in reset

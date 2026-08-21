@@ -124,10 +124,19 @@ if [[ "$repair_run" == true ]]; then
   done
   if [[ -f "$repair_refresh_pending_file" ]]; then
     repair_refresh_pending=true
-    echo 'Managed package/image refresh was already started by an earlier interrupted run; resuming the pending refresh without repeating completed root package work.'
+    pending_refresh_revision="$(sed -n 's/^POLICY_REVISION=//p' "$repair_refresh_pending_file" 2>/dev/null | head -n1 || true)"
+    pending_refresh_installer_version="$(sed -n 's/^INSTALLER_VERSION=//p' "$repair_refresh_pending_file" 2>/dev/null | head -n1 || true)"
+    if [[ "$pending_refresh_revision" == "$repair_refresh_revision" ]]; then
+      echo "Managed package/image/source refresh was already started under compatible refresh policy revision $repair_refresh_revision; resuming the pending user-level refresh without repeating completed root package work (origin bundle: ${pending_refresh_installer_version:-legacy/unknown}; current bundle: $installer_version)."
+    else
+      repair_root_refresh_needed=true
+      echo "Managed refresh was interrupted under a different/legacy refresh policy (saved revision: ${pending_refresh_revision:-none}; required: $repair_refresh_revision; origin bundle: ${pending_refresh_installer_version:-legacy/unknown}). Re-running the bounded root package phase before resuming so the current refresh policy cannot be skipped."
+    fi
+    unset pending_refresh_revision pending_refresh_installer_version
   else
     last_refresh_epoch="$(sed -n 's/^LAST_SUCCESS_EPOCH=//p' "$repair_refresh_state" 2>/dev/null | head -n1 || true)"
     last_refresh_revision="$(sed -n 's/^POLICY_REVISION=//p' "$repair_refresh_state" 2>/dev/null | head -n1 || true)"
+    last_refresh_installer_version="$(sed -n 's/^INSTALLER_VERSION=//p' "$repair_refresh_state" 2>/dev/null | head -n1 || true)"
     now_epoch="$(date +%s)"
     if [[ "$force_managed_update" == true ]]; then
       repair_refresh_pending=true
@@ -141,8 +150,10 @@ if [[ "$repair_run" == true ]]; then
       else
         echo "Managed repair package/image refresh is due (interval: ${repair_refresh_days} days; legacy installs without a refresh marker refresh once)."
       fi
+    elif [[ -n "$last_refresh_installer_version" && "$last_refresh_installer_version" != "$installer_version" ]]; then
+      echo "LatticeVale bundle changed since the last managed component refresh (saved refresh: $last_refresh_installer_version; current bundle: $installer_version), but managed-refresh policy revision $repair_refresh_revision is unchanged and the age gate is not due. Resume / repair remains local-first; stage migrations and live verifiers still apply. Choose Update / repair installer-managed software to force package/image/source refresh now."
     fi
-    unset last_refresh_epoch last_refresh_revision now_epoch
+    unset last_refresh_epoch last_refresh_revision last_refresh_installer_version now_epoch
   fi
   unset marker
 fi
@@ -163,7 +174,7 @@ if [[ "$repair_root_refresh_needed" == true ]]; then
   if [[ "$force_managed_update" == true ]]; then
     echo 'Update / repair: refreshing APT metadata and upgrading/installing only LatticeVale prerequisite packages plus the managed Docker package set; unrelated Ubuntu packages are not broadly upgraded.'
   else
-    echo 'Aged managed repair: refreshing APT metadata and upgrading/installing only LatticeVale prerequisite packages; unrelated Ubuntu packages are not broadly upgraded.'
+    echo 'Managed repair refresh: refreshing APT metadata and upgrading/installing only LatticeVale prerequisite packages; unrelated Ubuntu packages are not broadly upgraded.'
   fi
   apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
   apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${prereq_packages[@]}"
@@ -465,8 +476,9 @@ if ! timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1; then
   for _ in {1..30}; do timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1 && break; sleep 1; done
 fi
 timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1 || { echo 'Docker daemon could not be started.' >&2; exit 1; }
-# Refresh adaptive ceilings only when that policy is enabled and the WSL-visible
-# CPU/RAM fingerprint changed. A routine start must not rewrite Compose state needlessly.
+# Refresh adaptive ceilings only when that policy is enabled and either the policy
+# revision or WSL-visible CPU/RAM fingerprint changed. A routine start must not rewrite
+# Compose state needlessly.
 resource_limits_enabled="$(python3 - "\$stack_dir/install-options.json" <<'PY_RESOURCE_ENABLED'
 import json,sys
 try:
@@ -488,7 +500,7 @@ if [[ "\$resource_limits_enabled" == true ]]; then
     saved_cpus=''
     saved_mem=''
   fi
-  if [[ "\$saved_version" != 2 || "\$saved_cpus" != "\$current_cpus" || "\$saved_mem" != "\$current_mem_mib" ]]; then
+  if [[ "\$saved_version" != 3 || "\$saved_cpus" != "\$current_cpus" || "\$saved_mem" != "\$current_mem_mib" ]]; then
     runuser -u "\$stack_user" -- env HOME="\$stack_home" USER="\$stack_user" DOCKER_HOST=unix:///var/run/docker.sock \
       bash -c 'cd "\$1" && ./configure-stack.sh --refresh-resource-policy' bash "\$stack_dir" || { echo 'Could not refresh LatticeVale adaptive resource policy.' >&2; exit 1; }
   fi
@@ -655,7 +667,7 @@ if [[ "$repair_root_refresh_needed" == true ]]; then
   # configure stage refreshes the selected current Compose images/builds before this
   # periodic maintenance cycle is considered complete. If a later stage is interrupted,
   # Resume / repair continues the image half without repeating completed root package work.
-  printf 'POLICY_REVISION=%s\n' "$repair_refresh_revision" > "$repair_refresh_pending_file"
+  printf 'POLICY_REVISION=%s\nINSTALLER_VERSION=%s\n' "$repair_refresh_revision" "$installer_version" > "$repair_refresh_pending_file"
   chown "$linux_uid:$linux_gid" "$repair_refresh_pending_file"
   chmod 0600 "$repair_refresh_pending_file"
   repair_refresh_pending=true
@@ -665,7 +677,7 @@ fi
 # Never recursively chown database/model trees: Postgres and Ollama legitimately maintain
 # container-owned files under data/synapse-db, data/honcho-db, and data/ollama.
 repair_user_tree() {
-  local rel="$1" path="$stack_dir/$1"
+  local rel="$1" path="$stack_dir/$1" item list_file metadata_error
   [[ -e "$path" || -L "$path" ]] || return 0
   if [[ -L "$path" ]]; then
     echo "Unsafe installer-owned path: '$path' is a symbolic link. Repair it manually before continuing." >&2
@@ -675,8 +687,47 @@ repair_user_tree() {
     echo "Unsafe installer-owned path: '$path' is a mountpoint. LatticeVale will not recursively change ownership across an external mount." >&2
     return 1
   fi
-  chown -hR -P --preserve-root "$linux_uid:$linux_gid" "$path"
-  chmod -R u+rwX "$path"
+
+  # Repair runs can execute while Hermes/QMD/log writers are still active. SQLite WAL/SHM
+  # sidecars and rotated log files can legitimately disappear between directory enumeration
+  # and metadata repair. A single recursive chown/chmod treats that harmless race as fatal
+  # under `set -e`, which can abort an otherwise healthy Resume / repair. Snapshot the
+  # current tree without crossing nested mounts, then tolerate a metadata-operation failure
+  # only when the exact entry has actually vanished. Real permission/ownership failures on
+  # entries that still exist remain fatal.
+  list_file="$(mktemp)"
+  if ! find -P "$path" -xdev -ignore_readdir_race -print0 > "$list_file"; then
+    rm -f "$list_file"
+    echo "Failed to enumerate installer-owned path '$path' for ownership repair." >&2
+    return 1
+  fi
+
+  while IFS= read -r -d '' item; do
+    metadata_error=""
+    if ! metadata_error="$(chown -h "$linux_uid:$linux_gid" -- "$item" 2>&1)"; then
+      if [[ ! -e "$item" && ! -L "$item" ]]; then
+        continue
+      fi
+      rm -f "$list_file"
+      echo "Failed to repair ownership for '$item': ${metadata_error:-unknown chown error}" >&2
+      return 1
+    fi
+
+    # Do not chmod symlinks. With find -P they are never traversed, and skipping them avoids
+    # changing a symlink target outside the managed tree.
+    if [[ ! -L "$item" ]]; then
+      metadata_error=""
+      if ! metadata_error="$(chmod u+rwX -- "$item" 2>&1)"; then
+        if [[ ! -e "$item" ]]; then
+          continue
+        fi
+        rm -f "$list_file"
+        echo "Failed to repair permissions for '$item': ${metadata_error:-unknown chmod error}" >&2
+        return 1
+      fi
+    fi
+  done < "$list_file"
+  rm -f "$list_file"
 }
 
 install -d -m 0700 -o "$linux_uid" -g "$linux_gid" "$stack_dir"

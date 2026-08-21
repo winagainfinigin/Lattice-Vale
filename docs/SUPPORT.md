@@ -1,5 +1,23 @@
 # Support
 
+## v14.4.6 adaptive resource fingerprint support note
+
+If `./manage.sh audit` reports `runtimePolicy PARTIAL` even though `.latticevale-resource-state` matches `nproc` and `/proc/meminfo`, use v14.4.6 or newer. Earlier v14.4.5 audit code could compare the saved WSL CPU fingerprint to `os.cpu_count()`, which may reflect the Windows host logical-CPU count instead of the processor set available to WSL. v14.4.6 aligns audit with the generator/manager CPU semantics. A real CPU or RAM allocation change still marks the policy stale and triggers normal regeneration.
+
+## v14.4.5 repair runtime-policy / update support note
+
+If `./manage.sh audit` reports `runtimePolicy PARTIAL` after an older repair, rerun Resume / repair with v14.4.5 or newer. The installer now treats adaptive policy convergence as an explicit repair step and will not report final success until the selected policy-v3 fingerprint and RAM controls verify. When that overlay changes, affected containers are reconciled through Compose so the settings become live.
+
+v14.4.6 refines the managed-update trigger introduced in v14.4.5: a bundle-version change alone no longer forces package/image/source refresh. Resume / repair refreshes that layer when the 30-day gate is due, the managed-refresh policy revision changes, or valid legacy refresh state is missing. Use explicit **Update / repair installer-managed software** when you intentionally want to force the current bundle's managed refresh immediately. Public 14.4.2→14.4.6 still refreshes because the revision advances from 1 to 2.
+
+## v14.4.4 repair metadata-race support note
+
+Implementation details: `REPAIR-METADATA-RACE-PATCH-NOTES.md`.
+
+Resume / repair no longer fails merely because a live SQLite `*-shm`/`*-wal` sidecar or rotated log disappears during root-assisted ownership reconciliation. Rerun Resume / repair with v14.4.4; the bootstrap tolerates only paths that actually vanished and will still stop on a genuine ownership/permission error for an entry that remains present.
+
+The v14.4.3 RAM-efficiency and uninstaller behavior remains current: adaptive policy v3 is still used, user `compose.override.yaml` remains authoritative, global WSL RAM/reclaim settings remain user-owned, and Docker-unavailable uninstall still fails closed when runtime may remain.
+
 ## v14.4.1 layout note
 
 Public commands now use `installer\install.ps1`, `installer\verify-release.ps1`, and `installer\uninstall.ps1`. The runtime stack and repair semantics are inherited from v14.4.0; this patch only reorganizes the extracted release and updates path resolution.
@@ -46,9 +64,12 @@ For native Windows Ollama/relay reports, include sanitized `native-ollama-relay.
 
 For an existing installer-managed stack, include which existing-stack action you selected:
 
-- **Resume / repair installation** is preservation-first. It repairs incomplete or stale stages and may perform the targeted managed package/image/source refresh when LatticeVale's periodic refresh window or policy revision requires it. It is **not** a promise to move every component to a newer upstream release on every run.
-- **Update / repair installer-managed software** is the controlled on-demand updater. It requires a successful managed backup first, forces the current LatticeVale bundle's declared installer-owned package/image/source refresh immediately, and then runs the normal repair/verifier stages. Use this option after replacing the installer with a newer LatticeVale ZIP when the goal is to adopt that release's tested Hermes, Matrix/Synapse, QMD, Honcho, SearXNG, managed Ollama, Docker-package, or related installer-owned pins.
+- **Resume / repair installation** is preservation-first. It repairs incomplete/stale stages and stale adaptive runtime policy. It performs the bounded installer-owned package/image/source refresh when the periodic refresh window is due, the refresh-policy revision changed, or valid legacy refresh state is missing. A bundle-version change alone remains local-first. It converges only through explicit managed-refresh triggers; it is **not** a blanket move to arbitrary newer upstream releases.
+- **Update / repair installer-managed software** is the controlled on-demand force-refresh mode. It requires a successful managed backup first, forces the current LatticeVale bundle's declared installer-owned package/image/source refresh immediately, and then runs the normal repair/verifier stages. Use it whenever you want a version-only bundle change to force managed component refresh before the age/revision gate is due.
 - **Change installed components** changes feature selections; it is not the dedicated updater.
 - `./manage.sh update` is an advanced upstream-refresh workflow and is not equivalent to the bundle-pinned Windows installer updater.
 
 If **Update / repair** refuses to start because the pre-update backup cannot complete, run **Resume / repair installation** first and correct the reported health/backup problem. Do not delete the stack or its databases to get past the safeguard.
+
+
+For v14.4.4 live repair metadata-race behavior, see `REPAIR-METADATA-RACE-PATCH-NOTES.md`.
