@@ -1,4 +1,4 @@
-NOTICE: reverted to v14.4.6 for now. v14.4.7 is bugged. v14.4.8 will be out soon
+NOTICE: reverted to v14.4.6 for now. v14.4.7 is bugged. If you installed the 14.4.7 version as a repair install, LatticeVale will fail from then on, but your completed install will still function. If you haven't gotten too far into new data with a completed install, I recommend starting over with a clean install. v14.4.8xwill be out soon
 
 # LatticeVale v14.4.7
 
