@@ -255,10 +255,12 @@ Use Option 6 when an actual managed-software refresh is desired. It is not requi
 
 ## Verification and health checks
 
-After installation or repair, the recommended live verification command is:
+After installation or repair, use the exact WSL distribution name selected for LatticeVale. If needed, list registered distributions first, then set `$Distro` once for the commands below:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+wsl --list --verbose
+$Distro = Read-Host "Enter the exact WSL distro name used by LatticeVale"
+wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
 ```
 
 A successful installation reports:
@@ -270,13 +272,13 @@ LatticeVale verification: HEALTHY
 For the detailed state-aware audit:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
+wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
 ```
 
 For a status snapshot:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh status'
+wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh status'
 ```
 
 `manage.sh` belongs to the installed Linux stack and should therefore be invoked through WSL when running from Windows PowerShell.
@@ -522,16 +524,20 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\veri
 
 This verifies the release/source package and checksum manifest. It is distinct from verifying the live installed stack.
 
-### Verify an installed stack
+### Verify or audit an installed stack
+
+Use the exact WSL distribution name selected during LatticeVale installation. If you are unsure of its registered name, list the distributions first:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+wsl --list --verbose
+$Distro = Read-Host "Enter the exact WSL distro name used by LatticeVale"
+wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
 ```
 
-### Audit an installed stack
+For the detailed state-aware audit, reuse the same `$Distro` value:
 
 ```powershell
-wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
+wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
 ```
 
 ### Uninstall
