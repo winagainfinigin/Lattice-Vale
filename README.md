@@ -1,13 +1,13 @@
 # LatticeVale v14.4.82
 
-> **Patch Release — v14.4.82**
+> **Hotfix Release — v14.4.82**  
 > Current recommended release and cumulative upgrade target from the public **v14.4.2 Main Release**.
 
 LatticeVale is a source-visible **Windows + WSL2 installer, integration layer, and lifecycle manager for a self-hosted Hermes Agent stack**.
 
-It installs into an **existing supported Ubuntu WSL2 distribution**, provisions Docker and Hermes, and can integrate Matrix, multi-profile Kanban orchestration, memory/Honcho, SearXNG, QMD indexing, Ollama/local AI, Obsidian, Windows lifecycle shortcuts, and Tailscale remote access.
+It installs into an **existing supported Ubuntu WSL2 distribution**, provisions Docker and Hermes, and can integrate Matrix, multi-profile Kanban orchestration, Honcho memory infrastructure, SearXNG, QMD indexing, Ollama/local AI, Obsidian, Windows lifecycle shortcuts, and Tailscale remote access.
 
-LatticeVale is intentionally **recovery-aware and ownership-conscious**. It manages the Hermes stack without treating the user's entire WSL installation, Docker environment, Windows applications, Tailscale configuration, or personal data as disposable.
+LatticeVale is intentionally **recovery-aware and ownership-conscious**. It manages the Hermes stack without treating the user's WSL installation, Docker environment, Windows applications, Tailscale configuration, or persistent data as disposable.
 
 ## What LatticeVale manages
 
@@ -36,48 +36,142 @@ Windows 11
 
 Depending on the selected installation options, LatticeVale can provide:
 
-- Hermes installation, configuration, gateways, providers/models, skills, and memory policy
+- Hermes installation, configuration, gateways, providers/models, skills, and memory integration
 - multi-profile Hermes with independent gateways and Matrix identities
 - Kanban triage, decomposition, dispatch, review, dependencies, and concurrency controls
 - Matrix/Synapse provisioning and cross-signing persistence
 - Honcho local contextual-memory infrastructure
 - SearXNG search plus keyless public-page extraction for Hermes research
+- Hermes Local Browser / Chromium support using the runtime supplied by the pinned Hermes image
 - QMD indexing, including optional Windows Obsidian vault access
 - LatticeVale-managed or supported Windows-native Ollama integration
-- adaptive Docker/WSL RAM policy
+- adaptive Docker/WSL resource policy
 - Windows/Tailscale relays and remote exposure
 - coordinated Start / Shutdown behavior
 - verification, audit, repair, update, backup, and controlled uninstall
 
 Persistent Hermes profiles, sessions, memory, Matrix state, Honcho data, Ollama models, QMD data, credentials, backups, Obsidian data, and explicit Compose overrides are preserved during normal repair and update operations.
 
-## v14.4.82 WSL recovery return-value hotfix
+---
 
-v14.4.82 fixes a PowerShell return-channel bug in the v14.4.81 bounded WSL launch recovery. The recovery helper could successfully restore WSL after `wsl --shutdown`, but its diagnostic text and native exit code were both emitted through the function success stream. The installer therefore captured an array instead of the scalar exit code `0`, misreported the helper output as an exit code, skipped the post-recovery distro re-probe, and ended with `No eligible existing Ubuntu WSL2 distro was found.`
+## v14.4.82 hotfix
 
-The hotfix keeps helper diagnostics visible with `Out-Host` while returning only the scalar native process exit code. A successful recovery now immediately re-runs the existing Ubuntu/architecture/storage/managed-stack eligibility checks in the same installer run. No WSL ownership boundary, networking policy, Hermes behavior, service, dependency, or storage threshold changes: fresh installs still require the normal 50 GiB free reserve, while confirmed installer-managed Resume / repair remains eligible at the existing 10 GiB free floor.
+v14.4.82 fixes a Windows PowerShell return-channel bug in the bounded WSL launch recovery introduced in v14.4.81.
 
-## v14.4.81 WSL launch-recovery hotfix
+The v14.4.81 recovery helper could successfully recover a distro after:
 
-v14.4.81 fixes a preflight dead end seen when a correctly registered Ubuntu WSL2 distro cannot cold-launch and `wsl.exe` returns **`Wsl/Service/E_UNEXPECTED` / `Catastrophic failure`**. When the affected distro is the only path forward—or is explicitly selected with `-DistroName`—the installer can now run a bounded, preservation-first recovery and re-probe the same distro **in the same installer run**.
+```powershell
+wsl --shutdown
+```
 
-The recovery order is deliberately narrow: first use Microsoft's non-destructive `wsl --shutdown` restart path and retry the existing distro. The bounded shutdown/re-probe path does not require elevation; if unrelated running distros are detected—or WSL cannot reliably report the running-distro list—the installer asks before using the global shutdown. If the same `E_UNEXPECTED` persists and `%UserProfile%\.wslconfig` explicitly selects `networkingMode=mirrored`, LatticeVale can then offer an **explicit** compatibility fallback that backs up `.wslconfig`, changes only `networkingMode` to `nat` (the WSL default), restarts WSL, and tests the same registered distro again. The normal installer does not unregister/import/convert/move/recreate a distro, edit its VHDX, or automatically escalate into DISM/Windows-feature repair. If the bounded recovery is insufficient, the existing Administrator repair helper remains the explicit deeper-repair path.
+while simultaneously writing diagnostic text to the PowerShell success stream. The installer could therefore capture both the helper's console output and its native exit code instead of receiving the scalar exit code `0`.
 
-This hotfix does **not** lower the existing storage prerequisites. After WSL recovers, LatticeVale re-runs the normal Ubuntu, architecture, storage, and managed-stack eligibility checks. An existing installer-managed stack can still qualify for Resume / repair with **at least 10 GiB free**, while a genuinely fresh install must still satisfy the normal **50 GiB free** fresh-install reserve on a host partition over 50 GiB total.
+This caused a successful recovery to be treated as unsuccessful and prevented the installer from immediately re-probing the recovered distro.
 
-See [`docs/SUPPORT.md`](docs/SUPPORT.md) for recovery guidance and official Microsoft WSL references, and [`docs/PATCH-NOTES.md`](docs/PATCH-NOTES.md) for the implementation boundary.
+v14.4.82 separates those channels:
 
-## v14.4.8 maintenance patch
+- helper diagnostics remain visible to the user;
+- the installer receives only the native process exit code;
+- exit code `0` triggers a fresh probe of the same registered distro;
+- normal Ubuntu, architecture, user, storage, and existing-installation eligibility checks then run again;
+- a recognized installer-managed installation can continue through the existing **10 GiB Resume / repair storage floor**;
+- a true clean installation continues to require the existing **50 GiB free-space reserve**.
 
-v14.4.8 packages the validated maintenance work on top of v14.4.7. The v14.4.7 web-extraction design remains intact: SearXNG is the local, keyless `web_search` backend and `latticevale-local` provides bounded keyless `web_extract` for public HTTP(S) text pages. v14.4.8 additionally makes clean/repair reconciliation fill Hermes Local Browser / Chromium and a 360-second auxiliary extraction timeout only when those installer-managed defaults are missing, while preserving explicit user browser/provider/timeout choices. It also carries the Linux static-audit and release-manifest portability fixes and the consolidated current v14.x documentation. No new service, image, daemon, port, API key, package install, paid dependency, or resource reservation is introduced.
+No distro is recreated, imported, moved, converted, unregistered, or replaced by this recovery.
 
-A healthy local SearXNG/Hermes integration can still occasionally return **zero search results** when upstream search engines rate-limit, CAPTCHA, or temporarily suspend automated requests. That condition is external to LatticeVale and does not by itself mean the installation needs repair. Retry later or broaden the query; when an authoritative URL is already known, Hermes can use `web_extract` directly without depending on search discovery. A repair investigation is warranted when the local SearXNG API/provider configuration itself fails, not merely because one successful search call returned an empty result set.
+---
 
-The migration is preservation-first. If a managed profile already names an explicit extract-capable/shared backend such as Firecrawl, Tavily, Exa, Parallel, or another custom provider, LatticeVale leaves that choice intact. The original v14.4.7 extraction migration and the v14.4.8 reliability migration advance only the installer-owned integrations checkpoint, so existing managed installs can adopt the required integration state without forcing a managed image/package refresh solely because the bundle version changed. By default, Hermes URL-safety policy rejects private/internal targets; cloud-metadata targets remain blocked even when a user explicitly enables Hermes private-URL access. Credential-bearing URLs are rejected, redirects are revalidated, connect-time DNS rebinding is guarded by Hermes's own SSRF-safe client, and downloads/output are bounded.
+## v14.4.81 WSL launch recovery
 
-See [`docs/PATCH-NOTES.md`](docs/PATCH-NOTES.md) for the consolidated v14.x implementation and migration notes.
+v14.4.81 added bounded recovery for WSL host/service launch failures such as:
 
-For installer-managed Hermes profiles, a fresh install or Resume / repair selects Hermes's free local Chromium browser only when no explicit browser backend/provider, browser gateway route, or recognized Hermes browser environment selection already indicates another choice. Existing explicit choices are preserved. If `auxiliary.web_extract.timeout` is missing, LatticeVale fills Hermes's documented fresh-install default of `360` seconds. SearXNG remains the managed search backend and `latticevale-local` remains the managed extraction backend. This is installer/runtime reconciliation only; LatticeVale does not change `SOUL.md`, prompts, or model policy for this behavior. See [`docs/SUPPORT.md`](docs/SUPPORT.md) for official upstream troubleshooting links.
+```text
+Catastrophic failure
+Error code: Wsl/Service/E_UNEXPECTED
+```
+
+When this failure prevents an otherwise registered distro from launching, LatticeVale can:
+
+1. verify whether stopping WSL could affect other running distributions;
+2. perform a clean `wsl --shutdown` recovery when safe or explicitly approved;
+3. wait for WSL to settle;
+4. re-probe the same registered distro;
+5. continue the installer in the same run if the distro becomes healthy.
+
+If persistent `E_UNEXPECTED` coincides with an explicitly configured global mirrored-networking mode, LatticeVale can separately offer the existing backed-up NAT fallback.
+
+Normal LatticeVale configuration does **not** create, reapply, or require mirrored mode.
+
+The bounded recovery does not:
+
+- unregister the distro;
+- import or recreate the distro;
+- move or convert the distro;
+- modify or delete its VHDX;
+- automatically run DISM;
+- automatically enable or disable Windows features;
+- silently change global WSL networking.
+
+Deeper Windows/WSL component repair remains an explicit operation through the included repair helper.
+
+---
+
+## v14.4.7 web extraction and Hermes reliability
+
+v14.4.7 closed the default Hermes research gap present in the v14.4.6 stack.
+
+SearXNG remains the local, keyless `web_search` backend while LatticeVale supplies a small keyless `web_extract` provider for public HTTP(S) text pages.
+
+The provider runs inside the existing Hermes container and adds no additional:
+
+- service
+- image
+- daemon
+- port
+- API key
+- package installation
+- resource reservation
+
+For installer-managed profiles using the LatticeVale defaults, the normal free web-research stack is:
+
+```text
+Search:      SearXNG
+Extraction:  LatticeVale local extraction provider
+Browser:     Hermes Local Browser / Chromium
+```
+
+A missing Hermes auxiliary web-extraction timeout is repaired to the supported `360` second default.
+
+Explicit user/provider choices remain authoritative. LatticeVale does not replace deliberately configured Browserbase, Browser Use, Camofox, CDP, browser-gateway, custom browser/provider, credential, or explicit timeout settings merely to enforce its defaults.
+
+LatticeVale also does **not** modify `SOUL.md`, prompts, model policy, or other user-owned AI behavior as part of this integration repair.
+
+### Search availability
+
+A healthy local SearXNG/Hermes integration can occasionally return **zero search results** when upstream search engines rate-limit, CAPTCHA, suspend, or otherwise limit automated requests.
+
+That condition is external to LatticeVale and does not by itself mean the installation needs repair.
+
+When an authoritative URL is already known, Hermes can use `web_extract` independently of search discovery.
+
+Repair investigation is appropriate when the local SearXNG API/provider path itself fails, rather than merely because one successful search request returned an empty result set.
+
+### Extraction safety
+
+The LatticeVale extraction provider:
+
+- supports public HTTP(S) text-oriented resources;
+- rejects credential-bearing URLs;
+- rejects private/internal targets through Hermes URL-safety handling;
+- keeps cloud-metadata targets blocked;
+- revalidates redirects;
+- uses Hermes's SSRF-safe HTTP client;
+- guards connect-time DNS resolution;
+- bounds downloaded and returned content.
+
+See [docs/PATCH-NOTES.md](docs/PATCH-NOTES.md) for detailed implementation and historical patch notes.
+
+---
 
 ## Lifecycle management
 
@@ -86,7 +180,8 @@ LatticeVale is not only an installer. It manages the ongoing lifecycle of the st
 - fresh installation
 - configuration and reconfiguration
 - startup and shutdown
-- status and health verification
+- status reporting
+- health verification
 - state-aware auditing
 - Resume / repair
 - release migrations
@@ -99,25 +194,52 @@ Its repair model is deliberately conservative:
 
 1. inspect live state;
 2. identify the failing or stale component;
-3. repair the smallest necessary layer;
+3. repair the smallest necessary managed layer;
 4. reconcile affected configuration and services;
 5. verify the resulting state.
 
-Completed installer checkpoints are not blindly trusted when live verification shows that the managed state has drifted or failed.
+Completed installer checkpoints are not blindly trusted when live verification shows that managed state has drifted or failed.
 
-### Resume / repair
+---
+
+## Resume / repair
 
 **Option 1 — Resume / repair installation** is the normal upgrade and repair path.
 
-Before launching a repair install, fully stop the selected LatticeVale WSL distro. If the Windows lifecycle shortcuts are installed, **Shut Down LatticeVale** is the recommended preparation step: it stops the managed LatticeVale stack and then terminates only the selected distro. A global `wsl --shutdown` is not required.
+It:
 
-It reuses existing selections, preserves persistent state, repairs incomplete or stale managed stages, applies required release migrations, regenerates stale runtime policy, and reconciles affected containers when necessary.
+- reuses existing component selections;
+- preserves persistent state;
+- repairs incomplete or stale managed stages;
+- applies required release migrations;
+- regenerates stale runtime policy;
+- reconciles affected containers where necessary;
+- refreshes the managed package/image/source layer only when its normal refresh conditions require it.
 
-A new LatticeVale version alone does not automatically require a complete Docker image or source refresh.
+A new LatticeVale bundle version alone does not automatically require a complete Docker image or source refresh.
 
-### Forced managed update
+### Storage requirements
 
-**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer, including applicable:
+LatticeVale intentionally distinguishes clean installs from existing managed repairs:
+
+```text
+Fresh installation:
+  host partition > 50 GiB total
+  at least 50 GiB free
+
+Existing installer-managed Resume / repair:
+  at least 10 GiB free
+```
+
+The lower repair threshold is used only after LatticeVale has confirmed an existing installer-managed installation.
+
+---
+
+## Forced managed update
+
+**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer.
+
+Depending on the enabled components, this can include:
 
 - prerequisite packages
 - Docker packages
@@ -125,7 +247,41 @@ A new LatticeVale version alone does not automatically require a complete Docker
 - audited source dependencies
 - installer-owned runtime layers
 
-Persistent application data and user configuration remain preserved.
+Persistent application data and explicit user configuration remain preserved.
+
+Use Option 6 when an actual managed-software refresh is desired. It is not required merely because the LatticeVale bundle version changed.
+
+---
+
+## Verification and health checks
+
+After installation or repair, the recommended live verification command is:
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+```
+
+A successful installation reports:
+
+```text
+LatticeVale verification: HEALTHY
+```
+
+For the detailed state-aware audit:
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
+```
+
+For a status snapshot:
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh status'
+```
+
+`manage.sh` belongs to the installed Linux stack and should therefore be invoked through WSL when running from Windows PowerShell.
+
+---
 
 ## Adaptive RAM and resource policy
 
@@ -142,7 +298,9 @@ Depending on the enabled services, it can apply:
 - bounded Ollama parallelism
 - short Ollama model keep-alive behavior
 
-Explicit user `compose.override.yaml` configuration remains authoritative and is applied after the generated LatticeVale resource policy.
+Explicit user `compose.override.yaml` configuration remains authoritative and is applied after generated LatticeVale resource policy.
+
+---
 
 ## v14.4.6 highlights
 
@@ -184,34 +342,30 @@ managed runtime payload requires refresh
 
 A bundle-version change by itself no longer forces package, image, build, or source refresh.
 
-Managed refresh is instead controlled by actual runtime state, the managed refresh policy/revision, scheduled refresh conditions, required migrations, or an explicit forced update.
+Managed refresh is instead controlled by actual runtime state, the managed-refresh policy/revision, periodic refresh conditions, required migrations, or an explicit forced update.
 
 This allows:
 
-- **v14.4.5 → v14.4.6:** apply the audit fix without unnecessarily rebuilding healthy managed images solely because the version changed.
-- **v14.4.2 → v14.4.6:** perform the required cumulative migration because the managed refresh revision and adaptive resource policy advance from the v14.4.2 baseline.
+- **v14.4.5 → v14.4.6:** the audit fix without unnecessarily rebuilding healthy managed images solely because the version changed.
+- **v14.4.2 → current:** the required cumulative migrations from the older public baseline.
 
-Intermediate v14.4.3–v14.4.8 installations are not required when upgrading from the supported v14.4.2 public baseline to v14.4.82 through normal Resume / repair.
+Intermediate v14.4.3–v14.4.6 installations are not required when upgrading from the supported public baseline through the normal Resume / repair path.
+
+---
 
 ## Release history
-
-- **v14.4.82 — WSL recovery return-value hotfix:** fixes successful helper output/exit-code isolation so same-run re-probe actually occurs.
-- **v14.4.81 — WSL launch-recovery hotfix:** adds bounded in-run recovery for registered distros blocked by `Wsl/Service/E_UNEXPECTED`, with explicit backed-up NAT fallback only for persistent mirrored-networking cases.
-- **v14.4.8 — Maintenance release:** formalizes conservative Hermes clean/repair web-browser defaults, the two CI portability fixes, and the current documentation consolidation without adding services or taking ownership of user policy.
-- **v14.4.7 — Web extraction:** added bounded keyless public-page extraction while keeping SearXNG as the managed search backend.
 
 | Version | Type | Primary change |
 | --- | --- | --- |
 | **v14.4.1** | Patch | Repository/release layout cleanup |
-| **v14.4.2** | **Main Release** | Public baseline |
+| **v14.4.2** | **Main Release** | Public v14.4.x baseline |
 | **v14.4.3** | Patch | RAM efficiency and uninstaller hardening |
 | **v14.4.4** | Patch | Repair-time SQLite/metadata race hardening |
 | **v14.4.5** | Patch | Runtime-policy and repair convergence |
-| **v14.4.6** | **Main Release** | Prior cumulative main release |
-| **v14.4.7** | Patch | Keyless web extraction |
-| **v14.4.8** | Patch | Conservative Hermes clean/repair reliability + CI portability + documentation consolidation |
-| **v14.4.81** | Patch | Preservation-first WSL `E_UNEXPECTED` launch recovery |
-| **v14.4.82** | **Current Release** | Successful WSL recovery now returns a scalar exit code and continues same-run eligibility re-probe |
+| **v14.4.6** | **Main Release** | CPU fingerprinting and managed-refresh refinement |
+| **v14.4.7** | Patch | Keyless web extraction and conservative Hermes web/browser defaults |
+| **v14.4.81** | Hotfix | Bounded same-run recovery for WSL `E_UNEXPECTED` launch failures |
+| **v14.4.82** | **Hotfix** | Correct successful WSL-recovery exit-code handling; current recommended release |
 
 ### v14.4.1
 
@@ -234,87 +388,96 @@ kanban.db-shm
 kanban.db-wal
 ```
 
-Files that genuinely disappear during live traversal are tolerated while real permission, mount, ownership, and filesystem failures remain errors.
+Files that genuinely disappear during live traversal are tolerated while actual permission, mount, ownership, and filesystem failures remain errors.
 
 ### v14.4.5
 
 Added explicit runtime-policy convergence so stale adaptive configuration cannot be skipped merely because an older installer checkpoint is marked complete.
 
-When required, LatticeVale regenerates the policy, invalidates affected repair state, reconciles Compose, and recreates affected containers so new runtime settings actually become live.
+When required, LatticeVale regenerates the policy, invalidates affected repair state, reconciles Compose, and recreates affected containers so new runtime settings become live.
 
 ### v14.4.6 — Main Release
 
-Prior cumulative main release. Includes the v14.4.3–v14.4.5 fixes plus corrected WSL CPU resource fingerprinting and refined managed-update triggering.
+Includes the v14.4.3–v14.4.5 fixes plus corrected WSL CPU resource fingerprinting and refined managed-update triggering.
 
 ### v14.4.7
 
-Added the bounded keyless `latticevale-local` public-page extraction provider while retaining SearXNG as the managed search backend and preserving explicit extraction-provider choices.
-
-### v14.4.8
-
-Formalizes the conservative Hermes clean/repair reliability follow-up: Local Browser / Chromium and the 360-second extraction timeout are filled only when missing, explicit user choices remain authoritative, CI path handling is hardened, and current v14.x patch documentation is consolidated. No new service, paid provider, API key, or user-policy ownership is introduced.
+Added the keyless local public-page extraction provider and conservative Hermes Local Browser / extraction-timeout reconciliation.
 
 ### v14.4.81
 
-Adds bounded same-run recovery for a registered WSL distro that fails preflight with `Wsl/Service/E_UNEXPECTED`: clean WSL shutdown/retry first, then an explicit backed-up NAT fallback only when mirrored networking is configured and the failure persists. The distro/VHDX remain preserved and deeper Windows repair is not automatic.
+Added bounded same-run recovery for WSL host/service `E_UNEXPECTED` launch failures while preserving distro registration, VHDX data, and the existing clean/repair storage policy.
+
+### v14.4.82
+
+Corrects the helper return-channel handling so a successful v14.4.81 WSL recovery is recognized as successful and the installer immediately re-probes the recovered distro.
 
 ```text
-v14.4.1  release-layout patch
+v14.4.1   release-layout patch
     ↓
-v14.4.2  MAIN RELEASE / public baseline
+v14.4.2   MAIN RELEASE / public baseline
     ↓
-v14.4.3  RAM + uninstall patch
+v14.4.3   RAM + uninstall patch
     ↓
-v14.4.4  repair-race patch
+v14.4.4   repair-race patch
     ↓
-v14.4.5  runtime-policy repair patch
+v14.4.5   runtime-policy repair patch
     ↓
-v14.4.6  MAIN RELEASE / prior cumulative main release
+v14.4.6   MAIN RELEASE
     ↓
-v14.4.7  web-extraction patch
+v14.4.7   web extraction + Hermes reliability
     ↓
-v14.4.8  maintenance release
+v14.4.81  WSL E_UNEXPECTED recovery
     ↓
-v14.4.81 WSL launch-recovery hotfix
-    ↓
-v14.4.82 WSL recovery return-value hotfix / current recommended release
+v14.4.82  WSL recovery return-channel hotfix / current recommended release
 ```
+
+---
 
 ## Ownership and safety boundaries
 
 LatticeVale does not automatically treat the following as disposable:
 
 - the WSL distribution itself
+- its VHDX
 - unrelated Docker containers, images, volumes, or networks
 - global WSL networking configuration
 - Windows-native Ollama
 - Windows Tailscale
-- user-modified Windows shortcuts or tasks
+- user-modified Windows shortcuts or scheduled tasks
 - Obsidian vault contents
 - unrelated user documents
+- user-owned Hermes configuration
+- persistent application data
 
 Where ownership cannot be safely established, repair and uninstall behavior favors preservation rather than destructive guessing.
+
+---
 
 ## Documentation
 
 The repository includes detailed documentation beyond this README.
 
-Key documentation includes:
+Start with:
 
-- [`docs/README.md`](docs/README.md) — documentation index and project overview
-- [`docs/Instructions.txt`](docs/Instructions.txt) — installation, upgrade, repair, and operating procedures
-- [`docs/FEATURES.md`](docs/FEATURES.md) — supported components, options, integrations, and capabilities
-- [`docs/Installer Description.txt`](docs/Installer%20Description.txt) — installer architecture, stages, ownership boundaries, and recovery behavior
-- [`docs/SECURITY.md`](docs/SECURITY.md) — trust boundaries, networking, secrets, exposure, and ownership policy
-- [`docs/SUPPORT.md`](docs/SUPPORT.md) — diagnostics, repair/recovery strategy, health states, and troubleshooting
-- [`docs/CHANGELOG.md`](docs/CHANGELOG.md) — detailed chronological development and release history
-- [`docs/RELEASE.md`](docs/RELEASE.md) — release validation, packaging, manifests, and maintainer requirements
+- [docs/README.md](docs/README.md) — documentation index and project overview
+- [docs/Instructions.txt](docs/Instructions.txt) — installation, upgrade, repair, and operating procedures
+- [docs/FEATURES.md](docs/FEATURES.md) — supported components, options, integrations, and capabilities
+- [docs/Installer Description.txt](docs/Installer%20Description.txt) — installer architecture, stages, ownership boundaries, and recovery behavior
+- [docs/SUPPORT.md](docs/SUPPORT.md) — diagnostics, troubleshooting, official upstream resources, and recovery guidance
+- [docs/SECURITY.md](docs/SECURITY.md) — trust boundaries, networking, secrets, exposure, and ownership policy
+- [docs/CHANGELOG.md](docs/CHANGELOG.md) — chronological release history
+- [docs/PATCH-NOTES.md](docs/PATCH-NOTES.md) — consolidated detailed v14.x implementation and patch notes
+- [docs/RELEASE.md](docs/RELEASE.md) — release validation, packaging, manifests, and maintainer requirements
+- [docs/SOURCES.md](docs/SOURCES.md) — upstream source and dependency references
+- [docs/THIRD-PARTY-NOTICES.md](docs/THIRD-PARTY-NOTICES.md) — third-party attribution and distribution boundaries
+- [docs/WINDOWS-INTEGRATION-TEST-MATRIX.md](docs/WINDOWS-INTEGRATION-TEST-MATRIX.md) — Windows/WSL integration validation matrix
 
-Detailed version-specific implementation and audit notes are consolidated in [`docs/PATCH-NOTES.md`](docs/PATCH-NOTES.md). `docs/CHANGELOG.md` remains the canonical chronological release history.
+Historical one-off v14.x patch documents have been consolidated into `docs/PATCH-NOTES.md` to keep the repository easier to navigate while preserving their technical content.
 
-The included documentation contains substantially more installation, architecture, troubleshooting, compatibility, security, release-history, and implementation detail than this README.
+**For exact behavior, use the shipped source, current documentation, compatibility metadata, source manifest, and regression tests as the authoritative reference.**
 
-**For exact behavior, use the documentation, shipped source, compatibility metadata, and regression tests as the authoritative reference.**
+---
 
 ## Repository layout
 
@@ -331,26 +494,44 @@ The included documentation contains substantially more installation, architectur
 └─ README.md
 ```
 
+---
+
 ## Getting started
 
 Start with:
 
-1. [`docs/README.md`](docs/README.md)
-2. [`docs/Instructions.txt`](docs/Instructions.txt)
-3. [`docs/FEATURES.md`](docs/FEATURES.md)
+1. [docs/README.md](docs/README.md)
+2. [docs/Instructions.txt](docs/Instructions.txt)
+3. [docs/FEATURES.md](docs/FEATURES.md)
 
 ### Install
 
-From an Administrator PowerShell window at the repository/release root:
+From PowerShell at the repository or release root:
 
 ```powershell
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
 ```
 
-### Verify release
+LatticeVale requires an existing supported Ubuntu WSL2 distribution. It does not create, import, move, unregister, or convert one as part of normal installation.
+
+### Verify release files
 
 ```powershell
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1
+```
+
+This verifies the release/source package and checksum manifest. It is distinct from verifying the live installed stack.
+
+### Verify an installed stack
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+```
+
+### Audit an installed stack
+
+```powershell
+wsl -d Ubuntu-24.04 -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
 ```
 
 ### Uninstall
@@ -361,6 +542,10 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\unin
 
 For an existing installation, the installer provides state-aware verification, Resume / repair, reconfiguration, advanced recovery, and managed-update options.
 
+---
+
 ## License
 
-See [`LICENSE`](LICENSE).
+LatticeVale is licensed under the MIT License.
+
+See [LICENSE](LICENSE).
