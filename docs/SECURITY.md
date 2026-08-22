@@ -1,8 +1,22 @@
 # Security Policy
 
-## v14.4.7 local web extraction boundary
+## v14.4.82 WSL helper return-channel boundary
 
-The LatticeVale local extraction provider is intentionally limited to HTTP(S) text-oriented retrieval and inherits Hermes's URL-safety controls. By default Hermes blocks loopback/private/link-local/reserved/internal destinations, and its cloud-metadata safety floor remains blocked even if a user explicitly opts into `security.allow_private_urls`. The provider rejects embedded credentials and credential-like query parameters, revalidates redirects, and uses Hermes's connect-time SSRF-safe HTTP client so direct connections are made only to vetted addresses while preserving Host/SNI/certificate validation. Fetch duration, redirect count, response bytes, and returned text are bounded. It does not add an authenticated browser or a new network service. See [`WEB-EXTRACTION-PATCH-NOTES.md`](WEB-EXTRACTION-PATCH-NOTES.md).
+v14.4.82 changes only how the normal installer receives the bounded WSL helper's process result. Helper diagnostics are written to the host and only the scalar native exit code is returned to the caller. No privilege, networking, Windows-feature, distro-registration, VHDX, storage-policy, or Hermes ownership boundary changes from v14.4.81.
+
+## v14.4.81 WSL launch-recovery boundary
+
+The v14.4.81 normal installer may orchestrate a **bounded** WSL host launch recovery only after an existing registered distro has failed with `Wsl/Service/E_UNEXPECTED`. The first action is `wsl --shutdown` plus a retry; it changes no distro registration, VHDX, Windows feature, or WSL setting and does not require elevation. If other WSL distros are running, the user must approve the global shutdown first. If WSL cannot reliably enumerate the running-distro list during the fault, LatticeVale treats that state as unknown and also requires explicit approval instead of assuming no unrelated distro is active.
+
+A global `.wslconfig` change is available only when the same failure persists and the file explicitly selects `networkingMode=mirrored`. That action requires a second explicit user decision, creates a timestamped backup, changes only the networking-mode key to `nat`, preserves unrelated settings, and retests the same distro. The core installer does not directly implement the writer; it invokes the audited host-repair helper. Normal install does not automatically run DISM or enable/disable Windows features. The helper's deeper repair mode remains a separate elevated administrator action.
+
+## v14.4.8 Hermes browser-default maintenance boundary
+
+v14.4.8 may select Hermes Local Browser / Chromium only when no explicit browser backend/provider, gateway route, or recognized browser environment selection already exists. It does not overwrite deliberate cloud/custom browser choices and does not write `SOUL.md`, prompts, or model policy. The local-browser runtime is supplied by the pinned Hermes environment; LatticeVale adds no browser listener or cloud credential.
+
+## v14.4.7 local web-extraction boundary
+
+The LatticeVale local extraction provider introduced in v14.4.7 is intentionally limited to HTTP(S) text-oriented retrieval and inherits Hermes's URL-safety controls. By default Hermes blocks loopback/private/link-local/reserved/internal destinations, and its cloud-metadata safety floor remains blocked even if a user explicitly opts into `security.allow_private_urls`. The provider rejects embedded credentials and credential-like query parameters, revalidates redirects, and uses Hermes's connect-time SSRF-safe HTTP client so direct connections are made only to vetted addresses while preserving Host/SNI/certificate validation. Fetch duration, redirect count, response bytes, and returned text are bounded. It does not add an authenticated browser or a new network service. See [`PATCH-NOTES.md`](PATCH-NOTES.md).
 
 
 ## v14.4.6 resource-audit security posture
@@ -186,4 +200,4 @@ Static/container tests cannot fully emulate Windows Task Scheduler, a real WSL V
 
 ## Global WSL configuration changes
 
-If a selected option requires changing `.wslconfig`, applying that change requires the global `wsl --shutdown` operation. LatticeVale checks for other running WSL distros and asks for explicit confirmation before it writes the global configuration when unrelated distros would be stopped. Declining leaves the global setting unchanged and the repair can be rerun later.
+Global `.wslconfig` changes remain exceptional. v14.4.81 may offer only the documented mirrored→NAT compatibility recovery after persistent `E_UNEXPECTED`; it backs up the file and requires explicit approval. Any such change requires global `wsl --shutdown`, so LatticeVale checks for other running distros first and asks if that running-state check itself is unavailable. Declining leaves the setting unchanged. Other normal configuration flows do not take ownership of global WSL networking.

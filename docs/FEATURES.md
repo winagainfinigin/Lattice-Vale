@@ -1,12 +1,12 @@
-# LatticeVale v14.4.7 — Complete Features and Install Options Reference
+# LatticeVale v14.4.82 — Complete Features and Install Options Reference
 
-> **v14.4.7:** managed SearXNG profiles get end-to-end keyless web research: SearXNG for discovery plus a local public-page text extractor, unless the user already selected another extract-capable provider.
+> **v14.4.82:** retains the v14.4.81 bounded WSL recovery and fixes only the wrapper return channel so helper console diagnostics remain visible while the installer receives a scalar native exit code and can execute the intended same-run eligibility re-probe.
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.4.7 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.4.82 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.7 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.82 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -85,6 +85,8 @@ Existing installer-managed repair has a lower managed-repair threshold when the 
 Fresh installs use the **explicit questionnaire**. Suggested choices are guidance; host/system-affecting Y/N, menu, numeric and Tailscale-port questions require explicit input rather than silently accepting a suggestion.
 
 ## 3.1 Select the existing Ubuntu WSL2 distro
+
+v14.4.81 additionally handles the bounded host-level case where an existing registered distro is visible to WSL but fails to cold-launch with `Wsl/Service/E_UNEXPECTED`. If that distro is needed or explicitly requested, LatticeVale can restart WSL and retry it in the same installer run; a persistent failure on explicitly mirrored networking can receive an explicit backed-up NAT compatibility fallback. The distro itself is never recreated or rewritten.
 
 LatticeVale inventories registered WSL distributions and checks:
 
@@ -335,6 +337,9 @@ Tailnet ACLs/grants/tags/device policy remain the user's responsibility.
 - installs self-hosted SearXNG plus Valkey
 - Hermes managed web configuration switches its search backend to SearXNG when selected
 - v14.4.7 pairs that search backend with the keyless `latticevale-local` public-page extractor unless an explicit extraction/shared provider is already configured
+- fresh and repair-managed profiles use Hermes Local Browser / Chromium only when no explicit browser backend/provider, gateway route, or recognized browser environment selection already owns that choice
+- a missing `auxiliary.web_extract.timeout` is filled with `360`; an explicit timeout is preserved
+- these are installer/runtime defaults only; LatticeVale does not manage `SOUL.md`, prompts, or model policy
 - local port target: **8888**, collision-aware on fresh install
 - upstream engine availability remains external: a locally healthy SearXNG request can occasionally return zero usable results when search engines rate-limit, CAPTCHA, or suspend automated traffic
 - a zero-result search alone is therefore not proof that LatticeVale, Hermes, SearXNG, or Valkey is broken; known public URLs can still be read independently through `web_extract`
@@ -793,7 +798,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.4.7
+# 8. Current managed software/source pins documented by v14.4.82
 
 The release's declared managed references include:
 
@@ -854,13 +859,13 @@ Depending on user choices, LatticeVale can manage:
 - current-user Start / Shut Down desktop shortcuts
 - limited supported global `.wslconfig` lifetime policy
 
-Current normal installer flows **do not set or switch `[wsl2] networkingMode`**.
+Current normal configuration flows **do not set or switch `[wsl2] networkingMode`**. The narrow v14.4.81 launch-recovery path may invoke the explicit host-repair helper to change only mirrored→NAT after `E_UNEXPECTED` survives a clean WSL restart and the user separately approves that backed-up compatibility action.
 
 ---
 
 # 11. WSL networking behavior
 
-Current v14.4.7 policy:
+Current v14.4.82 policy:
 
 - discover active topology
 - preserve working NAT/default/VirtioProxy-capable paths
@@ -876,7 +881,7 @@ The explicit host-repair helper is separate. For the exact `E_UNEXPECTED` + mirr
 - retest the same distro
 - retain the backup and escalate diagnostics if recovery fails
 
-This host-repair action is not a normal stack-install feature.
+This is a narrowly scoped preflight recovery path, not a general stack/networking configuration feature. Deeper host repair remains separate.
 
 ---
 
@@ -1037,36 +1042,28 @@ Current primary documentation and current source take precedence over archived v
 
 # 18. Documentation files reviewed for this consolidation
 
-## v14.4.0 audit source set, mapped to the current v14.4.7 layout (28)
+## Current documentation set after v14.4.8 consolidation (retained by v14.4.82)
 
-- `.github/PULL_REQUEST_TEMPLATE.md`
-- `docs/AUDIT-PATCH-NOTES.md`
-- `docs/BACKPORT-NOTES.md`
-- `docs/CHANGELOG.md`
-- `docs/CLEAN-HOST-RESET-PATCH-NOTES.md`
-- `docs/COMPATIBILITY-PORT-RECLAIM-PATCH-NOTES.md`
-- `docs/CONTRIBUTING.md`
-- `docs/EXISTING-INSTALL-QC-PATCH-NOTES.md`
-- `docs/FUNCTIONAL-WSL-PREFLIGHT-PATCH-NOTES.md`
-- `docs/Installer Description.txt`
-- `docs/Instructions.txt`
-- `docs/KANBAN-SKILL-POLICY-PATCH-NOTES.md`
-- `LatticeVale-Core/AUDIT.md`
-- `LatticeVale-Core/README.md`
-- `LatticeVale-Core/VERSION.txt`
-- `docs/MATRIX-RESILIENCE-PATCH-NOTES.md`
-- `docs/NETWORK-SAFETY-PATCH-NOTES.md`
+The v14.4.0 audit originally reviewed a larger set of one-off patch-note files. Those v14.x detailed notes are now preserved in `docs/PATCH-NOTES.md`; `docs/CHANGELOG.md` remains canonical for version history. Current user/maintainer documentation is intentionally split by purpose rather than by individual patch.
+
 - repository-root `README.md`
-- `docs/RELEASE.md`
-- `docs/SECURITY.md`
-- `installer/SOURCE-SHA256SUMS.txt`
-- `docs/SOURCES.md`
+- `docs/README.md`
+- `docs/FEATURES.md`
+- `docs/Instructions.txt`
+- `docs/Installer Description.txt`
 - `docs/SUPPORT.md`
+- `docs/SECURITY.md`
+- `docs/SOURCES.md`
 - `docs/THIRD-PARTY-NOTICES.md`
-- `docs/UPDATE-REPAIR-PATCH-NOTES.md`
-- `docs/WSL-HOST-SAFETY-PATCH-NOTES.md`
+- `docs/CHANGELOG.md`
+- `docs/PATCH-NOTES.md`
+- `docs/RELEASE.md`
+- `docs/CONTRIBUTING.md`
 - `docs/NATIVE-OLLAMA-INTEGRATION.md`
 - `docs/WINDOWS-INTEGRATION-TEST-MATRIX.md`
+- `LatticeVale-Core/README.md`
+- `LatticeVale-Core/AUDIT.md`
+- `.github/PULL_REQUEST_TEMPLATE.md`
 
 ## Explicitly archival v13 documentation (33)
 

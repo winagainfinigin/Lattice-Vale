@@ -4,12 +4,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7'}, version
+assert version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82'}, version
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 helper = (RELEASE / 'tools' / 'Repair-LatticeVale-WslHost.ps1').read_text(encoding='ascii')
 audit = (ROOT / 'stack' / 'state-audit.py').read_text(encoding='utf-8')
 
-# Normal installer runtime must never own/change the host-global networkingMode.
+# Normal configuration/runtime must never own/change the host-global networkingMode directly.
 for forbidden in (
     'function Resolve-LatticeValeNativeOllamaMirroredFallback',
     'function Set-WslGlobalNetworkingModeValue',
@@ -30,9 +30,9 @@ assert "wslNetworkingModeOwner = $wslNetworkingModeOwner" in ps
 assert "Shared WSL networking policy: existing mirrored mode (externally/user configured)." in ps
 assert 'without taking ownership of or rewriting .wslconfig' in ps
 
-# Safe host recovery is outside normal install runtime, backs up before editing, changes
-# only the networking key, and is attempted before DISM/feature repair when the exact
-# E_UNEXPECTED+mirrored condition is observed.
+# Safe host recovery remains implemented in the explicit helper. v14.4.81 may invoke
+# that helper in bounded launch-recovery mode, but core still has no networking writer.
+# NAT is backed up and limited to persistent E_UNEXPECTED + mirrored before deeper repair.
 assert '[switch]$ApplyNatFallback' in helper
 assert 'function Set-WslNetworkingModeNat' in helper
 assert '$backupPath = "$configPath.latticevale-auditpatch-$stamp.bak"' in helper
@@ -41,8 +41,11 @@ safe = helper.index("$initialNetworkingMode = Get-WslNetworkingModeFromConfig")
 dism = helper.index("dism.exe /Online /Cleanup-Image /RestoreHealth")
 assert safe < dism
 assert "if ($initialProbe.Unexpected -and $initialNetworkingMode -eq 'mirrored')" in helper
-assert 'Applying backed-up NAT compatibility recovery before component repair' in helper
-assert "-SkipComponentStoreRepair -ApplyNatFallback" in helper
+assert 'Applying backed-up NAT compatibility recovery' in helper
+assert '[switch]$LaunchRecoveryOnly' in helper
+assert "'-LaunchRecoveryOnly'" in ps
+assert 'Set-WslNetworkingModeNat' not in ps
+assert helper.index('if ($LaunchRecoveryOnly)') < dism
 for forbidden in ('--unregister', '--import', '--set-version', 'Optimize-VHD', 'Mount-VHD', 'Dismount-VHD'):
     assert forbidden.lower() not in helper.lower(), forbidden
 

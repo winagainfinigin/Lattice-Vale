@@ -20,7 +20,7 @@ assert 'tools\\Repair-LatticeVale-WslHost.ps1' in ps
 assert 'WSL_HOST_E_UNEXPECTED' in ps
 assert 'Catastrophic failure' in ps
 
-# The core installer remains prerequisite-only. Host mutation is isolated in an explicit helper.
+# The core installer remains prerequisite/coordination-only. Any host mutation is still isolated in the explicit helper; v14.4.81 may invoke its bounded launch-recovery mode.
 for forbidden in ('Enable-WindowsOptionalFeature', 'dism.exe /Online /Cleanup-Image /RestoreHealth'):
     assert forbidden.lower() not in ps.lower(), forbidden
 
@@ -30,7 +30,9 @@ assert 'dism.exe /Online /Cleanup-Image /RestoreHealth' in helper
 assert 'Set-WslNetworkingModeNat' in helper
 assert 'networkingMode=nat' in helper
 assert 'latticevale-auditpatch-' in helper
-assert 'wsl.exe --shutdown' in helper
+assert "Invoke-NativeProcessCapture 'wsl.exe' @('--shutdown') 30" in helper
+assert '[switch]$LaunchRecoveryOnly' in helper
+assert 'Set-WslNetworkingModeNat' not in ps
 assert 'ApplyNatFallback' in helper
 assert 'Testing current WSL state before host mutation' in helper
 assert 'No host repair was performed' in helper

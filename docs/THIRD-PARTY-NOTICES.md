@@ -1,5 +1,7 @@
 # Third-party notices
 
+The v14.4.7 web-extraction change, v14.4.8 Hermes clean/repair maintenance, v14.4.81 WSL launch-recovery hotfix, and v14.4.82 helper return-value hotfix add no redistributed third-party binary, image, package, or license. Local browser support uses the Chromium/Playwright runtime already provided by the separately obtained Hermes Agent image.
+
 ## v14.3.38 notice
 
 The Kanban/skill reliability patch adds **no new third-party package, binary, image, model, or external service**. It uses the Hermes Agent plugin/tool interfaces already present in the pinned Hermes image and generates only LatticeVale-owned text configuration/plugin policy.

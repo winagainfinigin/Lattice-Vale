@@ -1,13 +1,39 @@
 # Changelog
 
+## 14.4.82 - 2026-08-21
+
+- Fixes the v14.4.81 bounded WSL recovery wrapper so helper diagnostics are displayed through `Out-Host` instead of being returned through the function success stream. The caller now receives only the scalar native process exit code.
+- A successful `wsl --shutdown` recovery (`exit 0`) now follows the already-designed same-run path: re-probe the same registered distro, then apply the unchanged Ubuntu/architecture/storage/managed-stack eligibility rules.
+- Preserves the v14.4.81 safety boundary and storage contract: no distro/VHDX mutation, no automatic DISM/feature repair, 50 GiB free for a true fresh install, and 10 GiB free for a confirmed existing installer-managed Resume / repair.
+- Adds `v14.4.82-wsl-helper-exitcode-fixtures.py`; no service, image, package, dependency, Hermes policy, networking policy, or integration revision changes.
+
+## 14.4.81 - 2026-08-21
+
+- Fixes the WSL preflight dead end where a registered Ubuntu WSL2 distro reports `Wsl/Service/E_UNEXPECTED` / `Catastrophic failure`: when that distro is required or explicitly selected, the installer can invoke a bounded preservation-first host recovery and then fully re-probe eligibility in the same run.
+- Recovery first performs a bounded `wsl --shutdown`, waits for WSL to settle, and re-tests the same distro without changing registration, the VHDX, Windows features, or `.wslconfig`.
+- If `E_UNEXPECTED` persists **and** `.wslconfig` explicitly selects mirrored networking, the installer can offer an explicit default-No NAT compatibility recovery. The helper backs up `.wslconfig`, changes only `[wsl2] networkingMode` to `nat`, preserves unrelated settings, restarts WSL, and retests the same distro.
+- The bounded shutdown/re-probe path can run from the normal installer without elevation; the normal installer does not automatically escalate into DISM or Windows-feature mutation. Deeper host repair remains an explicit Administrator-helper action.
+- Other running WSL distros are detected before the global shutdown step; the user must explicitly approve temporarily stopping them. If running-distro enumeration itself fails, LatticeVale treats the state as unknown and asks before global shutdown rather than assuming no unrelated distro is active. An explicitly requested broken `-DistroName` receives recovery even when another registered distro is healthy.
+- After a successful WSL recovery, the installer re-runs normal Ubuntu/version/architecture/storage/managed-stack checks. Fresh-install and managed-repair storage thresholds are unchanged.
+- Adds `v14.4.81-wsl-launch-recovery-fixtures.py` and updates current release/test/documentation identity without adding any runtime service, image, package, API key, port, model-policy change, or third-party dependency.
+
+## 14.4.8 - 2026-08-21
+
+- Fresh and repaired installer-managed Hermes profiles fill the free Local Browser / Chromium choice only when no explicit browser backend/provider, gateway route, or recognized browser environment selection already exists; missing `auxiliary.web_extract.timeout` becomes `360`, while explicit browser/provider/timeout choices remain user-owned. This does not modify `SOUL.md`, prompts, or model policy.
+- Advances the installer-owned integrations checkpoint from revision 3 to 4 for that reliability migration without advancing the managed package/image/source refresh revision or forcing a version-only managed refresh.
+- Fixes the Linux static audit so a missing ordering marker produces an ordinary audit failure instead of an uncaught substring exception.
+- Normalizes release-manifest path handling so the strict source-manifest verifier resolves portable manifest paths consistently across supported PowerShell environments while retaining missing-file, coverage, encoding, and hash validation.
+- Consolidates the current v14.x one-off patch-note documents into [`PATCH-NOTES.md`](PATCH-NOTES.md), updates the current documentation set and official troubleshooting links, and leaves the v13 archive intact.
+- Inherits v14.4.7's SearXNG + bounded `latticevale-local` extraction design unchanged; no new service, image, package, paid provider, API key, listener, resource reservation, or user-policy ownership is introduced.
+
 ## 14.4.7 - 2026-08-21
 
 - Fixes the default Hermes web-research integration gap: SearXNG remains the keyless `web_search` backend while managed profiles receive a generated `latticevale-local` `web_extract` provider for public HTTP(S) text content.
 - Adds no container, image, package, API key, listener, Windows networking change, or resource reservation. This avoids the substantial service/resource footprint of self-hosted extraction stacks while retaining the existing stable SearXNG topology.
 - Preserves explicit user `web.backend` / `web.extract_backend` choices. The local extractor is selected only when the effective shared/extract choice is empty or SearXNG.
 - Hardens local extraction against SSRF-style access: non-HTTP(S), credential-bearing, loopback/private/link-local/reserved/non-global destinations are rejected; each redirect is revalidated; environment proxy inheritance is disabled; redirect, response-byte, timeout, and output sizes are bounded.
-- Advances only the installer-owned integrations checkpoint revision from 2 to 3 so Resume / repair can migrate existing managed profiles without forcing package/image/source refresh.
-- Adds `v14.4.7-web-extraction-fixtures.py` and documents the implementation/security/migration contract in [`WEB-EXTRACTION-PATCH-NOTES.md`](WEB-EXTRACTION-PATCH-NOTES.md).
+- The original extraction change advanced the installer-owned integrations checkpoint from 2 to 3 so Resume / repair could migrate existing managed profiles without forcing package/image/source refresh; v14.4.8 advances it again to 4 for the missing browser/timeout defaults.
+- Adds `v14.4.7-web-extraction-fixtures.py` and documents the implementation/security/migration contract in [`PATCH-NOTES.md`](PATCH-NOTES.md).
 - Clarifies repair/update preparation across current documentation: fully stop the selected LatticeVale WSL distro before launching Option 1 Resume / repair or Option 6 Update / repair. When installed, **Shut Down LatticeVale** is the recommended method because it stops the managed stack and terminates only that distro; global `wsl --shutdown` is not required.
 - Documents the remaining SearXNG operational boundary: external engines may temporarily rate-limit/CAPTCHA/suspend automated requests, so a successful `web_search` call can return zero results without indicating a broken LatticeVale installation. Known public URLs remain independently readable through v14.4.7 `web_extract`; support/test guidance now distinguishes upstream empty-result conditions from local provider/service failures.
 
@@ -104,14 +130,14 @@ Clean-host Scheduled Task action compatibility correction.
 - Clean-host reset requires `-Execute` plus exact `CLEAN-RESET` confirmation. `-RemoveWslRuntime` permanently unregisters every WSL distro registered to the current Windows user, removes former registered distro storage, removes global `.wslconfig*` state, and attempts to uninstall the Store/MSI WSL app through `Microsoft.WSL`.
 - Windows cleanup is ownership-gated: only LatticeVale/explicit legacy pre-LatticeVale Foundry tasks, relay/helper processes, firewall rules, shortcuts/recent links, AppData/helpers and known PATH entries are eligible. Tailscale Serve is disabled only when the existing listener still references a known LatticeVale bridge backend.
 - Shared infrastructure is intentionally preserved: Hyper-V, HypervisorPlatform, VirtualMachinePlatform, HNS networks, Windows Tailscale, Obsidian, unrelated firewall/network state, and standalone `%USERPROFILE%\.hermes` are not removed by the clean-host tool.
-- Adds `CLEAN-HOST-RESET-PATCH-NOTES.md` and `v14.3.42-clean-host-reset-fixtures.py`; updates Instructions/Description/README/Support/Security/Release/Audit/GitHub metadata to distinguish conservative uninstall from intentional host reset.
+- Adds `v14.3.42-clean-host-reset-fixtures.py` and the original detailed clean-host implementation note (now preserved in `PATCH-NOTES.md`); updates Instructions/Description/README/Support/Security/Release/Audit/GitHub metadata to distinguish conservative uninstall from intentional host reset.
 - The change is audit-driven: a real host audit showed retained mirrored `.wslconfig`, LatticeVale relay task/process state, legacy pre-LatticeVale Foundry/PATH residue, root shortcuts and registered custom-location WSL storage while also confirming independently installed Tailscale/Obsidian and shared Hyper-V/HNS state that must not be indiscriminately removed.
 
 ## 14.3.41 - 2026-08-19
 
 WSL cold-start host-safety and global-networking ownership correction.
 
-Detailed implementation/audit notes: `WSL-HOST-SAFETY-PATCH-NOTES.md`.
+Detailed implementation/audit notes: `PATCH-NOTES.md`.
 
 - Removes the remaining normal-installer ability to create, switch, or reapply global WSL `[wsl2] networkingMode=mirrored`. Clean install, Resume / repair, Change components, provider/profile reconfiguration, Advanced recovery, and Update / repair now treat WSL networking mode as host/user-owned.
 - Continues to support an already-working externally configured mirrored topology without mutating `.wslconfig`; its saved ownership is recorded as `user-existing-mirrored` rather than installer-owned. NAT/default/VirtioProxy-capable paths remain supported through dynamic/scoped relays and exact firewall rules.
@@ -145,7 +171,7 @@ Existing-install quality-control and shared-Docker preservation release.
 
 Kanban / skill-management reliability and portability release.
 
-Detailed implementation/audit notes: `KANBAN-SKILL-POLICY-PATCH-NOTES.md`.
+Detailed implementation/audit notes: `PATCH-NOTES.md`.
 
 - Keeps the proven shared-board dispatcher, singleton lock, dependency graph, triage/decomposition, cross-profile worker execution, review flow, and durable artifact handling intact; the live audit showed those mechanisms functioning end-to-end.
 - Adds `latticevale-kanban-policy` v1.2.0 for installer-managed gateway profiles. Current Hermes `pre_tool_call` shallow argument modification is used only for deterministic repairs: unbound root `kanban_create` calls are normalized to `triage=true`, and a literal `HERMES_KANBAN_TASK` argument is replaced only when the process has a real bound task.

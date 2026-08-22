@@ -15,6 +15,15 @@ def check(cond, msg):
     if not cond:
         errors.append(msg)
 
+def check_before(text, first, second, msg):
+    """Record missing/order failures without aborting the rest of the audit."""
+    first_pos=text.find(first)
+    second_pos=text.find(second)
+    check(first_pos >= 0, f'{msg}: missing first marker: {first}')
+    check(second_pos >= 0, f'{msg}: missing second marker: {second}')
+    if first_pos >= 0 and second_pos >= 0:
+        check(first_pos < second_pos, msg)
+
 def read(rel):
     p=ROOT/rel
     check(p.is_file(), f'missing required file: {rel}')
@@ -164,6 +173,8 @@ r=subprocess.run([sys.executable,str(ROOT/'tests/v14.3.40-documentation-separati
 check(r.returncode==0, 'v14.3.40 documentation-separation audit failed: ' + (r.stdout+r.stderr).strip())
 r=subprocess.run([sys.executable,str(ROOT/'tests/v14.3.41-wsl-host-safety-fixtures.py')],capture_output=True,text=True)
 check(r.returncode==0, 'v14.3.41 WSL host-safety audit failed: ' + (r.stdout+r.stderr).strip())
+r=subprocess.run([sys.executable,str(ROOT/'tests/v14.4.81-wsl-launch-recovery-fixtures.py')],capture_output=True,text=True)
+check(r.returncode==0, 'v14.4.81 WSL launch-recovery audit failed: ' + (r.stdout+r.stderr).strip())
 r=subprocess.run([sys.executable,str(ROOT/'tests/v14.3.42-clean-host-reset-fixtures.py')],capture_output=True,text=True)
 check(r.returncode==0, 'v14.3.42 clean-host reset audit failed: ' + (r.stdout+r.stderr).strip())
 r=subprocess.run([sys.executable,str(ROOT/'tests/v14.3.43-scheduled-task-action-compat-fixtures.py')],capture_output=True,text=True)
@@ -379,11 +390,11 @@ check('MATRIX_HOME_ROOM' in configure and 'MATRIX_ALLOWED_ROOMS' in configure,'p
 check('secrets/matrix-profiles/$name.env' in configure and '.matrix-profiles/$name.info' in configure,'profile Matrix protected state/metadata missing')
 check('hermes_model_configured "$pdir/config.yaml"' in configure and 'HERMES_MODEL=$model' in configure,'profile Matrix provisioning must remain bound to the configured profile/model')
 check('matrix2.' not in configure and 'platforms.matrix2' not in configure,'invented second Matrix adapter namespace must never be generated')
-check(('Windows Obsidian vault folder (explicit Windows-local path required)' in ps1 and 'Windows Obsidian vault folder [suggested:' not in ps1) if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7'} else (('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' in ps1) if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else ('Windows Obsidian vault folder [$defaultObsidianVault]' in ps1)),'initial installer questionnaire must collect an explicit Windows Obsidian vault path without a v14.3.22 suggestion')
+check(('Windows Obsidian vault folder (explicit Windows-local path required)' in ps1 and 'Windows Obsidian vault folder [suggested:' not in ps1) if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82'} else (('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' in ps1) if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else ('Windows Obsidian vault folder [$defaultObsidianVault]' in ps1)),'initial installer questionnaire must collect an explicit Windows Obsidian vault path without a v14.3.22 suggestion')
 check('/_matrix/client/v3/join/$encoded_room' not in configure,'installer must not pre-join Hermes before its fresh E2EE state store initializes')
 check('/_matrix/client/v3/joined_rooms' in configure,'post-start Matrix auto-join verification missing')
 check('start_or_restart_profile_gateway_exact()' in configure and 'action=start' in configure and 'action=restart' in configure,'profile Matrix gateway activation must distinguish stopped from running s6 services')
-if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7'}:
+if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82'}:
     check('LATTICEVALE_PROVISIONING_STATE pending-manual' in configure and './manage.sh matrix-profile-finish "$name"' in configure,'profile Matrix retry/manual-finish path missing')
 else:
     check("wait_matrix_room_join \"$token\" \"$room_id\" \"Profile '$name' Matrix bot\" 45 \"$name\"" in configure,'profile Matrix join verification must track the exact named gateway')
@@ -403,18 +414,25 @@ check('start_selected_matrix_profile_gateways' in manage and "select(.matrix.ena
 check(r'runuser -u "\$stack_user" -- env -u DOCKER_CONTEXT' in bootstrap,'stack auto-start must run Compose as the selected Ubuntu user')
 check('-RestartCount 3' in ps1 and 'LastTaskResult' in ps1 and 'autoStartValidated' in ps1,'Windows stack auto-start task execution validation/retry missing')
 check('docker exec -u hermes hermes-agent hermes' in configure,'Hermes CLI should run unprivileged')
-if version == '14.4.7':
-    check("integrations) printf '3' ;;" in configure,'v14.4.7 integration migration revision missing')
-    check("web['extract_backend']='latticevale-local'" in configure,'v14.4.7 keyless extract backend selection missing')
-    check('latticevale-web-extract' in configure and 'register_web_search_provider' in configure,'v14.4.7 web extraction plugin generation missing')
-    check('create_ssrf_safe_client' in configure and 'follow_redirects=False' in configure and 'normalize_url_for_request' in configure and 'sensitive_query_param_name' in configure and 'is_safe_url' in configure,'v14.4.7 extractor network-safety boundaries missing')
+if version in {'14.4.7','14.4.8','14.4.81','14.4.82'}:
+    check("integrations) printf '4' ;;" in configure,'v14.4.7+ integration migration revision missing')
+    check("web['extract_backend']='latticevale-local'" in configure,'v14.4.7+ keyless extract backend selection missing')
+    check('latticevale-web-extract' in configure and 'register_web_search_provider' in configure,'v14.4.7+ web extraction plugin generation missing')
+    check('create_ssrf_safe_client' in configure and 'follow_redirects=False' in configure and 'normalize_url_for_request' in configure and 'sensitive_query_param_name' in configure and 'is_safe_url' in configure,'v14.4.7+ extractor network-safety boundaries missing')
+    check("browser['cloud_provider']='local'" in configure and "browser.setdefault('engine','auto')" in configure,'v14.4.8 free local-browser reliability default missing')
+    check("web_extract_aux.setdefault('timeout',360)" in configure,'v14.4.8 web-extract auxiliary timeout repair missing')
+if version == '14.4.82':
+    check('& $powershellExe @helperArgs | Out-Host' in ps1,'v14.4.82 WSL helper diagnostics must bypass the function success-output return stream')
+    check('$helperExitCode = [int]$LASTEXITCODE' in ps1 and 'return $helperExitCode' in ps1,'v14.4.82 WSL helper wrapper must return only the scalar native exit code')
 
 check('chown -R "$linux_user:$linux_user" "$stack_dir"' not in bootstrap,'must not recursively chown persistent container data')
 
 # Install ordering: selected infrastructure/Matrix must exist before Hermes provider setup.
-check(configure.index('Preparing selected Docker infrastructure before Hermes setup.') < configure.index('DEFAULT Hermes profile provider/model selection follows.'), 'supporting infrastructure must precede default Hermes provider/model selection')
-check(configure.index('Matrix account setup: create one admin account and one Hermes bot account') < configure.index('DEFAULT Hermes profile provider/model selection follows.'), 'Matrix bootstrap must precede default Hermes provider/model selection')
-check(ps1.index("Write-Step 'Bootstrapping Docker and the selected LatticeVale stack inside Ubuntu'") < ps1.index("Write-Step 'Installing selected Windows applications'"), 'Windows add-ons must follow successful Linux stack bootstrap')
+# Missing markers are audit failures, not Python exceptions, so CI reports every
+# regression in one run instead of terminating with ValueError.
+check_before(configure, 'Preparing selected Docker infrastructure before Hermes setup.', 'DEFAULT Hermes profile provider/model selection follows.', 'supporting infrastructure must precede default Hermes provider/model selection')
+check_before(configure, 'Matrix account setup: create one admin account and one Hermes bot account', 'DEFAULT Hermes profile provider/model selection follows.', 'Matrix bootstrap must precede default Hermes provider/model selection')
+check_before(ps1, "Write-Step 'Bootstrapping Docker and the selected LatticeVale stack inside Ubuntu'", "Write-Step 'Installing selected Windows applications'", 'Windows add-ons must follow successful Linux stack bootstrap')
 
 # README must make prerequisites unmistakable
 for phrase in ('does not install, import, unregister, convert, move, or repair WSL itself','Existing Ubuntu **22.04, 24.04, or 26.04** distro running as **WSL2**','over 50 GiB total capacity','at least 50 GiB free'):
@@ -466,6 +484,6 @@ if errors:
     print('STATIC AUDIT: FAIL')
     for e in errors: print('-',e)
     raise SystemExit(1)
-print('STATIC AUDIT: PASS')
+print(f'STATIC AUDIT: PASS (v{version})')
 print(f'{len(services)} Compose services')
 print(f'v{version} LatticeVale release + retained existing-WSL/recovery invariants verified')

@@ -1,13 +1,23 @@
 #Requires -Version 5.1
-#Requires -RunAsAdministrator
 [CmdletBinding()]
 param(
     [string]$DistroName = '',
     [switch]$ApplyNatFallback,
-    [switch]$SkipComponentStoreRepair
+    [switch]$SkipComponentStoreRepair,
+    [switch]$LaunchRecoveryOnly
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Test-IsAdministrator {
+    try {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
+        return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } catch {
+        return $false
+    }
+}
 
 function Write-Step([string]$Text) {
     Write-Host "`n== $Text ==" -ForegroundColor Cyan
@@ -31,44 +41,101 @@ function Test-RebootPending {
     return $false
 }
 
-function Invoke-WslLaunchProbe([string]$Name) {
-    $lines = @()
-    $exitCode = -1
-    try {
-        $lines = @(& wsl.exe -d $Name -u root -- true 2>&1 | ForEach-Object { [string]$_ })
-        $exitCode = $LASTEXITCODE
-    } catch {
-        $lines += [string]$_.Exception.Message
+function ConvertTo-WindowsProcessArgument([string]$Value) {
+    if ($null -eq $Value) { return '""' }
+    if ($Value -notmatch '[\s"]') { return $Value }
+    $builder = New-Object System.Text.StringBuilder
+    [void]$builder.Append('"')
+    $slashes = 0
+    foreach ($ch in $Value.ToCharArray()) {
+        if ($ch -eq '\') { $slashes++; continue }
+        if ($ch -eq '"') {
+            [void]$builder.Append(('\' * (($slashes * 2) + 1)))
+            [void]$builder.Append('"')
+            $slashes = 0
+            continue
+        }
+        if ($slashes -gt 0) { [void]$builder.Append(('\' * $slashes)); $slashes = 0 }
+        [void]$builder.Append($ch)
     }
-    $text = ($lines -join "`n").Trim()
+    if ($slashes -gt 0) { [void]$builder.Append(('\' * ($slashes * 2))) }
+    [void]$builder.Append('"')
+    return $builder.ToString()
+}
+
+function Invoke-NativeProcessCapture([string]$FilePath, [string[]]$Arguments, [int]$TimeoutSeconds = 30) {
+    $process = $null
+    try {
+        $argumentLine = (($Arguments | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }) -join ' ')
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $FilePath
+        $startInfo.Arguments = $argumentLine
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $startInfo
+        if (-not $process.Start()) { throw "Could not start native process: $FilePath" }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill() } catch {}
+            try { $process.WaitForExit(2000) | Out-Null } catch {}
+            $stdout = if ($stdoutTask.IsCompleted) { [string]$stdoutTask.Result } else { '' }
+            $stderr = if ($stderrTask.IsCompleted) { [string]$stderrTask.Result } else { '' }
+            $text = (($stdout + "`n" + $stderr) -replace "`0", '').Trim()
+            return [pscustomobject]@{ Success=$false; ExitCode=-1; TimedOut=$true; Text=$text; StdOut=(($stdout -replace "`0", '').Trim()); StdErr=(($stderr -replace "`0", '').Trim()) }
+        }
+        $process.WaitForExit()
+        $stdout = [string]$stdoutTask.Result
+        $stderr = [string]$stderrTask.Result
+        $text = (($stdout + "`n" + $stderr) -replace "`0", '').Trim()
+        $exitCode = [int]$process.ExitCode
+        return [pscustomobject]@{ Success=($exitCode -eq 0); ExitCode=$exitCode; TimedOut=$false; Text=$text; StdOut=(($stdout -replace "`0", '').Trim()); StdErr=(($stderr -replace "`0", '').Trim()) }
+    } catch {
+        return [pscustomobject]@{ Success=$false; ExitCode=-1; TimedOut=$false; Text=[string]$_.Exception.Message; StdOut=''; StdErr=[string]$_.Exception.Message }
+    } finally {
+        if ($process) { try { $process.Dispose() } catch {} }
+    }
+}
+
+function Invoke-WslLaunchProbe([string]$Name) {
+    $probe = Invoke-NativeProcessCapture 'wsl.exe' @('-d', $Name, '-u', 'root', '--', 'true') 30
+    $text = ([string]$probe.Text).Trim()
     return [pscustomobject]@{
-        Success = ($exitCode -eq 0)
-        ExitCode = $exitCode
+        Success = [bool]$probe.Success
+        ExitCode = [int]$probe.ExitCode
+        TimedOut = [bool]$probe.TimedOut
         Text = $text
         Unexpected = ($text -match '(?i)(Wsl/Service(?:/CreateInstance(?:/CreateVm)?)?/E_UNEXPECTED|Wsl/Service/E_UNEXPECTED|Catastrophic failure)')
     }
 }
 
-function Test-ModernStoreWsl {
-    try {
-        $versionLines = @(& wsl.exe --version 2>&1)
-        return ($LASTEXITCODE -eq 0 -and $versionLines.Count -ge 0)
-    } catch {
+function Invoke-WslShutdownRecovery {
+    $shutdown = Invoke-NativeProcessCapture 'wsl.exe' @('--shutdown') 30
+    if (-not $shutdown.Success) {
+        $detail = if ($shutdown.TimedOut) { 'wsl --shutdown timed out after 30 seconds' } elseif ($shutdown.Text) { $shutdown.Text } else { "wsl.exe exit code $($shutdown.ExitCode)" }
+        Write-Warning "The clean WSL shutdown recovery could not complete: $detail"
         return $false
     }
+    # Microsoft documents wsl --shutdown as the fast path for fully restarting WSL.
+    # Give the host VM/networking state time to settle before probing the same distro.
+    Start-Sleep -Seconds 8
+    return $true
+}
+
+function Test-ModernStoreWsl {
+    $probe = Invoke-NativeProcessCapture 'wsl.exe' @('--version') 15
+    return [bool]$probe.Success
 }
 
 function Get-RegisteredWslDistroNames {
-    try {
-        $raw = (& wsl.exe --list --quiet 2>$null | Out-String)
-        $exitCode = $LASTEXITCODE
-        if ($exitCode -ne 0) { return @() }
-        $normalized = ($raw -replace "`0", '').Trim([char]0xFEFF,[char]0x200B,[char]0x20,[char]0x0D,[char]0x0A,[char]0x09)
-        if ([string]::IsNullOrWhiteSpace($normalized)) { return @() }
-        return @($normalized -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
-    } catch {
-        return @()
-    }
+    $probe = Invoke-NativeProcessCapture 'wsl.exe' @('--list', '--quiet') 15
+    if (-not $probe.Success) { return @() }
+    $normalized = ([string]$probe.StdOut).Trim([char]0xFEFF,[char]0x200B,[char]0x20,[char]0x0D,[char]0x0A,[char]0x09)
+    if ([string]::IsNullOrWhiteSpace($normalized)) { return @() }
+    return @($normalized -split "`r?`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ })
 }
 
 function Get-WslNetworkingModeFromConfig {
@@ -169,45 +236,69 @@ if ($initialProbe.Success) {
     if ($wslFeatureState -and $wslFeatureState -ne 'Enabled' -and $modernWsl) {
         Write-Host "The legacy/inbox Windows Subsystem for Linux optional feature is '$wslFeatureState', but modern Store/MSI WSL successfully launched '$DistroName'. No feature repair is needed." -ForegroundColor Yellow
     }
-    Write-Host "WSL launch test passed for '$DistroName'. No host repair was performed; you can rerun installer\install.ps1." -ForegroundColor Green
+    Write-Host "WSL launch test passed for '$DistroName'. No host repair was performed." -ForegroundColor Green
     exit 0
 }
 
-# v14.3.41 safe-first recovery: when the launch failure is E_UNEXPECTED and the
-# global WSL configuration explicitly selects mirrored networking, test the narrow,
-# reversible networking correction before DISM or Windows feature mutation. Mirrored
-# mode is global to every WSL2 distro and can fail only after a cold restart, so host
-# configuration recovery belongs ahead of component-store repair.
+# v14.4.81 safe-first recovery: Microsoft documents wsl --shutdown as an
+# initial recovery for catastrophic/unexpected WSL failures. Try that non-destructive
+# restart first. Only if E_UNEXPECTED persists and the user explicitly configured
+# mirrored networking may the helper offer the existing backed-up NAT correction.
+if ($initialProbe.Unexpected) {
+    Write-Step 'Retrying E_UNEXPECTED after a clean WSL shutdown'
+    if (Invoke-WslShutdownRecovery) {
+        $restartProbe = Invoke-WslLaunchProbe $DistroName
+        if ($restartProbe.Success) {
+            Write-Host "WSL launch recovered after wsl --shutdown. The distro registration, VHDX, and .wslconfig were not changed." -ForegroundColor Green
+            exit 0
+        }
+        $initialProbe = $restartProbe
+        if ($restartProbe.Text) { Write-Host $restartProbe.Text }
+    }
+}
+
 $initialNetworkingMode = Get-WslNetworkingModeFromConfig
 if ($initialProbe.Unexpected -and $initialNetworkingMode -eq 'mirrored') {
-    Write-Step 'Detected E_UNEXPECTED with global mirrored WSL networking'
+    Write-Step 'Detected persistent E_UNEXPECTED with global mirrored WSL networking'
     if (-not $ApplyNatFallback) {
-        Write-Warning 'The registered distro cannot launch while .wslconfig explicitly selects networkingMode=mirrored. LatticeVale no longer creates or requires mirrored networking because host-build regressions can make a previously working configuration fail after WSL or Windows restarts.'
-        Write-Host "No Windows component or distro mutation has been performed. To back up .wslconfig, change only networkingMode to NAT, and retest the same registered distro, rerun:`n  .\tools\Repair-LatticeVale-WslHost.ps1 -DistroName '$DistroName' -SkipComponentStoreRepair -ApplyNatFallback" -ForegroundColor Yellow
+        Write-Warning 'The registered distro still cannot launch after a clean WSL restart while .wslconfig explicitly selects networkingMode=mirrored. NAT is the WSL default and is the narrow compatibility fallback LatticeVale can offer without touching the distro or VHDX.'
+        Write-Host "No Windows component or distro mutation has been performed. To back up .wslconfig, change only networkingMode to NAT, and retest the same registered distro, rerun:`n  .\tools\Repair-LatticeVale-WslHost.ps1 -DistroName '$DistroName' -LaunchRecoveryOnly -ApplyNatFallback" -ForegroundColor Yellow
         exit 20
     }
 
-    Write-Step 'Applying backed-up NAT compatibility recovery before component repair'
+    Write-Step 'Applying backed-up NAT compatibility recovery'
     $backupPath = Set-WslNetworkingModeNat
     Write-Host "Backed up the previous .wslconfig to: $backupPath"
     Write-Host 'Changed only [wsl2] networkingMode to nat; processor, memory, [general], and unrelated settings are preserved.'
-    & wsl.exe --shutdown 2>$null | Out-Null
-    Start-Sleep -Seconds 2
-    $natProbe = Invoke-WslLaunchProbe $DistroName
-    if ($natProbe.Success) {
-        Write-Host "WSL launch test passed after the NAT recovery. LatticeVale did not modify distro registration or the VHDX. You can rerun installer\install.ps1." -ForegroundColor Green
-        exit 0
+    if (Invoke-WslShutdownRecovery) {
+        $natProbe = Invoke-WslLaunchProbe $DistroName
+        if ($natProbe.Success) {
+            Write-Host "WSL launch test passed after the NAT recovery. LatticeVale did not modify distro registration or the VHDX." -ForegroundColor Green
+            exit 0
+        }
+        Write-Warning 'WSL still fails after changing only networkingMode to NAT. The .wslconfig backup was preserved.'
+        if ($natProbe.Text) { Write-Host $natProbe.Text }
+        $initialProbe = $natProbe
     }
-    Write-Warning 'WSL still fails after changing only networkingMode to NAT. The .wslconfig backup was preserved; continuing with the remaining host diagnostics instead of assuming networking was the only cause.'
-    if ($natProbe.Text) { Write-Host $natProbe.Text }
-    $initialProbe = $natProbe
+}
+
+if ($LaunchRecoveryOnly) {
+    Write-Warning 'Bounded launch recovery did not restore the existing distro. No DISM, Windows-feature mutation, distro registration change, or VHDX change was performed.'
+    Write-Host "For deeper Windows/WSL host repair, rerun without -LaunchRecoveryOnly from an elevated PowerShell window:`n  .\tools\Repair-LatticeVale-WslHost.ps1 -DistroName '$DistroName'" -ForegroundColor Yellow
+    exit 30
+}
+
+if (-not (Test-IsAdministrator)) {
+    Write-Warning 'The bounded WSL launch recovery is safe to run without elevation, but deeper DISM/Windows-feature repair requires Administrator rights.'
+    Write-Host "Open PowerShell as Administrator and rerun:`n  .\tools\Repair-LatticeVale-WslHost.ps1 -DistroName '$DistroName'" -ForegroundColor Yellow
+    exit 40
 }
 
 $systemChanged = $false
 
 if (-not $SkipComponentStoreRepair) {
     Write-Step 'Repairing the Windows component store'
-    Write-Host 'The supplied audit reported that the component store is repairable, so this modified build runs Microsoft DISM RestoreHealth before changing WSL feature state.'
+    Write-Host 'Running Microsoft DISM RestoreHealth before any deeper WSL feature-state repair.'
     & dism.exe /Online /Cleanup-Image /RestoreHealth
     $dismExit = $LASTEXITCODE
     if ($dismExit -ne 0 -and $dismExit -ne 3010) {
@@ -246,7 +337,7 @@ if ($systemChanged -or (Test-RebootPending)) {
 Write-Step 'Testing the existing WSL distro'
 $probe = Invoke-WslLaunchProbe $DistroName
 if ($probe.Success) {
-    Write-Host "WSL launch test passed for '$DistroName'. You can rerun installer\install.ps1." -ForegroundColor Green
+    Write-Host "WSL launch test passed for '$DistroName'." -ForegroundColor Green
     exit 0
 }
 
@@ -254,21 +345,12 @@ Write-Warning "WSL launch test failed with exit code $($probe.ExitCode)."
 if ($probe.Text) { Write-Host $probe.Text }
 
 if ($probe.Unexpected) {
-    Write-Step 'Retrying after a clean WSL shutdown'
-    & wsl.exe --shutdown | Out-Null
-    Start-Sleep -Seconds 2
-    $probe = Invoke-WslLaunchProbe $DistroName
-    if ($probe.Success) {
-        Write-Host "WSL launch recovered after wsl --shutdown. You can rerun installer\install.ps1." -ForegroundColor Green
-        exit 0
-    }
-
     $wslMode = Get-WslNetworkingModeFromConfig
     Write-Host "Configured WSL networkingMode: $wslMode"
     if ($wslMode -eq 'mirrored') {
         if (-not $ApplyNatFallback) {
             Write-Warning 'E_UNEXPECTED persists while .wslconfig uses mirrored networking.'
-            Write-Host 'A Microsoft WSL issue documents internal/E_UNEXPECTED failures with mirrored networking on Windows 11. LatticeVale v14.3.41 treats NAT/default networking as the compatibility-safe recovery path and no longer creates mirrored mode.'
+            Write-Host 'Current WSL issue reports show E_UNEXPECTED on affected Windows 11 builds, while mirrored-networking regressions are also documented separately. LatticeVale therefore treats NAT/default networking only as a conditional compatibility fallback here, not as proof of the root cause.'
             Write-Host "To apply a reversible NAT fallback, rerun:`n  .\tools\Repair-LatticeVale-WslHost.ps1 -DistroName '$DistroName' -SkipComponentStoreRepair -ApplyNatFallback"
             exit 20
         }
@@ -277,8 +359,7 @@ if ($probe.Unexpected) {
         $backupPath = Set-WslNetworkingModeNat
         Write-Host "Backed up the previous .wslconfig to: $backupPath"
         Write-Host 'Changed only [wsl2] networkingMode to nat; processor, memory, and [general] settings are preserved.'
-        & wsl.exe --shutdown | Out-Null
-        Start-Sleep -Seconds 2
+        [void](Invoke-WslShutdownRecovery)
         $probe = Invoke-WslLaunchProbe $DistroName
         if ($probe.Success) {
             Write-Host "WSL launch test passed in NAT mode. You can rerun installer\install.ps1." -ForegroundColor Green

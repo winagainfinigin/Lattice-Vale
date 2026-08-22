@@ -1,4 +1,28 @@
-# LatticeVale v14.4.7 audit
+# LatticeVale v14.4.82 audit
+
+## v14.4.82 WSL helper exit-code audit
+
+- The child WSL recovery helper's success-stream diagnostics are routed to `Out-Host`; they no longer become return objects from `Invoke-LatticeValeWslHostLaunchRecoveryHelper`.
+- The wrapper captures `[int]$LASTEXITCODE` immediately after the child process and returns that scalar value only.
+- Exit `0` still maps to `return $true`, which activates the existing full distro eligibility re-probe. No recovery or storage-policy branch is broadened.
+
+## v14.4.81 WSL launch-recovery audit
+
+- A registered distro blocked by `WSL_HOST_E_UNEXPECTED` can enter bounded recovery when no eligible distro exists or when that broken distro is explicitly requested.
+- The safe-first action is a bounded `wsl --shutdown`, eight-second settle, and bounded same-distro launch probe; no `.wslconfig`, Windows feature, registration, or VHDX mutation occurs before that retry.
+- Other running distros require explicit approval before the global shutdown. If WSL cannot reliably enumerate running distros during the fault, the state is treated as unknown and also requires explicit approval.
+- Persistent E_UNEXPECTED may expose a separate NAT action only when `.wslconfig` explicitly selects mirrored mode. That helper action backs up the file, changes only `networkingMode`, and retests; core installer code contains no direct networking-mode writer.
+- `-LaunchRecoveryOnly` must remain usable without elevation and must terminate before DISM/Windows-feature mutation when bounded recovery fails. Deeper repair remains explicit Administrator tooling.
+- Any recovery success invalidates the failed preflight result and triggers a complete distro eligibility re-probe. It does not bypass Ubuntu version, architecture, storage, or managed-stack checks; the existing thresholds remain 50 GiB free for a fresh install and 10 GiB free for a confirmed existing installer-managed Resume / repair.
+- Existing v14.4.8 Hermes/web reconciliation, integrations checkpoint revision 4, managed refresh policy, and user-owned agent configuration remain unchanged.
+
+## v14.4.8 maintenance audit
+
+- Confirmed installer-managed profiles receive Hermes Local Browser / Chromium only when no explicit browser backend/provider, browser gateway route, or recognized browser environment selection already exists.
+- Confirmed a missing `auxiliary.web_extract.timeout` becomes `360` while explicit timeout values remain preserved.
+- Confirmed the integrations checkpoint is revision 4 so repair adopts the installer-owned defaults without advancing the managed package/image/source refresh gate.
+- Confirmed the change is limited to runtime setup/reconciliation: no `SOUL.md`, prompt, or model-policy mutation is introduced.
+- Confirmed Linux static-audit missing-marker handling is fail-closed without an uncaught substring exception, and release-manifest path normalization retains strict file/hash verification.
 
 ## v14.4.7 web extraction audit
 
@@ -7,7 +31,7 @@
 - LatticeVale keeps SearXNG as the search backend and selects `latticevale-local` only when no explicit extract-capable/shared provider is already configured.
 - The generated extractor accepts HTTP(S) text-oriented responses, rejects credential-bearing inputs, validates every redirect, uses Hermes's connect-time SSRF-safe HTTP client and URL-safety policy (including the non-negotiable cloud-metadata block), and bounds redirects, response bytes, and returned characters.
 - No Compose service, image pin, WSL networking policy, Windows integration, host power/resource policy, or managed package/source refresh revision changes in this patch.
-- Integration checkpoint revision 3 migrates managed profiles on Resume / repair while preserving explicit user provider choices.
+- The original v14.4.7 extraction migration used integration checkpoint revision 3; v14.4.8 uses revision 4 to apply the additional missing browser/timeout defaults while preserving explicit user choices.
 
 
 ## v14.4.6 adaptive resource fingerprint audit
@@ -34,7 +58,7 @@ v14.3.43 adds defensive optional-property inspection for heterogeneous Windows S
 
 v14.3.42 adds an explicit destructive-reset boundary without changing normal installer runtime behavior. The reset tool is dry-run-first, ownership-gated, never automatic, preserves shared Hyper-V/VMP/HNS/Tailscale/Obsidian state, and reserves WSL unregister/package removal for the explicit `-RemoveWslRuntime` path.
 
-v14.3.41 adds a release invariant: normal installer/runtime code must not write or switch global WSL `[wsl2] networkingMode`. Existing externally configured mirrored mode may be observed/used if healthy; E_UNEXPECTED+mirrored recovery is isolated to the explicit Administrator repair helper, which backs up `.wslconfig` and tries NAT before broader component repair.
+v14.3.41 established the invariant that normal configuration/runtime code must not directly write or switch global WSL `[wsl2] networkingMode`. Existing externally configured mirrored mode may be observed/used if healthy. v14.4.81 permits the installer to orchestrate the explicit helper in bounded launch-recovery mode after E_UNEXPECTED; only a separately approved persistent E_UNEXPECTED+mirrored path can invoke the helper's backed-up NAT change, and deeper DISM/feature repair remains outside the normal installer path.
 
 - Inherited v14.3.39 existing-install QC: all six managed-stack menu paths were traced through Windows selection, saved-option handling, Linux checkpoint controls, component disable/reconcile behavior, recovery backups, and update backup ordering. One shared-Docker compatibility defect was found and corrected: mutating repair modes no longer run engine-global `docker image prune` or `docker builder prune`; automatic cleanup is restricted to proven LatticeVale-owned disposable state.
 - v14.3.38 Kanban/skill policy audit: the shared board, singleton dispatcher lock, dependency/decomposition flow, cross-profile workers, and durable completion artifacts are preserved. The new plugin handles only model-facing context errors. It discovers all real profiles for routing validation, modifies only installer-managed profiles, shallow-repairs only deterministic arguments, blocks ambiguous worker lifecycle misuse, and retains hard-stop guardrails. The integrations checkpoint revision forces adoption on clean and repair/update paths without requiring a software refresh.

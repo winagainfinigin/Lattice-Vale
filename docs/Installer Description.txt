@@ -1,6 +1,12 @@
-LATTICEVALE v14.4.7 — INSTALLER DESCRIPTION
+LATTICEVALE v14.4.82 — INSTALLER DESCRIPTION
 
 V14.4.7 WEB EXTRACTION PATCH: SearXNG remains the keyless search backend; managed profiles also receive a bounded keyless public-page extractor unless an explicit extract-capable provider is already configured. No extra container, service, API key, or package is added.
+
+V14.4.82 WSL RECOVERY HOTFIX: The v14.4.81 recovery helper behavior is unchanged, but its console diagnostics are now sent directly to the host while only the native integer exit code is returned to the installer. A successful bounded recovery therefore triggers the intended same-run distro eligibility re-probe instead of being misread as a failed helper exit.
+
+V14.4.81 WSL LAUNCH RECOVERY: If the selected/required registered Ubuntu WSL2 distro fails preflight with Wsl/Service/E_UNEXPECTED / Catastrophic failure, the installer can run a bounded preservation-first recovery in the same run. It tries wsl --shutdown and the same distro again first. If that failure persists while .wslconfig explicitly selects mirrored networking, the user can explicitly approve a backed-up change of only networkingMode to nat, followed by another retry. The installer then re-runs normal distro eligibility. It never unregisters/imports/moves/converts/recreates the distro or edits its VHDX, and it does not automatically run DISM/Windows-feature repair.
+
+V14.4.8 HERMES CLEAN/REPAIR RELIABILITY: A fresh or repaired installer-managed profile receives Hermes Local Browser / Chromium only when no explicit browser backend/provider, gateway route, or recognized browser environment selection already owns that choice. A missing web-extract auxiliary timeout is filled with 360 seconds. Explicit browser/provider/timeout choices remain user-owned, and LatticeVale does not modify SOUL.md, prompts, or model policy for this reliability behavior.
 
 SearXNG service health and upstream search-result availability are intentionally distinct. LatticeVale can verify the local SearXNG/Valkey service and Hermes provider wiring, but the external engines queried by SearXNG can independently rate-limit, CAPTCHA, suspend, or return no usable results. A successful local search request with an empty result set is therefore an operational/upstream condition, not by itself evidence that the LatticeVale installation requires repair. v14.4.7 keeps known-URL page extraction independent through `latticevale-local`.
 
@@ -35,7 +41,7 @@ A typical selected stack can include:
 Everything is optional except the core prerequisites and Hermes/Docker layer required by the selected installation mode.
 
 WSL HOST-NETWORKING OWNERSHIP
-LatticeVale discovers the active WSL networking topology but v14.3.41+ does not set or switch global `[wsl2] networkingMode` during clean install, repair, component changes, provider reconfiguration, advanced recovery, or update/repair. NAT/default and VirtioProxy-capable paths use dynamic/scoped relays. If the host/user has already configured mirrored networking and it is healthy, LatticeVale can consume that topology without taking ownership of `.wslconfig`. This boundary exists because a global WSL networking change affects every WSL2 distro and may behave differently after a cold Windows/WSL restart.
+LatticeVale discovers the active WSL networking topology, and normal configuration/runtime paths do not set or switch global `[wsl2] networkingMode`. NAT/default and VirtioProxy-capable paths use dynamic/scoped relays. If the host/user has already configured mirrored networking and it is healthy, LatticeVale can consume that topology without taking ownership of `.wslconfig`. The only v14.4.81+ installer-orchestrated networking change is the explicit, backed-up mirrored→NAT compatibility fallback after persistent `E_UNEXPECTED` survives a clean WSL restart. This narrow exception exists in preflight host recovery because a global WSL networking change affects every WSL2 distro; it is not used for ordinary feature configuration.
 
 ================================================================================
 2. WHAT LATTICEVALE CONFIGURES AUTOMATICALLY

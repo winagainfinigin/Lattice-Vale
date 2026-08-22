@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
 CONFIGURE = (ROOT / "stack" / "configure-stack.sh").read_text(encoding="utf-8")
 
-assert VERSION == "14.4.7", VERSION
-assert "integrations) printf '3' ;;" in CONFIGURE
+assert VERSION in {"14.4.7","14.4.8","14.4.81","14.4.82"}, VERSION
+assert "integrations) printf '4' ;;" in CONFIGURE
 assert "web['search_backend']='searxng'" in CONFIGURE
 assert "web['extract_backend']='latticevale-local'" in CONFIGURE
 assert "shared in {'','searxng'}" in CONFIGURE
@@ -28,6 +28,8 @@ assert "is_safe_url" in CONFIGURE
 assert "_MAX_RESPONSE_BYTES = 2_000_000" in CONFIGURE
 assert "_MAX_OUTPUT_CHARS = 250_000" in CONFIGURE
 assert "_MAX_REDIRECTS = 5" in CONFIGURE
+assert "browser['cloud_provider']='local'" in CONFIGURE
+assert "web_extract_aux.setdefault('timeout',360)" in CONFIGURE
 
 # Explicit non-SearXNG shared/extract providers remain authoritative: the local extractor
 # is selected only when both the shared fallback and extract choice are empty/SearXNG.
@@ -48,7 +50,7 @@ plugin_end = CONFIGURE.index("\nPY_LATTICEVALE_WEB_EXTRACT_PLUGIN\n", plugin_sta
 plugin_source = CONFIGURE[plugin_start:plugin_end]
 
 
-def run_profile_scenario(initial_web, searxng=True):
+def run_profile_scenario(initial_web, searxng=True, initial_browser=None, initial_auxiliary=None, initial_tool_gateway=None, env_lines=None):
     with tempfile.TemporaryDirectory() as td:
         base = Path(td)
         hermes = base / "data" / "hermes"
@@ -60,8 +62,17 @@ def run_profile_scenario(initial_web, searxng=True):
         }
         if initial_web is not None:
             initial["web"] = initial_web
+        if initial_browser is not None:
+            initial["browser"] = initial_browser
+        if initial_auxiliary is not None:
+            initial["auxiliary"] = initial_auxiliary
+        if initial_tool_gateway is not None:
+            initial["tool_gateway"] = initial_tool_gateway
         for cfg_path in (hermes / "config.yaml", assistant / "config.yaml"):
             cfg_path.write_text(yaml.safe_dump(initial, sort_keys=False), encoding="utf-8")
+        if env_lines:
+            (hermes / ".env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
+            (assistant / ".env").write_text("\n".join(env_lines) + "\n", encoding="utf-8")
         opts = {
             "searxng": searxng,
             "kanban": False,
@@ -102,8 +113,64 @@ root_cfg, assistant_cfg, root_plugin, assistant_plugin = run_profile_scenario({}
 for cfg in (root_cfg, assistant_cfg):
     assert cfg["web"]["search_backend"] == "searxng"
     assert cfg["web"]["extract_backend"] == "latticevale-local"
+    assert cfg["browser"]["cloud_provider"] == "local"
+    assert cfg["browser"]["engine"] == "auto"
+    assert cfg["auxiliary"]["web_extract"]["timeout"] == 360
     assert "web/latticevale-web-extract" in cfg["plugins"]["enabled"]
 assert root_plugin and assistant_plugin
+
+# Repair must preserve explicit browser and auxiliary choices while still updating
+# the installer-owned SearXNG/extraction integration.
+root_cfg, assistant_cfg, _, _ = run_profile_scenario(
+    {}, True,
+    initial_browser={"cloud_provider": "browserbase", "engine": "auto"},
+    initial_auxiliary={"web_extract": {"timeout": 75}},
+)
+for cfg in (root_cfg, assistant_cfg):
+    assert cfg["browser"]["cloud_provider"] == "browserbase"
+    assert cfg["auxiliary"]["web_extract"]["timeout"] == 75
+
+# Other deliberate browser selections/routing remain authoritative on repair.
+for browser_cfg in (
+    {"cloud_provider": "browser-use", "engine": "auto"},
+    {"cloud_provider": "camofox", "engine": "auto"},
+    {"cloud_provider": "custom-browser", "engine": "auto", "executable_path": "/custom/chromium"},
+    {"backend": "custom-backend", "engine": "auto"},
+):
+    root_cfg, assistant_cfg, _, _ = run_profile_scenario({}, True, initial_browser=browser_cfg)
+    for cfg in (root_cfg, assistant_cfg):
+        for key, value in browser_cfg.items():
+            assert cfg["browser"][key] == value
+        assert cfg["browser"].get("cloud_provider") != "local"
+
+root_cfg, assistant_cfg, _, _ = run_profile_scenario(
+    {}, True, initial_tool_gateway={"browser": "gateway"}
+)
+for cfg in (root_cfg, assistant_cfg):
+    assert cfg["tool_gateway"]["browser"] == "gateway"
+    assert cfg["browser"].get("cloud_provider") != "local"
+
+# Legacy/direct cloud credentials are evidence of an intentional cloud choice even if
+# cloud_provider has not yet been written into config.yaml.
+for env_line in ("BROWSER_USE_API_KEY=test", "BROWSERBASE_API_KEY=test", "BROWSERBASE_PROJECT_ID=test", "CAMOFOX_URL=http://localhost:9377", "BROWSER_CDP_URL=http://127.0.0.1:9222"):
+    root_cfg, assistant_cfg, _, _ = run_profile_scenario({}, True, env_lines=[env_line])
+    for cfg in (root_cfg, assistant_cfg):
+        assert cfg["browser"].get("cloud_provider") != "local"
+
+# A second repair pass over LatticeVale defaults is idempotent.
+root_cfg, assistant_cfg, _, _ = run_profile_scenario({}, True)
+root2, assistant2, _, _ = run_profile_scenario(
+    root_cfg.get("web", {}), True,
+    initial_browser=root_cfg.get("browser"),
+    initial_auxiliary=root_cfg.get("auxiliary"),
+    initial_tool_gateway=root_cfg.get("tool_gateway"),
+)
+assert root2["web"] == root_cfg["web"]
+assert root2["browser"] == root_cfg["browser"]
+assert root2["auxiliary"] == root_cfg["auxiliary"]
+assert assistant2["web"] == assistant_cfg["web"]
+assert assistant2["browser"] == assistant_cfg["browser"]
+assert assistant2["auxiliary"] == assistant_cfg["auxiliary"]
 
 root_cfg, assistant_cfg, root_plugin, assistant_plugin = run_profile_scenario({"extract_backend": "tavily"}, True)
 for cfg in (root_cfg, assistant_cfg):
@@ -201,4 +268,4 @@ assert "secret-style" not in content and "secret-script" not in content
 _, json_text = extract_text('{"ok":true,"items":[1,2]}', "application/json")
 assert '"ok": true' in json_text
 
-print("v14.4.7 web extraction fixtures: PASS")
+print("v14.4.7+ web extraction fixtures: PASS")

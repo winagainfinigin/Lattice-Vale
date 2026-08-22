@@ -8,12 +8,12 @@ import yaml
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7'}, version
+assert version in {'14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82'}, version
 configure=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 
 # Repair/update adoption: the integrations revision advances whenever an installer-owned
 # integration needs migration without touching unrelated checkpoints.
-assert ("integrations) printf '3'" in configure) if version == '14.4.7' else ("integrations) printf '2'" in configure)
+assert ("integrations) printf '4'" in configure) if version in {'14.4.7','14.4.8','14.4.81','14.4.82'} else ("integrations) printf '2'" in configure)
 
 # Routing is discovered, not machine/profile-name hard-coded. Valid user-created
 # profiles remain valid routing targets, while fallback automatic assignment only
@@ -94,6 +94,8 @@ with tempfile.TemporaryDirectory() as td:
     assert new_worker['kanban']['review_dispatch'] is False
     assert new_root['skills']['write_approval'] is True, 'explicit approval gate must survive repair/update'
     assert new_worker['skills']['write_approval'] is False, 'fresh managed profile gets Hermes automatic-write default'
+    assert new_root['browser']['cloud_provider'] == 'local' and new_worker['browser']['cloud_provider'] == 'local'
+    assert new_root['auxiliary']['web_extract']['timeout'] == 360 and new_worker['auxiliary']['web_extract']['timeout'] == 360
     assert ext_path.read_text(encoding='utf-8') == external_before, 'user-owned profile must not be rewritten'
 
 # Execute the generated plugin source itself with arbitrary profile names.

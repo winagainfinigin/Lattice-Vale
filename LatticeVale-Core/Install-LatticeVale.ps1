@@ -1957,6 +1957,94 @@ function Confirm-LatticeValeGlobalWslRestart([string]$TargetName) {
     return $true
 }
 
+function Get-LatticeValeWslHostRepairHelperPath {
+    $releaseRoot = Split-Path -Parent $PSScriptRoot
+    return (Join-Path $releaseRoot 'tools\Repair-LatticeVale-WslHost.ps1')
+}
+
+function Invoke-LatticeValeWslHostLaunchRecoveryHelper(
+    [string]$Name,
+    [switch]$ApplyNatFallback
+) {
+    $helperPath = Get-LatticeValeWslHostRepairHelperPath
+    if (-not (Test-Path -LiteralPath $helperPath -PathType Leaf)) {
+        Write-Warning "The WSL host-repair helper is missing from this release: $helperPath"
+        return 127
+    }
+    $hostExeName = if ($PSVersionTable.PSEdition -eq 'Core') { 'pwsh.exe' } else { 'powershell.exe' }
+    $powershellExe = Join-Path $PSHOME $hostExeName
+    if (-not (Test-Path -LiteralPath $powershellExe -PathType Leaf)) {
+        $fallback = Get-Command powershell.exe -ErrorAction SilentlyContinue
+        if ($fallback) { $powershellExe = [string]$fallback.Source }
+    }
+    if (-not (Test-Path -LiteralPath $powershellExe -PathType Leaf)) {
+        Write-Warning 'A supported PowerShell host could not be located for the bounded WSL host-recovery helper.'
+        return 127
+    }
+    $helperArgs = @('-NoLogo','-NoProfile','-ExecutionPolicy','Bypass','-File',$helperPath,'-DistroName',$Name,'-LaunchRecoveryOnly')
+    if ($ApplyNatFallback) { $helperArgs += '-ApplyNatFallback' }
+    # Keep helper diagnostics visible without returning them through this function's
+    # success-output stream. PowerShell captures every success-stream object from a
+    # function, so streaming the child process directly here would turn $exitCode at
+    # the caller into an array containing diagnostic text plus the native exit code.
+    # Out-Host preserves the console output while leaving this function's sole return
+    # value as the scalar native process exit code.
+    & $powershellExe @helperArgs | Out-Host
+    $helperExitCode = [int]$LASTEXITCODE
+    return $helperExitCode
+}
+
+function Try-RecoverLatticeValeWslHostLaunch([string]$Name) {
+    Write-Step "Bounded WSL launch recovery for '$Name'"
+    Write-Info 'LatticeVale will not unregister, import, convert, move, recreate, or edit files inside the distro during this recovery.'
+
+    $runningProbe = Invoke-NativeProcessCapture 'wsl.exe' @('--list','--running','--quiet') 15
+    $running = @()
+    if ($runningProbe.Success) {
+        $runningText = ([string]$runningProbe.StdOut).Replace([string][char]0, '')
+        $running = @(($runningText -split "`r?`n") | ForEach-Object { $_.Trim() } | Where-Object { $_ })
+    }
+    $others = @($running | Where-Object { -not $_.Equals($Name, [System.StringComparison]::OrdinalIgnoreCase) })
+    if (-not $runningProbe.Success) {
+        $detail = Get-SafeDiagnosticExcerpt $runningProbe.Text 240
+        if (-not $detail) { $detail = 'running-distro enumeration did not complete successfully' }
+        Write-Warning "WSL could not reliably report which distros are currently running: $detail"
+        if (-not (Read-ChoiceExplicit 'Proceed with the global WSL shutdown/restart recovery anyway?' "'wsl --shutdown' stops every running WSL2 distro. LatticeVale cannot prove whether unrelated distros are active during this host-service failure." 'No WSL process is stopped and this installer run remains blocked until the selected distro can launch.' $false $false)) {
+            return $false
+        }
+    } elseif ($others.Count -gt 0) {
+        Write-Warning ("Microsoft's first recovery step for E_UNEXPECTED is 'wsl --shutdown', which temporarily stops all running WSL2 distros. Other running distros: {0}" -f ($others -join ', '))
+        if (-not (Read-ChoiceExplicit 'Temporarily stop all running WSL distros and try the bounded launch recovery now?' 'The helper first performs only a clean WSL shutdown/restart and re-probes this existing distro.' 'No host setting is changed; this installer run remains blocked until WSL can launch the selected distro.' $false $false)) {
+            return $false
+        }
+    } else {
+        Write-Info "No other running WSL distro was detected; trying Microsoft's clean WSL shutdown/restart recovery first."
+    }
+
+    $exitCode = Invoke-LatticeValeWslHostLaunchRecoveryHelper $Name
+    if ($exitCode -eq 0) { return $true }
+
+    if ($exitCode -eq 20) {
+        Write-Warning 'The clean WSL restart did not recover the distro, and the host explicitly uses mirrored WSL networking.'
+        if (-not (Read-ChoiceExplicit 'Apply the backed-up NAT compatibility recovery now?' 'Yes backs up %UserProfile%\.wslconfig, changes only [wsl2] networkingMode to nat (the WSL default), restarts WSL, and re-tests the same registered distro. Other .wslconfig settings are preserved.' 'No global WSL setting is changed; the distro and VHDX remain untouched.' $false $false)) {
+            return $false
+        }
+        $exitCode = Invoke-LatticeValeWslHostLaunchRecoveryHelper $Name -ApplyNatFallback
+        if ($exitCode -eq 0) { return $true }
+    }
+
+    if ($exitCode -eq 10) {
+        Write-Warning 'Windows reports that a restart is required before WSL can be validated reliably.'
+    } elseif ($exitCode -eq 30) {
+        Write-Warning 'The bounded non-destructive recovery did not restore WSL. LatticeVale will not automatically escalate into DISM/Windows-feature repair during a normal install.'
+    } elseif ($exitCode -ne 0) {
+        Write-Warning "The bounded WSL launch-recovery helper exited with code $exitCode."
+    }
+    $helperPath = Get-LatticeValeWslHostRepairHelperPath
+    Write-Host "    For deeper explicit Windows/WSL host repair, run this release helper from elevated PowerShell:`n    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File `"$helperPath`" -DistroName `"$Name`"" -ForegroundColor Yellow
+    return $false
+}
+
 function Restart-LatticeValeWslForGlobalConfigChange(
     [string]$Name,
     [int]$ReadyTimeoutSeconds = 180
@@ -3148,7 +3236,7 @@ function Get-UbuntuDistroInfo([string]$Name) {
         $result.LaunchStatus = 'FAILED'
         $launchDetail = if ($osRelease.Detail) { $osRelease.Detail } else { 'distro could not be launched/read' }
         if ($launchDetail -match '(?i)(Wsl/Service(?:/CreateInstance(?:/CreateVm)?)?/E_UNEXPECTED|Wsl/Service/E_UNEXPECTED|Catastrophic failure)') {
-            Add-DistroBlocker $result 'WSL_HOST_E_UNEXPECTED' "WSL itself failed while launching the registered distro: $launchDetail. Run tools\Repair-LatticeVale-WslHost.ps1 from an elevated PowerShell window. The helper preserves the registered distro and VHDX. When E_UNEXPECTED occurs with global mirrored networking, it offers a backed-up NAT recovery before broader Windows component repair."
+            Add-DistroBlocker $result 'WSL_HOST_E_UNEXPECTED' "WSL itself failed while launching the registered distro: $launchDetail. If no eligible distro remains, v14.4.82 can offer a bounded in-run recovery: clean WSL shutdown/restart first, then an explicit backed-up NAT fallback only when persistent E_UNEXPECTED coincides with user-configured mirrored networking. Distro registration and the VHDX are preserved."
         } else {
             Add-DistroBlocker $result 'UNLAUNCHABLE' $launchDetail
         }
@@ -3354,6 +3442,42 @@ function Select-ExistingUbuntuDistro([string]$RequestedName, [object[]]$Installe
     for ($i = 0; $i -lt $infos.Count; $i++) { Show-DistroDiagnostic $infos[$i] ($i + 1) }
 
     $eligible = @($infos | Where-Object { $_.Eligible })
+    $unexpected = @($infos | Where-Object { $_.BlockerCodes -contains 'WSL_HOST_E_UNEXPECTED' })
+    $requestedUnexpected = $null
+    if (-not [string]::IsNullOrWhiteSpace($RequestedName)) {
+        $requestedUnexpected = $unexpected | Where-Object { $_.Name -ieq $RequestedName } | Select-Object -First 1
+    }
+    if ($eligible.Count -eq 0 -or $null -ne $requestedUnexpected) {
+        # v14.4.81: do not strand an otherwise registered distro on the generic
+        # WSL E_UNEXPECTED cold-start failure. Offer the bounded, preservation-first
+        # host recovery in the same installer run, then fully re-probe before deciding
+        # eligibility. This also applies when -DistroName explicitly names the broken
+        # distro even if a different registered distro is otherwise eligible.
+        # Deeper DISM/feature repair remains an explicit helper action.
+        if ($unexpected.Count -gt 0) {
+            $recoveryTarget = $null
+            if ($null -ne $requestedUnexpected) {
+                $recoveryTarget = $requestedUnexpected
+            } elseif ([string]::IsNullOrWhiteSpace($RequestedName) -and $unexpected.Count -eq 1) {
+                $recoveryTarget = $unexpected[0]
+            } else {
+                Write-Host 'WSL launch-recovery candidates:' -ForegroundColor White
+                for ($i = 0; $i -lt $unexpected.Count; $i++) { Write-Host ("  [{0}] {1}" -f ($i + 1), $unexpected[$i].Name) }
+                $recoveryChoice = Read-IntegerExplicit 'Distro to use for the WSL host recovery probe' 1 $unexpected.Count
+                $recoveryTarget = $unexpected[$recoveryChoice - 1]
+            }
+
+            if ($null -ne $recoveryTarget -and (Try-RecoverLatticeValeWslHostLaunch ([string]$recoveryTarget.Name))) {
+                Write-Step 'Rechecking Ubuntu WSL2 eligibility after host recovery'
+                $infos = @()
+                foreach ($name in $InstalledNames) { $infos += Get-UbuntuDistroInfo ([string]$name) }
+                Write-Host 'Post-recovery WSL distribution diagnostics:' -ForegroundColor White
+                for ($i = 0; $i -lt $infos.Count; $i++) { Show-DistroDiagnostic $infos[$i] ($i + 1) }
+                $eligible = @($infos | Where-Object { $_.Eligible })
+            }
+        }
+    }
+
     if ($eligible.Count -eq 0) {
         $storageOnly = @($infos | Where-Object {
             $_.WslVersion -eq 2 -and $_.UbuntuStatus -eq 'SUPPORTED' -and $_.LaunchStatus -eq 'OK' -and
@@ -6080,7 +6204,7 @@ $sharedNativeTailscale = (($tailscaleDashboard -or $tailscaleMatrix) -and ($honc
 # only when it was configured outside this installer. LatticeVale does not write or switch
 # networkingMode in either clean-install or repair/update flows.
 if ($activeWslNetworkingMode -eq 'mirrored') {
-    Write-Warning 'Existing global WSL mirrored networking is active. LatticeVale will use this already-working user/host configuration when capability checks pass, but v14.3.41 will not create, reapply, or require mirrored mode. If WSL later fails to launch with E_UNEXPECTED, use tools\Repair-LatticeVale-WslHost.ps1 for a backed-up NAT recovery.'
+    Write-Warning 'Existing global WSL mirrored networking is active. LatticeVale will use this already-working user/host configuration when capability checks pass; ordinary configuration/runtime paths will not create, reapply, or require mirrored mode. If a later install/repair preflight fails with E_UNEXPECTED, v14.4.82 can offer bounded shutdown/retry recovery and, only after persistent failure plus explicit approval, a backed-up NAT compatibility fallback.'
 }
 
 # Native Windows Ollama and Windows-host Tailscale share the observed WSL topology,

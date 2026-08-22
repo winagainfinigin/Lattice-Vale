@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.40', '14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7'}, version
+assert version in {'14.3.40', '14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82'}, version
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='ascii')
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')

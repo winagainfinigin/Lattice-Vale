@@ -1,5 +1,9 @@
 # Native Windows Ollama integration
 
+> **v14.4.81 WSL recovery note:** the bounded preflight recovery can change an explicitly mirrored host to NAT only after persistent `E_UNEXPECTED` and explicit user approval. If that occurs, later native-Windows-Ollama/Tailscale integration checks must rediscover and verify the recovered live topology; they must not assume the pre-recovery mirrored path remains valid. This does not change native Ollama ownership, model placement, or relay/firewall policy.
+
+> **v14.4.8 non-impact note:** the inherited v14.4.7 web-extraction patch and v14.4.8 Hermes clean/repair reliability maintenance do not change native Windows Ollama discovery, relay/firewall topology, model placement, or WSL networking ownership. The local-browser and missing extraction-timeout defaults apply only to installer-managed Hermes web/browser configuration.
+
 > **v14.3.41 host-safety update:** native Windows Ollama integration no longer offers or writes mirrored WSL networking as remediation. LatticeVale uses an already-working externally configured mirrored topology when available; otherwise it uses verified NAT/default/VirtioProxy-capable relays or the explicit firewall-scoped direct-Ollama fallback.
 
 

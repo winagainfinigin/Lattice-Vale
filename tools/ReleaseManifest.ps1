@@ -58,19 +58,25 @@ function Test-LatticeValeSourceManifest {
         $manifestKey=$manifestRelative.ToLowerInvariant()
         if ($listed.ContainsKey($manifestKey)) { throw "Duplicate/case-colliding source-manifest entry: $manifestRelative" }
         $listed[$manifestKey]=$true
-        $relative=$manifestRelative.Replace('/',[IO.Path]::DirectorySeparatorChar)
-        $target=[IO.Path]::GetFullPath((Join-Path $root $relative))
+        # Build the native path from already-validated portable path segments. This
+        # avoids separator/overload edge cases between Windows PowerShell 5.1, pwsh,
+        # and Linux runners while preserving the release-root escape check below.
+        $target=$root
+        foreach ($segment in @($manifestRelative -split '/')) {
+            $target=Join-Path -Path $target -ChildPath $segment
+        }
+        $target=[IO.Path]::GetFullPath($target)
         $separator = [string][IO.Path]::DirectorySeparatorChar
         $altSeparator = [string][IO.Path]::AltDirectorySeparatorChar
         $rootPrefix = if ($root.EndsWith($separator) -or $root.EndsWith($altSeparator)) { $root } else { $root+[IO.Path]::DirectorySeparatorChar }
         if (-not $target.StartsWith($rootPrefix,[StringComparison]::OrdinalIgnoreCase)) { throw "Source-manifest path escapes the release root: $manifestRelative" }
-        if (-not (Test-Path -LiteralPath $target -PathType Leaf)) { throw "Release source file is missing: $relative" }
-        $item=Get-Item -LiteralPath $target -Force
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Release source file must not be a reparse point: $relative" }
-        Assert-LatticeValePowerShellSourceEncoding -Path $target -RelativePath $manifestRelative
-        $actual=(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
-        if ($actual -ne $expected) { throw "Source verification failed for '$relative'. Expected $expected, got $actual." }
-        if ($WriteEachFile) { Write-Host "OK  $relative" }
+        $item=Get-Item -LiteralPath $target -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item -or $item.PSIsContainer) { throw "Release source file is missing: $manifestRelative" }
+        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Release source file must not be a reparse point: $manifestRelative" }
+        Assert-LatticeValePowerShellSourceEncoding -Path $item.FullName -RelativePath $manifestRelative
+        $actual=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) { throw "Source verification failed for '$manifestRelative'. Expected $expected, got $actual." }
+        if ($WriteEachFile) { Write-Host "OK  $manifestRelative" }
         $checked++
     }
     if ($checked -lt 1) { throw 'Source manifest contained no files to verify.' }

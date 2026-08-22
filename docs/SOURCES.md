@@ -1,8 +1,20 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.4.82 source-policy note
+
+v14.4.82 adds no dependency or download source. The hotfix uses the existing PowerShell `Out-Host` cmdlet to keep child-helper diagnostics visible while returning only the native process exit code to the installer. All v14.4.81 WSL tooling and upstream dependencies remain unchanged.
+
+## v14.4.81 source-policy note
+
+v14.4.81 adds no third-party runtime package, service, container image, bundled binary, API key, or paid provider. The WSL launch-recovery hotfix uses only existing Windows/WSL/PowerShell capabilities already required by LatticeVale. It does not download a repair utility, change dependency pins, or add a network source. The optional NAT compatibility action edits only the user's existing global WSL configuration after an explicit prompt and creates a local backup first.
+
+## v14.4.8 source-policy note
+
+v14.4.8 adds no third-party runtime package, service, container image, bundled binary, paid provider, or API-key requirement. The clean/repair reliability change uses the local Chromium/Playwright runtime already supplied by the pinned Hermes Agent image and fills only missing installer-managed browser/timeout configuration. The CI portability fixes and documentation consolidation add no runtime dependency.
+
 ## v14.4.7 source-policy note
 
-v14.4.7 adds no third-party runtime package, service, container image, or bundled binary. Its generated Hermes extraction plugin uses Python standard-library parsing plus `httpx` and Hermes's existing `tools.url_safety` connect-time SSRF-safe client, all already present in the pinned Hermes Agent image. The design was checked against Hermes Agent v2026.8.16's public `WebSearchProvider` / user-plugin registration contract, canonical `plugins/web/<name>` layout, web-tool dispatch path, URL-safety helpers, and the bundled SearXNG provider's search-only capability.
+v14.4.7 added no third-party runtime package, service, container image, or bundled binary. Its generated Hermes extraction plugin uses Python standard-library parsing plus `httpx` and Hermes's existing `tools.url_safety` connect-time SSRF-safe client, all already present in the pinned Hermes Agent image. The design was checked against Hermes Agent v2026.8.16's public `WebSearchProvider` / user-plugin registration contract, canonical `plugins/web/<name>` layout, web-tool dispatch path, URL-safety helpers, and the bundled SearXNG provider's search-only capability.
 
 ## v14.4.6 source-policy note
 
@@ -42,7 +54,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.7 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.4.82 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 

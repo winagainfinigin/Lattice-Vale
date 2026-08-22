@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: LatticeVale version
-      placeholder: 14.4.7
+      placeholder: 14.4.82
     validations:
       required: true
   - type: dropdown

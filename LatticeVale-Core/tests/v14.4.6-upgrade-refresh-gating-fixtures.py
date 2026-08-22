@@ -5,7 +5,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert VERSION in {'14.4.6','14.4.7'}, VERSION
+assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82'}, VERSION
 
 boot = (ROOT / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 compat = (ROOT / 'compatibility.conf').read_text(encoding='utf-8')
@@ -70,7 +70,7 @@ assert 'current_cpus = visible_cpu_count()' in audit
 docs = '\n'.join([
     (ROOT.parent / 'README.md').read_text(encoding='utf-8'),
     (ROOT.parent / 'docs/README.md').read_text(encoding='utf-8'),
-    (ROOT.parent / 'docs/RESOURCE-FINGERPRINT-AUDIT-PATCH-NOTES.md').read_text(encoding='utf-8'),
+    (ROOT.parent / 'docs/PATCH-NOTES.md').read_text(encoding='utf-8'),
 ])
 assert '14.4.5→14.4.6' in docs
 assert '14.4.2→14.4.6' in docs

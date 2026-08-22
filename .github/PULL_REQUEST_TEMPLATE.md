@@ -1,4 +1,4 @@
-> **v14.4.7 quality checklist:** preserve all v14.4.3 RAM/uninstaller and earlier ownership boundaries; live metadata repair may ignore only entries that actually vanished; resource audit must use WSL/process-visible CPU count; and a version-only bundle bump must not force managed image/source rebuilds unless the managed-refresh revision/age/legacy-state gate or explicit Option 6 requires it. Direct public 14.4.2→14.4.7 repair must still converge through refresh revision 1→2 and resource policy v2→v3.
+> **v14.4.82 quality checklist:** preserve all v14.4.3 RAM/uninstaller and earlier ownership boundaries; live metadata repair may ignore only entries that actually vanished; resource audit must use WSL/process-visible CPU count; and a version-only bundle bump must not force managed image/source rebuilds unless the managed-refresh revision/age/legacy-state gate or explicit Option 6 requires it. Direct public 14.4.2→14.4.82 repair must still converge through refresh revision 1→2 and resource policy v2→v3. Hermes clean/repair may fill only missing LatticeVale-managed web/browser defaults; explicit browser/provider/gateway/environment/timeout choices and user-owned `SOUL.md`/model policy must remain untouched.
 
 ## Summary
 
@@ -17,7 +17,7 @@ For profile/Kanban changes, use arbitrary profile names in tests. Do not assume 
 - [ ] Update / repair behavior remains bundle-pinned and preservation-first.
 - [ ] Clean-host reset remains separate, dry-run-first, ownership-gated, and never automatic; normal uninstall does not become more destructive.
 - [ ] Scheduled Task cleanup tolerates heterogeneous/non-Exec action types and never assumes `Execute`/`Arguments`/`WorkingDirectory` exist.
-- [ ] Normal installer/runtime code does not write global WSL `[wsl2] networkingMode`; host-global networking recovery remains explicit, backed up, and reversible.
+- [ ] Normal configuration/runtime code does not directly write global WSL `[wsl2] networkingMode`; v14.4.81+ bounded E_UNEXPECTED recovery may invoke only the audited helper without requiring elevation, global shutdown requires confirmation when unrelated/unknown running-distro state exists, and any mirrored→NAT change remains separately explicit, backed up, and reversible.
 - [ ] RAM/resource-policy changes do not silently take ownership of global WSL `memory`/`autoMemoryReclaim`, and user `compose.override.yaml` remains the final override layer.
 - [ ] Normal uninstall fails closed when runtime may still exist but Docker cannot be inspected, and retained unowned tasks/shortcuts keep any support files they still reference.
 - [ ] Persistent user state is preserved unless the change is an explicitly documented destructive recovery action.

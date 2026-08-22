@@ -18,9 +18,9 @@ Changes to `Reset-LatticeVale-CleanHost.ps1` must remain capability/ownership ba
 
 ## v14.3.41 host-networking and inherited safety contribution rules
 
-Do not add a normal installer path that writes global WSL `networkingMode`. Networking integrations must prove capability using the active topology and use scoped relays/firewall rules; host-global recovery belongs in the explicit repair helper and must remain backed up/reversible.
+Do not add normal configuration/runtime code that directly writes global WSL `networkingMode`. Networking integrations must prove capability using the active topology and use scoped relays/firewall rules. The v14.4.81 preflight exception is narrowly defined: after a registered distro returns `WSL_HOST_E_UNEXPECTED`, the installer may invoke the audited helper in bounded `-LaunchRecoveryOnly` mode without elevation. Global shutdown must remain confirmation-gated when unrelated running distros are present or running-distro state cannot be verified. A mirrored→NAT change requires a separate explicit decision, backup, and same-distro retest. Deeper host repair remains explicit helper-only.
 
-See `KANBAN-SKILL-POLICY-PATCH-NOTES.md` for the runtime invariants this release is protecting.
+See `PATCH-NOTES.md` for the runtime invariants this release is protecting. For Hermes web/browser work, preserve explicit user provider/browser/gateway/environment/timeout choices; LatticeVale may fill only missing installer-managed defaults and must not manage `SOUL.md` or model policy.
 
 Changes to managed Hermes profile policy must be tested on **arbitrary profile names and mixed ownership**. Never assume a secondary profile is named `assistant`; discover the real profile roster, edit only LatticeVale-managed configs, preserve valid user-created routing targets, and never automatically conscript an unrelated user-owned profile. Kanban changes must preserve worker task binding, dependency/decomposition behavior, singleton dispatch, and durable attachment semantics. Skill-policy changes must preserve explicit `skills.write_approval` choices on repair and must not weaken Hermes tool-loop hard stops as a substitute for correcting invalid tool arguments. Any migration must have both clean-install and existing-stack checkpoint coverage.
 
