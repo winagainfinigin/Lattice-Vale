@@ -1,6 +1,6 @@
 LATTICEVALE v14.4.82 — INSTALLER DESCRIPTION
 
-V14.4.7 WEB EXTRACTION PATCH: SearXNG remains the keyless search backend; managed profiles also receive a bounded keyless public-page extractor unless an explicit extract-capable provider is already configured. No extra container, service, API key, or package is added.
+CURRENT RELEASE: v14.4.82 is the current recommended LatticeVale release. It is a narrowly scoped hotfix over v14.4.81 and retains the current v14.4.8/v14.4.7 Hermes web-research behavior plus the inherited repair, update, resource, preservation, and ownership policies documented throughout the release.
 
 V14.4.82 WSL RECOVERY HOTFIX: The v14.4.81 recovery helper behavior is unchanged, but its console diagnostics are now sent directly to the host while only the native integer exit code is returned to the installer. A successful bounded recovery therefore triggers the intended same-run distro eligibility re-probe instead of being misread as a failed helper exit.
 
@@ -8,12 +8,14 @@ V14.4.81 WSL LAUNCH RECOVERY: If the selected/required registered Ubuntu WSL2 di
 
 V14.4.8 HERMES CLEAN/REPAIR RELIABILITY: A fresh or repaired installer-managed profile receives Hermes Local Browser / Chromium only when no explicit browser backend/provider, gateway route, or recognized browser environment selection already owns that choice. A missing web-extract auxiliary timeout is filled with 360 seconds. Explicit browser/provider/timeout choices remain user-owned, and LatticeVale does not modify SOUL.md, prompts, or model policy for this reliability behavior.
 
-SearXNG service health and upstream search-result availability are intentionally distinct. LatticeVale can verify the local SearXNG/Valkey service and Hermes provider wiring, but the external engines queried by SearXNG can independently rate-limit, CAPTCHA, suspend, or return no usable results. A successful local search request with an empty result set is therefore an operational/upstream condition, not by itself evidence that the LatticeVale installation requires repair. v14.4.7 keeps known-URL page extraction independent through `latticevale-local`.
+V14.4.7 WEB EXTRACTION PATCH: SearXNG remains the keyless search backend; managed profiles also receive a bounded keyless public-page extractor (`latticevale-local`) unless an explicit extract-capable provider is already configured. No extra container, service, API key, package, listener, or resource reservation is added.
+
+SearXNG service health and upstream search-result availability are intentionally distinct. LatticeVale can verify the local SearXNG/Valkey service and Hermes provider wiring, but the external engines queried by SearXNG can independently rate-limit, CAPTCHA, suspend, or return no usable results. A successful local search request with an empty result set is therefore an operational/upstream condition, not by itself evidence that the LatticeVale installation requires repair. Known public URLs remain independently readable through the managed `latticevale-local` extraction path.
 
 WHAT THIS FILE IS
 This is the plain-language capability and configuration guide. It explains what LatticeVale installs, what it configures automatically, what Hermes can do after installation, and which decisions may still belong to the user.
 It is intentionally NOT a step-by-step install guide. For commands and procedures, read Instructions.txt.
-For the consolidated current feature/install-option inventory, read FEATURES.md.
+For the complete current feature/questionnaire/mode/port/service inventory, read FEATURES.md. For symptom-oriented troubleshooting use SUPPORT.md; for trust and ownership boundaries use SECURITY.md; for exact third-party pins/source policy use SOURCES.md; for release history and detailed implementation lineage use CHANGELOG.md and PATCH-NOTES.md.
 
 ================================================================================
 1. WHAT LATTICEVALE IS
@@ -67,7 +69,20 @@ Examples include:
 Repair/update runs re-read saved intent and reconcile installer-owned state instead of assuming every current default should overwrite an existing installation.
 
 ================================================================================
-3. SETTINGS THAT MAY STILL REQUIRE USER DECISIONS
+3. HOW REPAIR, UPDATE, AND VERIFICATION FIT TOGETHER
+================================================================================
+
+The existing-install menu separates recovery from forced software refresh:
+- Resume / repair (Option 1) is the normal preservation-first repair path. It reuses saved intent, audits live state, repairs stale/incomplete managed stages, reconciles changed Compose/resource configuration, and can recreate affected containers. It refreshes installer-owned packages/images/source only when the 30-day gate, managed-refresh revision, or missing legacy refresh state requires it; a bundle-version change alone does not force that refresh.
+- Update / repair installer-managed software (Option 6) is the explicit bundle-aligned updater. After a required managed backup, it forces the current bundle's declared installer-managed package/image/source refresh and then runs the normal repair/verifier sequence.
+- Verify installation only (Option 3) is the read-only installer path when diagnostics are wanted without mutation.
+- `./manage.sh verify` validates the live installed stack; a healthy current installation reports `LatticeVale verification: HEALTHY`. `./manage.sh audit` provides more detailed state classification.
+- `installer\verify-release.ps1` serves a different purpose: it verifies the extracted release/source tree and exact SHA-256 manifest coverage before runtime changes.
+
+These distinctions are important when deciding whether a failed external provider/search request requires local repair, whether an image refresh should be forced, or whether the installation is already healthy.
+
+================================================================================
+4. SETTINGS THAT MAY STILL REQUIRE USER DECISIONS
 ================================================================================
 
 LatticeVale can automate infrastructure, but it cannot safely decide every account, model, security, cost, privacy, or workflow preference for every user. The following areas should be reviewed after installation and whenever your needs change.
@@ -239,14 +254,16 @@ Resume / repair treats stale adaptive runtime/RAM policy as an explicit repair o
 
 The inherited v14.4.4 root-assisted ownership reconciliation remains safe against transient live-file disappearance: the installer snapshots the managed tree without following symlinks or crossing nested mounts, ignores a failed metadata operation only when that exact path has vanished, and preserves fail-closed behavior for genuine still-existing filesystem failures.
 
-`Update / repair installer-managed software` forces the current LatticeVale bundle's tested/declared managed software refresh after a required managed backup. This is the preferred controlled updater.
+`Update / repair installer-managed software` (Option 6) forces the current LatticeVale bundle's tested/declared managed software refresh after a required managed backup. This is the preferred controlled updater when the goal is specifically to pull/rebuild/refresh the installer-managed software layer now.
+
+Resume / repair (Option 1) can still recreate/reconcile affected containers and can perform the bounded managed refresh when its age/revision/legacy-state trigger requires it; it simply does not force that refresh solely because the bundle version changed.
 
 `./manage.sh update` is an advanced upstream-refresh path and is not the same thing as applying a newer LatticeVale release's tested fixed pins.
 
 Separately owned software such as native Windows Ollama must be updated through its own owner/application.
 
 ================================================================================
-4. SETTINGS THAT USUALLY DO NOT NEED MANUAL EDITING
+5. SETTINGS THAT USUALLY DO NOT NEED MANUAL EDITING
 ================================================================================
 
 For installer-managed components, users normally should NOT manually edit generated credentials, room IDs, internal service URLs, Compose-generated environment wiring, installer checkpoint files, or protected Matrix token/device metadata just to fix a failed repair.
@@ -254,7 +271,7 @@ For installer-managed components, users normally should NOT manually edit genera
 Prefer rerunning the installer in the appropriate existing-install mode. Manual edits to generated internals can make ownership verification ambiguous and can cause repair to preserve rather than overwrite a value it can no longer prove is installer-owned.
 
 ================================================================================
-5. WHAT A NORMAL HEALTHY INSTALL STILL DOES NOT PROMISE
+6. WHAT A NORMAL HEALTHY INSTALL STILL DOES NOT PROMISE
 ================================================================================
 
 A healthy LatticeVale installation means the selected local stack and managed integrations pass the available checks. It does not guarantee:
@@ -269,7 +286,7 @@ A healthy LatticeVale installation means the selected local stack and managed in
 Use provider errors, status/audit output, and the installer repair modes to distinguish external-service changes from local stack corruption before deleting persistent data.
 
 ================================================================================
-6. PRESERVATION AND OWNERSHIP PRINCIPLES
+7. PRESERVATION AND OWNERSHIP PRINCIPLES
 ================================================================================
 
 LatticeVale is designed to modify only state it can identify as installer-managed and to preserve user-owned/unknown state when ownership is ambiguous.
@@ -288,7 +305,7 @@ Normal repair/update aims to preserve:
 Advanced recovery is intentionally separate because some recovery actions can replace narrowly scoped installer-owned identity state. Read those prompts before confirming.
 
 ================================================================================
-7. NORMAL UNINSTALL VS. CLEAN-HOST RESET
+8. NORMAL UNINSTALL VS. CLEAN-HOST RESET
 ================================================================================
 
 Normal `installer\uninstall.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites. v14.4.5 refuses to continue when Docker runtime may still exist but the Docker daemon is unavailable, because deleting only the Windows side could leave restartable containers behind. If an ownership-modified scheduled task or shortcut is retained, support files it still references are retained too. Installer-owned direct-Ollama environment restoration is applied only when the recorded value is still owned and is followed by a Windows environment-change broadcast.
@@ -302,12 +319,13 @@ The utility also treats Windows Scheduled Task action collections as heterogeneo
 The utility deliberately does not treat every virtualization/networking component as LatticeVale-owned. It preserves Hyper-V, HypervisorPlatform, VirtualMachinePlatform, HNS infrastructure, Windows Tailscale, Obsidian, unrelated firewall/HNS state, and `%USERPROFILE%\.hermes` unless a future tool can prove more specific ownership. This boundary minimizes collateral damage on systems where WSL, Hyper-V, Tailscale or Hermes tooling is shared with other workloads.
 
 ================================================================================
-8. COMPATIBILITY BOUNDARY
+9. COMPATIBILITY BOUNDARY
 ================================================================================
 
 The distributed LatticeVale bundle targets:
-- Windows 10/11 x64/AMD64;
+- Windows 10/11 x64/AMD64 build 19041 or newer;
 - Microsoft WSL already installed and functioning;
+- Windows PowerShell 5.1 or PowerShell 7.x for the shipped Windows entry points;
 - Ubuntu 22.04, 24.04, or 26.04 running as WSL2;
 - amd64/x86_64 selected distro;
 - normal non-root Ubuntu user with sudo access.
@@ -315,26 +333,50 @@ The distributed LatticeVale bundle targets:
 The installer is capability-based within that supported boundary. It does not require a particular Windows username, drive letter, WSL distro name, Linux username, secondary Hermes profile name, Matrix room ID, AI provider, or model.
 
 ================================================================================
-9. LICENSE / CUSTOMIZATION CONTEXT
+10. LICENSE / CUSTOMIZATION CONTEXT
 ================================================================================
 
 LatticeVale's own source and documentation are MIT-licensed and may be inspected, modified, forked, and redistributed subject to the MIT notice. A modified/downstream build should be labeled as modified, should not publish secrets or generated private state, and should regenerate/verify the release manifest after documentation or source changes. Third-party components keep their own licenses and terms. See the repository-root `README.md`, plus `docs\CONTRIBUTING.md` and `docs\THIRD-PARTY-NOTICES.md`, for repository/publication details.
 
 ================================================================================
-10. WHERE TO GO NEXT
+11. WHERE TO GO NEXT
 ================================================================================
 
-For exact installation, repair, update, verification, backup, and recovery steps:
+For exact installation, repair, update, verification, backup, and recovery procedures:
   Instructions.txt
 
-For security boundaries and reporting:
+For the complete current feature/questionnaire/mode/port/service inventory:
+  FEATURES.md
+
+For symptom-oriented troubleshooting and official upstream troubleshooting links:
+  SUPPORT.md
+
+For security, privilege, secrets, network exposure, and preservation boundaries:
   SECURITY.md
 
-For current quick-start/project overview:
-  README.md
-
-For release changes:
+For chronological release changes:
   CHANGELOG.md
 
-For support/diagnostic expectations:
-  SUPPORT.md
+For consolidated detailed v14.x implementation/audit notes:
+  PATCH-NOTES.md
+
+For maintainer packaging and release validation requirements:
+  RELEASE.md
+
+For exact third-party images/packages/source/model references and pin policy:
+  SOURCES.md
+
+For native Windows Ollama ownership/networking details:
+  NATIVE-OLLAMA-INTEGRATION.md
+
+For live Windows/WSL integration validation scope:
+  WINDOWS-INTEGRATION-TEST-MATRIX.md
+
+For contribution/fork expectations and publication hygiene:
+  CONTRIBUTING.md
+
+For third-party attribution and license boundaries:
+  THIRD-PARTY-NOTICES.md
+
+For the current GitHub/project overview and quick start:
+  README.md

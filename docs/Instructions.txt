@@ -1,32 +1,45 @@
 LATTICEVALE v14.4.82 — INSTRUCTIONS
 
+CURRENT RELEASE: v14.4.82 is the current recommended LatticeVale release. It is a hotfix over v14.4.81 and retains the v14.4.8/v14.4.7 Hermes web-research maintenance plus the inherited v14.4.6/v14.4.5 repair/update behavior.
+
 V14.4.82 WSL RECOVERY HOTFIX: If v14.4.81 printed that WSL recovered after `wsl --shutdown` but then warned that the helper exited with a long block of text followed by `0`, use v14.4.82. It isolates the helper's console output from its scalar exit code so successful recovery continues directly into the normal distro re-probe and Resume / repair eligibility checks.
 
-V14.4.7 WEB RESEARCH: When SearXNG is selected and no explicit extraction provider is configured, LatticeVale also configures its keyless public HTTP(S) page extractor. Existing explicit Firecrawl/Tavily/Exa/Parallel/custom provider choices are preserved.
+V14.4.8 HERMES CLEAN/REPAIR RELIABILITY: For installer-managed profiles, LatticeVale fills Hermes Local Browser / Chromium only when no explicit browser backend/provider, browser gateway route, or recognized Hermes browser environment selection already exists. A missing auxiliary web-extract timeout is filled with 360 seconds; explicit values are preserved. LatticeVale does not write SOUL.md, prompts, or user/model policy as part of this repair.
 
-V14.4.8 HERMES CLEAN/REPAIR RELIABILITY: For installer-managed profiles, LatticeVale fills Hermes Local Browser / Chromium only when no explicit browser backend/provider, browser gateway route, or recognized Hermes browser environment selection already exists. A missing auxiliary web-extract timeout is filled with 360 seconds; explicit values are preserved. LatticeVale does not write SOUL.md or user/model policy as part of this repair.
+V14.4.7 WEB RESEARCH: When SearXNG is selected and no explicit extraction provider is configured, LatticeVale also configures its bounded keyless public HTTP(S) page extractor (`latticevale-local`). Existing explicit Firecrawl/Tavily/Exa/Parallel/custom provider choices are preserved.
 
 SEARXNG OPERATIONAL NOTE: SearXNG is local, but the search engines it queries are external. `web_search` can execute successfully and still temporarily return no results when upstream engines rate-limit, CAPTCHA, or suspend automated requests. Do not treat an isolated zero-result search as proof that LatticeVale needs repair. Retry later or broaden the query; if you already know the authoritative public URL, use `web_extract` directly. Repair/troubleshoot the installation when the local SearXNG API/provider path itself fails or known public URL extraction is consistently unavailable.
 
 PURPOSE OF THIS FILE
 This file is the procedural operator guide: what to do, in what order, and how to verify or recover the installation.
-For a plain-language explanation of what LatticeVale installs, what Hermes can do, and which settings may still require your decisions after installation, read "Installer Description.txt".
-For the complete current feature/install-option inventory, read FEATURES.md.
-For security boundaries read SECURITY.md. For release history read CHANGELOG.md.
-For modifying or forking LatticeVale under its MIT license, use README.md and CONTRIBUTING.md; keep this file focused on operating the installer.
+Use the rest of the shipped documentation as follows:
+- Installer Description.txt — plain-language architecture/capability guide and the settings that remain user decisions.
+- FEATURES.md — complete current feature, questionnaire, existing-install mode, port, service, and managed-pin inventory.
+- SUPPORT.md — symptom-oriented troubleshooting, including v14.4.82/v14.4.81 WSL recovery and Hermes web-research diagnostics.
+- SECURITY.md — trust, privilege, secrets, networking, ownership, and preservation boundaries.
+- CHANGELOG.md — chronological release history.
+- PATCH-NOTES.md — consolidated detailed v14.x implementation/audit notes.
+- RELEASE.md — maintainer packaging and release-validation checklist.
+- SOURCES.md — third-party source, image, package, model, and pin policy.
+- NATIVE-OLLAMA-INTEGRATION.md — native Windows Ollama networking/ownership details.
+- WINDOWS-INTEGRATION-TEST-MATRIX.md — live Windows/WSL integration validation scope.
+- CONTRIBUTING.md — contribution/fork expectations.
+- THIRD-PARTY-NOTICES.md — third-party attribution/licensing boundaries.
+- README.md — current GitHub/project overview and quick start.
+Keep this file focused on operating the installer rather than duplicating every implementation detail from those references.
 
 ================================================================================
 1. BEFORE YOU START
 ================================================================================
 
-1. Use Windows 10/11 x64/AMD64 with Administrator access.
+1. Use Windows 10/11 x64/AMD64 build 19041 or newer with Administrator access. Windows PowerShell 5.1 and PowerShell 7.x are supported by the shipped entry points.
 2. Install and verify Microsoft WSL separately before using LatticeVale.
 3. Have an existing Ubuntu 22.04, 24.04, or 26.04 WSL2 distro using amd64/x86_64.
 4. Confirm the distro launches normally and has a normal non-root sudo user with a home under /home/.
 5. Fresh installs require the Windows volume backing the selected WSL distro to be over 50 GiB total capacity and have at least 50 GiB free. An existing installer-managed stack may Resume / repair with at least 10 GiB free; LatticeVale confirms managed ownership before applying that lower repair floor.
 6. Have Internet access for packages, container images, provider authentication, and any models that must be downloaded.
 7. If you intend to use native Windows Ollama, install it separately first. LatticeVale can use and launch an existing native Ollama, but does not install or update that Windows application.
-8. Extract the complete release ZIP to a normal Windows folder. Do not run `installer\install.ps1` from inside a ZIP viewer.
+8. Extract the complete release ZIP to a normal Windows folder. The official package contains one top-level `Lattice-Vale` folder. Do not run `installer\install.ps1` from inside a ZIP viewer.
 
 LatticeVale does NOT create, import, move, unregister, convert, or repair WSL distributions during normal installation. Normal configuration/runtime paths do not create or switch global WSL `networkingMode`; an existing externally configured mirrored mode is used only if it already works. The sole v14.4.81+ exception is the explicitly approved mirrored→NAT compatibility fallback after persistent `E_UNEXPECTED` during bounded preflight recovery.
 
@@ -42,7 +55,7 @@ From the extracted LatticeVale folder, optionally verify the complete shipped re
 
   powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1
 
-The installer performs the same source-manifest verification by default before executing the core installer.
+The installer performs the same source-manifest verification by default before executing the core installer. This verifies the extracted LatticeVale release files and exact SHA-256 manifest coverage; it does NOT verify the health of an already-installed Hermes stack. Live-stack verification is covered in section 6.
 
 The ExecutionPolicy Bypass argument applies only to that launched PowerShell process. It does not change your stored Windows execution policy and is not a substitute for reviewing trusted source.
 
@@ -76,7 +89,7 @@ The installer will detect eligible distros, verify WSL2/Ubuntu/architecture/stor
 6. If adding named profiles, choose each profile name/role and whether it should clone the default provider/model or configure its own.
 7. If enabling Kanban, choose concurrency values appropriate to the machine and intended automation level.
 8. If enabling Matrix, select whether named profiles should receive dedicated Matrix identities/rooms.
-9. If enabling Windows Tailscale exposure, choose the requested private HTTPS ports and review the networking prompt carefully.
+9. If enabling Windows Tailscale exposure, choose the requested private HTTPS ports and review the networking prompt carefully. Current fresh suggestions are 9443 for Dashboard and 443 for Matrix; existing managed values are preserved when possible.
 10. If enabling **Obsidian integration**, enter a Windows-local drive path for the vault, not a \\wsl.localhost or SMB path. QMD can be used without Obsidian and does not by itself require a Windows vault path.
 11. If enabling local AI, choose managed WSL/Docker Ollama or an already-installed native Windows Ollama when offered, then choose models/acceleration as prompted.
 12. Review the complete configuration summary.
@@ -130,17 +143,32 @@ When a managed stack is detected the installer offers:
 
 If you are unsure and simply need to recover a managed installation, choose option 1.
 
+Practical image/container rule:
+- Option 1 may recreate/reconcile affected containers when configuration, resource policy, migrations, or health require it. It may also refresh installer-owned images/packages/source when the 30-day gate, managed-refresh revision, or missing legacy refresh state requires that refresh. It does not force a pull/rebuild merely because the LatticeVale bundle version changed.
+- Option 6 is the explicit choice when your goal is to force the current bundle-aligned installer-managed package/image/source refresh now. Persistent application data and explicit user-owned overrides remain preservation-first.
+
 ================================================================================
 6. AFTER INSTALLATION — VERIFY HEALTH
 ================================================================================
 
-Open the selected Ubuntu WSL distro and run:
+From Windows PowerShell, the simplest full live-stack verification is:
+
+  wsl -d <your-distro-name> -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+
+A successful current installation reports:
+
+  LatticeVale verification: HEALTHY
+
+For additional detail, open the selected Ubuntu WSL distro and run:
 
   cd ~/hermes-stack
   ./manage.sh verify
+  ./manage.sh audit
   ./manage.sh status
   ./manage.sh profiles
   ./manage.sh matrix-info
+
+`verify` checks the live selected stack and integrations; `audit` gives the more detailed state classification used by repair diagnostics. These are distinct from `installer\verify-release.ps1`, which verifies the extracted release files rather than the installed runtime.
 
 If the installer reports a pending secondary Matrix profile, also read:
 
@@ -303,7 +331,7 @@ Remember the execution layers are different:
 
 A command that exists inside the Hermes image may not exist directly on the WSL host. When using bash -lc inside the Hermes container, call /opt/hermes/.venv/bin/hermes explicitly if the login shell does not place it on PATH.
 
-If WSL itself cannot launch reliably, stop and repair WSL outside LatticeVale first.
+If the exact preflight failure is `Wsl/Service/E_UNEXPECTED` / `Catastrophic failure`, allow the v14.4.82 bounded recovery path to run first when it is offered. It retries the same registered distro after a controlled WSL restart and then re-runs normal eligibility checks. If that bounded path fails, or WSL is broken in another way, use the explicit host-repair guidance/tool printed by LatticeVale or repair WSL separately; do not unregister the distro or delete its VHDX as a first response.
 
 ================================================================================
 15. SECURITY CHECKLIST
@@ -352,4 +380,4 @@ The clean-host reset removes only Windows integrations it can attribute to Latti
 17. VALIDATION LIMITS
 ================================================================================
 
-The release includes source/static regression coverage and release-manifest verification, but no installer can prove every third-party provider, Windows security product, Tailscale policy, GPU driver, network topology, or future upstream service behavior in advance. Treat live provider/network/account behavior as an integration boundary and use Verify/Resume rather than destructive resets when one of those external systems changes.
+The release includes source/static regression coverage and exact release-manifest verification, while WINDOWS-INTEGRATION-TEST-MATRIX.md documents the separate live Windows/WSL validation boundary. No installer can prove every third-party provider, Windows security product, Tailscale policy, GPU driver, network topology, or future upstream service behavior in advance. Treat live provider/network/account behavior as an integration boundary and use Verify/Resume rather than destructive resets when one of those external systems changes.
