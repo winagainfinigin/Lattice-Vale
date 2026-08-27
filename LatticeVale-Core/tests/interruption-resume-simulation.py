@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
     opts={
         'schema':16,'installerVersion':'14.3.0','timezone':'Etc/UTC','dashboard':False,'multiAgent':False,'workers':[],'ollamaAcceleration':'cpu','containerResourceLimits':False,
         'kanban':False,'matrix':False,'tailscale':False,'tailscaleDashboard':False,'tailscaleMatrix':False,
-        'searxng':False,'qmd':False,'honcho':False,'hermesLocalAI':False,'localTextModel':'qwen3.5:4b','localEmbeddingModel':'qwen3-embedding:4b','obsidian':False,'unattendedUpdates':False,
+        'searxng':True,'qmd':False,'honcho':False,'hermesLocalAI':False,'localTextModel':'qwen3.5:4b','localEmbeddingModel':'qwen3-embedding:4b','obsidian':False,'unattendedUpdates':False,
         'autoStart':False,'windowsShortcuts':False,'resetCheckpoints':False,'forceProviderSetup':False,'forceProfileSetup':False,
         'rebuildMatrixIdentity':False,'installerMode':'resume'
     }
@@ -65,6 +65,8 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
         exit 0
     ''')); fakecurl.chmod(0o755)
 
+    # Keep one lightweight mocked infrastructure service selected so stage_infrastructure
+    # always executes the deliberately slowed Compose pull used as the SIGINT target.
     env=os.environ.copy(); env['PATH']=str(fakebin)+os.pathsep+env['PATH']; env['USER']='tester'; env['HERMES_TEST_SLOW']='1'
 
     interrupt_out=stack/'test-interrupt.out'; interrupt_err=stack/'test-interrupt.err'
@@ -73,10 +75,16 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
     deadline=time.time()+60
     while time.time()<deadline:
         st=json.loads((stack/'.installer-state.json').read_text()) if (stack/'.installer-state.json').exists() else {}
-        if st.get('currentStage')=='infrastructure': break
+        docker_log=log.read_text(encoding='utf-8') if log.exists() else ''
+        # Wait until the mocked long-running pull is actually in progress. Signalling as
+        # soon as the stage checkpoint appears races Bash process/command substitution
+        # setup and can exercise a shell parser edge case instead of LatticeVale's
+        # intended interruption/checkpoint behavior.
+        if st.get('currentStage')=='infrastructure' and 'compose pull --ignore-buildable' in docker_log:
+            break
         time.sleep(.1)
     else:
-        os.killpg(proc.pid, signal.SIGKILL); raise AssertionError('did not reach infrastructure stage')
+        os.killpg(proc.pid, signal.SIGKILL); raise AssertionError('did not reach the slow infrastructure pull')
     os.killpg(proc.pid, signal.SIGINT)
     proc.wait(timeout=30); out_f.close(); err_f.close()
     out=interrupt_out.read_text(); err=interrupt_err.read_text()
