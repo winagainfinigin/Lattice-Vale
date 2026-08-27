@@ -62,7 +62,7 @@ for _path in sorted(RELEASE_ROOT.rglob('*.ps1'),key=lambda p:p.relative_to(RELEA
     except UnicodeDecodeError:
         _source=_bytes.decode('ascii',errors='replace')
     _shipped_ps1.append((_label,_source))
-check(len(_shipped_ps1)==12,f'expected 12 shipped PowerShell files, got {len(_shipped_ps1)}')
+check(len(_shipped_ps1)==14,f'expected 14 shipped PowerShell files, got {len(_shipped_ps1)}')
 for _label,_source in _shipped_ps1:
     for _lineno,_line in enumerate(_source.splitlines(),1):
         for _match in re.finditer(r'\$([A-Za-z_][A-Za-z0-9_]*):',_line):

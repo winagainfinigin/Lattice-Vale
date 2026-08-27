@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_ROOT = ROOT.parent
 PS_FILES = sorted((p for p in RELEASE_ROOT.rglob('*.ps1') if '.git' not in p.parts), key=lambda p: p.relative_to(RELEASE_ROOT).as_posix().lower())
-assert len(PS_FILES) == 12, f'expected 12 shipped PowerShell files, got {len(PS_FILES)}'
+assert len(PS_FILES) == 14, f'expected 14 shipped PowerShell files, got {len(PS_FILES)}'
 
 # Microsoft documents these as PowerShell automatic variables. Most are engine-maintained
 # and should not be written by user code; a subset are actually ReadOnly/Constant.
