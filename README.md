@@ -534,7 +534,7 @@ Start with:
 From PowerShell at the repository or release root:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
 ```
 
 LatticeVale requires an existing supported Ubuntu WSL2 distribution. It does not create, import, move, unregister, or convert one as part of normal installation.
@@ -567,7 +567,7 @@ wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh
 ### Uninstall
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\uninstall.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Uninstall-LatticeVale.ps1
 ```
 
 For an existing installation, the installer provides state-aware verification, Resume / repair, reconfiguration, advanced recovery, and managed-update options.
