@@ -1,6 +1,6 @@
-LATTICEVALE v14.4.83 — INSTALLER DESCRIPTION
+LATTICEVALE v14.4.83 — INSTALLER DESCRIPTION HOTFIX 2
 
-CURRENT RELEASE: v14.4.83 is the current recommended LatticeVale release. It retains v14.4.82 WSL recovery behavior while advancing adaptive resource policy to v4, persistently managing the Redis/Valkey overcommit prerequisite when those services are selected, and removing the LatticeVale-owned Ubuntu Pro option without altering external Ubuntu Pro state.
+CURRENT RELEASE: v14.4.83 Hotfix 2 is the current recommended LatticeVale release. It retains v14.4.82 WSL recovery behavior while advancing adaptive resource policy to v4, persistently managing the Redis/Valkey overcommit prerequisite when those services are selected, and removing the LatticeVale-owned Ubuntu Pro option without altering external Ubuntu Pro state.
 
 V14.4.82 WSL RECOVERY HOTFIX: The v14.4.81 recovery helper behavior is unchanged, but its console diagnostics are now sent directly to the host while only the native integer exit code is returned to the installer. A successful bounded recovery therefore triggers the intended same-run distro eligibility re-probe instead of being misread as a failed helper exit.
 
@@ -308,7 +308,7 @@ Advanced recovery is intentionally separate because some recovery actions can re
 8. NORMAL UNINSTALL VS. CLEAN-HOST RESET
 ================================================================================
 
-Normal `installer\uninstall.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites. v14.4.5 refuses to continue when Docker runtime may still exist but the Docker daemon is unavailable, because deleting only the Windows side could leave restartable containers behind. If an ownership-modified scheduled task or shortcut is retained, support files it still references are retained too. Installer-owned direct-Ollama environment restoration is applied only when the recorded value is still owned and is followed by a Windows environment-change broadcast.
+Normal `installer\Uninstall-LatticeVale.ps1` is intentionally preservation-first. It removes provably installer-owned runtime/Windows integration state but does not unregister the WSL distro or uninstall shared Windows prerequisites. v14.4.5 refuses to continue when Docker runtime may still exist but the Docker daemon is unavailable, because deleting only the Windows side could leave restartable containers behind. If an ownership-modified scheduled task or shortcut is retained, support files it still references are retained too. Installer-owned direct-Ollama environment restoration is applied only when the recorded value is still owned and is followed by a Windows environment-change broadcast.
 
 `tools\Reset-LatticeVale-CleanHost.ps1` is a separate administrator utility for a different goal: intentionally returning a host to a fresh WSL/LatticeVale baseline. It is never called automatically by install, repair, update, verify, or normal uninstall. It defaults to a dry run and requires both `-Execute` and the exact interactive confirmation `CLEAN-RESET`.
 

@@ -1,6 +1,6 @@
-LATTICEVALE v14.4.83 — INSTRUCTIONS
+LATTICEVALE v14.4.83 — INSTRUCTIONS HOTFIX 2
 
-CURRENT RELEASE: v14.4.83 is the current recommended LatticeVale release. It retains the v14.4.82 bounded WSL recovery fix and adds adaptive resource policy v4, the Redis/Valkey overcommit prerequisite, and removal of the LatticeVale-owned Ubuntu Pro option while preserving external Ubuntu Pro state.
+CURRENT RELEASE: v14.4.83 Hotfix 2 is the current recommended LatticeVale release. It retains the v14.4.82 bounded WSL recovery fix and adds adaptive resource policy v4, the Redis/Valkey overcommit prerequisite, and removal of the LatticeVale-owned Ubuntu Pro option while preserving external Ubuntu Pro state.
 
 V14.4.82 WSL RECOVERY HOTFIX: If v14.4.81 printed that WSL recovered after `wsl --shutdown` but then warned that the helper exited with a long block of text followed by `0`, use v14.4.82. It isolates the helper's console output from its scalar exit code so successful recovery continues directly into the normal distro re-probe and Resume / repair eligibility checks.
 
@@ -39,7 +39,7 @@ Keep this file focused on operating the installer rather than duplicating every 
 5. Fresh installs require the Windows volume backing the selected WSL distro to be over 50 GiB total capacity and have at least 50 GiB free. An existing installer-managed stack may Resume / repair with at least 10 GiB free; LatticeVale confirms managed ownership before applying that lower repair floor.
 6. Have Internet access for packages, container images, provider authentication, and any models that must be downloaded.
 7. If you intend to use native Windows Ollama, install it separately first. LatticeVale can use and launch an existing native Ollama, but does not install or update that Windows application.
-8. Extract the complete release ZIP to a normal Windows folder. The official package contains one top-level `Lattice-Vale` folder. Do not run `installer\install.ps1` from inside a ZIP viewer.
+8. Extract the complete release ZIP to a normal Windows folder. The official package contains one top-level `Lattice-Vale` folder. Do not run `installer\Install-LatticeVale.ps1` from inside a ZIP viewer.
 
 LatticeVale does NOT create, import, move, unregister, convert, or repair WSL distributions during normal installation. Normal configuration/runtime paths do not create or switch global WSL `networkingMode`; an existing externally configured mirrored mode is used only if it already works. The sole v14.4.81+ exception is the explicitly approved mirrored→NAT compatibility fallback after persistent `E_UNEXPECTED` during bounded preflight recovery.
 
@@ -65,11 +65,11 @@ The ExecutionPolicy Bypass argument applies only to that launched PowerShell pro
 
 Open PowerShell AS ADMINISTRATOR in the extracted LatticeVale folder and run:
 
-  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
 
 Optional explicit distro selection:
 
-  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1 -DistroName <your-distro-name>
+  powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1 -DistroName <your-distro-name>
 
 Do not assume a distro is named Ubuntu-24.04. Use the name shown by:
 
@@ -306,7 +306,7 @@ Backups may contain API keys, Matrix credentials, provider state, and other secr
 For a newer LatticeVale release:
 1. extract the new ZIP separately;
 2. run its `installer\verify-release.ps1` if desired;
-3. run its `installer\install.ps1` as Administrator;
+3. run its `installer\Install-LatticeVale.ps1` as Administrator;
 4. select the same managed distro/user;
 5. choose option 6 for an immediate controlled software refresh, or option 1 for ordinary repair/migration behavior;
 6. verify afterward with ./manage.sh verify and ./manage.sh status.
@@ -326,7 +326,7 @@ Do not rely on the distro default user if it differs from the Linux user selecte
 If installation or repair is interrupted:
 1. do not delete the WSL distro, Docker volumes, Matrix crypto state, profiles, or databases;
 2. fully stop the selected LatticeVale WSL distro before rerunning the Windows repair installer; when available, **Shut Down LatticeVale** is the recommended method because it stops the managed stack and terminates only that distro;
-3. rerun `installer\install.ps1`;
+3. rerun `installer\Install-LatticeVale.ps1`;
 4. choose Resume / repair;
 5. follow the first concrete error reported;
 6. use Advanced recovery only when its described action matches the failure.
@@ -363,12 +363,12 @@ Automatic Kanban dispatch and skill writing are real agent capabilities. They ar
 ================================================================================
 
 NORMAL LATTICEVALE UNINSTALL
-Use the shipped `installer\uninstall.ps1` and read every scope/preservation prompt. Normal uninstall is preservation-first: it does not unregister WSL and should be used when you merely want to remove LatticeVale or retain the distro/stack for recovery.
+Use the shipped `installer\Uninstall-LatticeVale.ps1` and read every scope/preservation prompt. Normal uninstall is preservation-first: it does not unregister WSL and should be used when you merely want to remove LatticeVale or retain the distro/stack for recovery.
 
 v14.4.5 intentionally aborts normal uninstall if stack metadata indicates Docker runtime may still exist but the Docker daemon cannot be inspected. Start/repair Docker in the selected distro and rerun the uninstaller; do not work around this by manually deleting Windows integration files first. If an ownership-modified task or shortcut is retained, the uninstaller also retains support files it still references rather than breaking that retained object.
 
 INTENTIONAL FRESH WSL + LATTICEVALE BASELINE
-Use tools\Reset-LatticeVale-CleanHost.ps1 only when you deliberately want an intentionally destructive clean-host rebuild. If `-RemoveWslRuntime` is selected, **ALL WSL distributions registered to the current Windows user are permanently unregistered**, not merely the distro used by LatticeVale. It is separate from `installer\uninstall.ps1` so ordinary uninstall/repair cannot accidentally cross this boundary.
+Use tools\Reset-LatticeVale-CleanHost.ps1 only when you deliberately want an intentionally destructive clean-host rebuild. If `-RemoveWslRuntime` is selected, **ALL WSL distributions registered to the current Windows user are permanently unregistered**, not merely the distro used by LatticeVale. It is separate from `installer\Uninstall-LatticeVale.ps1` so ordinary uninstall/repair cannot accidentally cross this boundary.
 
 1. Copy/extract the LatticeVale release containing the reset tool somewhere OUTSIDE any source folder you intend to delete.
 2. Open PowerShell as Administrator.

@@ -102,7 +102,7 @@ The v14.4.3 RAM-efficiency and uninstaller behavior remains inherited, while v14
 
 ## v14.4.1 layout note
 
-Public commands now use `installer\install.ps1`, `installer\verify-release.ps1`, and `installer\uninstall.ps1`. The runtime stack and repair semantics are inherited from v14.4.0; this patch only reorganizes the extracted release and updates path resolution.
+v14.4.1 introduced the `installer/` public-launcher layout with lowercase `install.ps1` / `uninstall.ps1`. v14.4.83 Hotfix 2 makes `installer\Install-LatticeVale.ps1` and `installer\Uninstall-LatticeVale.ps1` the canonical documented commands while retaining the lowercase launchers for backward compatibility; `installer\verify-release.ps1` is unchanged. This naming correction does not change runtime stack or repair semantics.
 
 ## v14.4.0 stable support note
 
@@ -114,7 +114,7 @@ If the clean-host reset dry run from v14.3.42 failed on a Scheduled Task action 
 
 ## v14.3.42 clean-host reset support
 
-Use normal `installer/uninstall.ps1` for preservation-first removal. Use `tools\Reset-LatticeVale-CleanHost.ps1` only for an intentional fresh WSL/LatticeVale baseline. Always run it without `-Execute` first. `-RemoveWslRuntime` permanently removes every WSL distro registered to the current Windows user; shared Hyper-V/VirtualMachinePlatform, Tailscale, Obsidian and unrelated Windows networking remain outside its ownership boundary.
+Use normal `installer/Uninstall-LatticeVale.ps1` for preservation-first removal. Use `tools\Reset-LatticeVale-CleanHost.ps1` only for an intentional fresh WSL/LatticeVale baseline. Always run it without `-Execute` first. `-RemoveWslRuntime` permanently removes every WSL distro registered to the current Windows user; shared Hyper-V/VirtualMachinePlatform, Tailscale, Obsidian and unrelated Windows networking remain outside its ownership boundary.
 
 ## v14.3.41 WSL cold-start recovery
 

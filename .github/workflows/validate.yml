@@ -31,7 +31,7 @@ jobs:
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
       - name: Static audit
         run: python tests/static-audit.py
-      - name: Current v14.4.83 release identity and inherited policy regressions
+      - name: Current v14.4.83 Hotfix 2 release identity and inherited policy regressions
         run: |
           python tests/v14.3.38-kanban-skill-policy-fixtures.py
           python tests/v14.3.39-existing-install-qc-fixtures.py
@@ -51,6 +51,7 @@ jobs:
           python tests/v14.4.81-wsl-launch-recovery-fixtures.py
           python tests/v14.4.82-wsl-helper-exitcode-fixtures.py
           python tests/v14.4.83-runtime-policy-overcommit-ubuntu-pro-fixtures.py
+          python tests/v14.4.83-hotfix2-public-entrypoint-fixtures.py
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |

@@ -1,5 +1,10 @@
 # Release checklist
 
+## v14.4.83 Hotfix 2 public entry points
+
+The canonical public Windows launchers in the release root are `installer/Install-LatticeVale.ps1` and `installer/Uninstall-LatticeVale.ps1`; `installer/verify-release.ps1` remains the release verifier. Lowercase `installer/install.ps1` and `installer/uninstall.ps1` remain packaged only for backward compatibility. All five launcher/verifier files are covered by `installer/SOURCE-SHA256SUMS.txt`.
+
+
 ## v14.4.82 WSL recovery return-value hotfix checks
 
 Run `LatticeVale-Core/tests/v14.4.82-wsl-helper-exitcode-fixtures.py` and the inherited v14.4.81 WSL launch-recovery fixture. Confirm `Invoke-LatticeValeWslHostLaunchRecoveryHelper` routes child helper diagnostics through `Out-Host`, captures `[int]$LASTEXITCODE`, and returns only that scalar value. Confirm the caller still treats exit `0` as success and reaches `Rechecking Ubuntu WSL2 eligibility after host recovery`. Do not change the recovery strategy, NAT fallback boundary, distro/VHDX ownership, or the 50 GiB fresh / 10 GiB managed-repair storage thresholds.

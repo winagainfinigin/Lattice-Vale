@@ -339,7 +339,7 @@ function Remove-SourceTree {
     try { $resolved=[System.IO.Path]::GetFullPath($path) } catch { throw "Invalid LatticeValeSourcePath: $path" }
     if ($resolved -eq [System.IO.Path]::GetPathRoot($resolved)) { throw 'Refusing to delete a filesystem root.' }
     $version=Join-Path $resolved 'LatticeVale-Core\VERSION.txt'
-    $install=Join-Path $resolved 'installer\install.ps1'
+    $install=Join-Path $resolved 'installer\Install-LatticeVale.ps1'
     if (-not (Test-Path -LiteralPath $version -PathType Leaf) -or -not (Test-Path -LiteralPath $install -PathType Leaf)) {
         throw "Refusing to delete source path '$resolved' because it is not recognizably a LatticeVale release root."
     }
@@ -349,7 +349,7 @@ function Remove-SourceTree {
 }
 
 Write-Host 'LatticeVale clean-host reset utility' -ForegroundColor Cyan
-Write-Host 'This is intentionally separate from installer\uninstall.ps1 because it can remove WSL itself and legacy Hermes Foundry state.'
+Write-Host 'This is intentionally separate from installer\Uninstall-LatticeVale.ps1 because it can remove WSL itself and legacy Hermes Foundry state.'
 Write-Host 'It does NOT remove Tailscale, Obsidian, Hyper-V, HypervisorPlatform, VirtualMachinePlatform, unrelated firewall rules, unrelated HNS networks, or a standalone %USERPROFILE%\.hermes directory.'
 if (-not $Execute) { Write-Host "`nDRY RUN ONLY. Re-run with -Execute after reviewing the WOULD lines." -ForegroundColor Yellow }
 if ($Execute) {

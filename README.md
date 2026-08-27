@@ -1,6 +1,6 @@
 # LatticeVale v14.4.83
 
-> **Patch Release — v14.4.83**  
+> **Patch Release — v14.4.83 Hotfix 2**  
 > Current recommended release and cumulative upgrade target from the public **v14.4.2 Main Release**.
 
 LatticeVale is a source-visible **Windows + WSL2 installer, integration layer, and lifecycle manager for a self-hosted Hermes Agent stack**.
@@ -51,6 +51,19 @@ Depending on the selected installation options, LatticeVale can provide:
 - verification, audit, repair, update, backup, and controlled uninstall
 
 Persistent Hermes profiles, sessions, memory, Matrix state, Honcho data, Ollama models, QMD data, credentials, backups, Obsidian data, and explicit Compose overrides are preserved during normal repair and update operations.
+
+---
+
+## v14.4.83 Hotfix 2 — public launcher correction
+
+Hotfix 2 corrects the documented public Windows entry-point filenames without changing the v14.4.83 runtime/resource policy. The primary repository/release commands are now:
+
+```powershell
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Uninstall-LatticeVale.ps1
+```
+
+The lowercase `installer\install.ps1` and `installer\uninstall.ps1` launchers remain shipped and manifest-verified for backward compatibility with existing automation, but current documentation and helper guidance use the canonical `Install-LatticeVale.ps1` / `Uninstall-LatticeVale.ps1` names. `installer\verify-release.ps1` is unchanged.
 
 ---
 
@@ -384,7 +397,7 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.4.7** | Patch | Keyless web extraction and conservative Hermes web/browser defaults |
 | **v14.4.81** | Hotfix | Bounded same-run recovery for WSL `E_UNEXPECTED` launch failures |
 | **v14.4.82** | Hotfix | Correct successful WSL-recovery exit-code handling |
-| **v14.4.83** | **Patch** | Ollama policy v4, Redis/Valkey overcommit prerequisite, Ubuntu Pro integration removal; current recommended release |
+| **v14.4.83** | **Patch / Hotfix 2** | Ollama policy v4, Redis/Valkey overcommit prerequisite, Ubuntu Pro integration removal, canonical public launcher correction; current recommended release |
 
 ### v14.4.1
 
@@ -454,7 +467,7 @@ v14.4.81  WSL E_UNEXPECTED recovery
     ↓
 v14.4.82  WSL recovery return-channel hotfix
     ↓
-v14.4.83  resource/runtime repair patch / current recommended release
+v14.4.83  resource/runtime repair patch + Hotfix 2 launcher correction / current recommended release
 ```
 
 ---
@@ -534,7 +547,7 @@ Start with:
 From PowerShell at the repository or release root:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
 ```
 
 LatticeVale requires an existing supported Ubuntu WSL2 distribution. It does not create, import, move, unregister, or convert one as part of normal installation.
@@ -567,7 +580,7 @@ wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh
 ### Uninstall
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\uninstall.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Uninstall-LatticeVale.ps1
 ```
 
 For an existing installation, the installer provides state-aware verification, Resume / repair, reconfiguration, advanced recovery, and managed-update options.

@@ -43,7 +43,7 @@
 - Previous environment/firewall state is recorded and restored only when it is still installer-owned; later manual `OLLAMA_HOST` changes are preserved.
 - Containers never consume the Windows NAT address directly. `native-ollama-relay.sh` discovers the current WSL default-route gateway at start and exposes the verified target only through Docker's WSL host-gateway interface. No `~/.bashrc` mutation is required.
 
-This directory contains the complete inspectable installer implementation. The recommended public entry point is `../installer/install.ps1`, which verifies `../installer/SOURCE-SHA256SUMS.txt` and then invokes `Install-LatticeVale.ps1`.
+This directory contains the complete inspectable installer implementation. The recommended public entry point is `../installer/Install-LatticeVale.ps1`, which verifies `../installer/SOURCE-SHA256SUMS.txt` and then invokes the core `Install-LatticeVale.ps1`. The older `../installer/install.ps1` launcher remains included for backward compatibility.
 
 ## v14.3.17 changes
 

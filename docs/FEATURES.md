@@ -905,7 +905,7 @@ Repair does not deliberately delete:
 
 # 13. Normal uninstall
 
-`installer\uninstall.ps1` is intentionally conservative.
+`installer\Uninstall-LatticeVale.ps1` is intentionally conservative.
 
 It can:
 

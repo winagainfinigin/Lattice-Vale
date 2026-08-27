@@ -362,7 +362,7 @@ if ($probe.Unexpected) {
         [void](Invoke-WslShutdownRecovery)
         $probe = Invoke-WslLaunchProbe $DistroName
         if ($probe.Success) {
-            Write-Host "WSL launch test passed in NAT mode. You can rerun installer\install.ps1." -ForegroundColor Green
+            Write-Host "WSL launch test passed in NAT mode. You can rerun installer\Install-LatticeVale.ps1." -ForegroundColor Green
             exit 0
         }
         Write-Warning 'WSL still fails after the NAT fallback. The .wslconfig backup was preserved for rollback.'

@@ -7,7 +7,7 @@ ROOT=STACK.parent
 
 required=[
     'README.md','LICENSE','docs/SECURITY.md','docs/SOURCES.md','docs/THIRD-PARTY-NOTICES.md',
-    'docs/CONTRIBUTING.md','docs/CHANGELOG.md','docs/RELEASE.md','docs/SUPPORT.md','installer/install.ps1','installer/uninstall.ps1','installer/verify-release.ps1',
+    'docs/CONTRIBUTING.md','docs/CHANGELOG.md','docs/RELEASE.md','docs/SUPPORT.md','installer/Install-LatticeVale.ps1','installer/Uninstall-LatticeVale.ps1','installer/install.ps1','installer/uninstall.ps1','installer/verify-release.ps1',
     '.gitattributes','.gitignore','.github/workflows/validate.yml','.github/PULL_REQUEST_TEMPLATE.md',
     'tools/New-SourceManifest.ps1',
 ]
@@ -32,8 +32,8 @@ configure=(STACK/'stack/configure-stack.sh').read_text(encoding='utf-8')
 readme=(ROOT/'README.md').read_text(encoding='utf-8')
 sources=(ROOT/'docs/SOURCES.md').read_text(encoding='utf-8')
 security=(ROOT/'docs/SECURITY.md').read_text(encoding='utf-8')
-release_install=(ROOT/'installer/install.ps1').read_text(encoding='utf-8')
-release_uninstall=(ROOT/'installer/uninstall.ps1').read_text(encoding='utf-8')
+release_install=(ROOT/'installer/Install-LatticeVale.ps1').read_text(encoding='utf-8')
+release_uninstall=(ROOT/'installer/Uninstall-LatticeVale.ps1').read_text(encoding='utf-8')
 release_verify=(ROOT/'installer/verify-release.ps1').read_text(encoding='utf-8')
 manifest_module=(ROOT/'tools/ReleaseManifest.ps1').read_text(encoding='utf-8')
 manifest_generator=(ROOT/'tools/New-SourceManifest.ps1').read_text(encoding='utf-8')
@@ -53,7 +53,7 @@ for expected in ('pkgs.tailscale.com','download.docker.com','plastic-labs/honcho
     assert expected in sources, f'SOURCES.md missing {expected}'
 
 # The documented bypass is isolated to one spawned PowerShell process, not stored user/machine policy.
-launch='powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\installer\\install.ps1'
+launch='powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\\installer\\Install-LatticeVale.ps1'
 assert launch in readme and launch in security
 assert 'Set-ExecutionPolicy Bypass' not in readme
 assert 'Set-ExecutionPolicy Bypass' not in security
@@ -103,6 +103,8 @@ assert "-name '*.msi'" in ci and "-name '*.zip'" in ci and "-name '*.deb'" in ci
 
 # Reviewable runtime code must not use opaque execution patterns.
 runtime_text='\n'.join([
+    (ROOT/'installer/Install-LatticeVale.ps1').read_text(encoding='utf-8'),
+    (ROOT/'installer/Uninstall-LatticeVale.ps1').read_text(encoding='utf-8'),
     (ROOT/'installer/install.ps1').read_text(encoding='utf-8'),
     (ROOT/'installer/uninstall.ps1').read_text(encoding='utf-8'),
     (STACK/'Uninstall-LatticeVale.ps1').read_text(encoding='utf-8'),

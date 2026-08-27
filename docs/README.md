@@ -1,6 +1,6 @@
-# LatticeVale v14.4.83 — Stable
+# LatticeVale v14.4.83 — Stable (Hotfix 2)
 
-> **v14.4.83:** retains the v14.4.82 WSL recovery fix and adds a narrow runtime reliability migration: adaptive resource policy v4 protects managed Ollama from the observed ~3 GiB cgroup ceiling when the existing aggregate budget can safely provide more headroom; selected Redis/Valkey workloads receive a persistent `vm.overcommit_memory=1` prerequisite; and the LatticeVale-owned Ubuntu Pro option is removed without uninstalling external Ubuntu Pro state. See [`PATCH-NOTES.md`](PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
+> **v14.4.83 Hotfix 2:** keeps the v14.4.83 runtime reliability changes unchanged and corrects the canonical public Windows launchers to `installer\Install-LatticeVale.ps1` and `installer\Uninstall-LatticeVale.ps1`, while retaining lowercase launchers for backward compatibility. The underlying v14.4.83 patch advances adaptive resource policy to v4, manages `vm.overcommit_memory=1` for selected Redis/Valkey workloads, and removes the LatticeVale-owned Ubuntu Pro option without altering external Ubuntu Pro state. See [`PATCH-NOTES.md`](PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
 
 **Unofficial, inspectable Windows + WSL2 installer and lifecycle manager for a self-hosted Hermes Agent stack.**
 
@@ -82,7 +82,7 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\veri
 
 Then inspect at minimum:
 
-- `installer\install.ps1`
+- `installer\Install-LatticeVale.ps1`
 - `LatticeVale-Core\Install-LatticeVale.ps1`
 - `LatticeVale-Core\linux\bootstrap.sh`
 - `LatticeVale-Core\stack\configure-stack.sh`
@@ -94,7 +94,7 @@ Then inspect at minimum:
 The supported launch command uses a **single isolated child PowerShell process** with an execution-policy override:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
 ```
 
 `-ExecutionPolicy Bypass` applies only to that spawned `powershell.exe` process; it does not change LocalMachine or CurrentUser policy. It is a convenience for running reviewed unsigned source, **not** a trust or malware-verification mechanism. Review the files and hashes first.
@@ -147,16 +147,16 @@ powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\veri
 4. Open **PowerShell as Administrator** in that folder and run:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
 ```
 
 To target a distro explicitly:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1 -DistroName Ubuntu-24.04
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1 -DistroName Ubuntu-24.04
 ```
 
-`installer/install.ps1` verifies the included source manifest by default, then invokes the full readable installer at `LatticeVale-Core\Install-LatticeVale.ps1`.
+`installer/Install-LatticeVale.ps1` verifies the included source manifest by default, then invokes the full readable installer at `LatticeVale-Core\Install-LatticeVale.ps1`.
 
 ## What the installer asks
 
@@ -266,14 +266,14 @@ Managed software refresh is policy-aware rather than version-number-driven. Norm
 Open **PowerShell as Administrator** in the extracted LatticeVale folder and run:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\uninstall.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Uninstall-LatticeVale.ps1
 ```
 
-The uninstaller verifies the same release source manifest as `installer/install.ps1`, then asks which existing LatticeVale WSL stack to remove. Its default mode stops/removes the runtime and installer-owned Windows integrations while preserving `~/hermes-stack` for a later reinstall/recovery. **Full purge** permanently deletes that stack directory only after you type `PURGE`.
+The uninstaller verifies the same release source manifest as `installer/Install-LatticeVale.ps1`, then asks which existing LatticeVale WSL stack to remove. Its default mode stops/removes the runtime and installer-owned Windows integrations while preserving `~/hermes-stack` for a later reinstall/recovery. **Full purge** permanently deletes that stack directory only after you type `PURGE`.
 
 The uninstaller never unregisters the WSL distro. It also preserves shared/general prerequisites and applications that may predate LatticeVale or be used elsewhere, including Docker Engine/packages, native Windows Ollama, Windows Tailscale, Obsidian, Ubuntu Pro, and unrelated Windows firewall/tasks/settings. A separately selected Windows-backed Obsidian vault is outside `~/hermes-stack` and is never deleted by the purge.
 
-For an intentionally **clean WSL/LatticeVale rebuild**, use `tools\Reset-LatticeVale-CleanHost.ps1` instead of making `installer\uninstall.ps1` more destructive. The clean-host reset is dry-run by default and, only when explicitly selected, can remove proven LatticeVale/legacy Foundry Windows integrations, unregister WSL distributions, remove global `.wslconfig*` state, uninstall the Store/MSI WSL app, and delete a verified LatticeVale source tree. It does not disable shared Hyper-V/VirtualMachinePlatform infrastructure or uninstall Tailscale/Obsidian. See `Instructions.txt` before using it.
+For an intentionally **clean WSL/LatticeVale rebuild**, use `tools\Reset-LatticeVale-CleanHost.ps1` instead of making `installer\Uninstall-LatticeVale.ps1` more destructive. The clean-host reset is dry-run by default and, only when explicitly selected, can remove proven LatticeVale/legacy Foundry Windows integrations, unregister WSL distributions, remove global `.wslconfig*` state, uninstall the Store/MSI WSL app, and delete a verified LatticeVale source tree. It does not disable shared Hyper-V/VirtualMachinePlatform infrastructure or uninstall Tailscale/Obsidian. See `Instructions.txt` before using it.
 
 ## Repository layout
 

@@ -39,7 +39,7 @@ v14.4.2 changes documentation, version/validation metadata, regression compatibi
 
 ## v14.4.1 release-layout security posture
 
-v14.4.1 changes release organization, not runtime privilege/network behavior. `installer/install.ps1`, `installer/uninstall.ps1`, and `installer/verify-release.ps1` resolve the repository root explicitly and continue verifying the complete extracted release tree. Git/GitHub metadata and `LICENSE` remain at repository root; substantive documentation is under `docs/`.
+v14.4.1 changed release organization, not runtime privilege/network behavior, by introducing the `installer/` public-launcher layer and exact release verification. v14.4.83 Hotfix 2 adds the canonical descriptive launchers `installer/Install-LatticeVale.ps1` and `installer/Uninstall-LatticeVale.ps1`; the lowercase v14.4.1-era launchers remain for backward compatibility. All current public launchers resolve the repository root explicitly and continue verifying the complete extracted release tree. Git/GitHub metadata and `LICENSE` remain at repository root; substantive documentation is under `docs/`.
 
 ## v14.4.0 stable security posture
 
@@ -95,7 +95,7 @@ Run `installer\verify-release.ps1` to verify every extracted release file except
 The documented command is:
 
 ```powershell
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\install.ps1
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
 ```
 
 This starts a separate Windows PowerShell process whose execution-policy override exists only for that process. It does **not** change the user's or machine's stored execution policy. `Bypass` removes execution-policy blocking/warnings for that child process; it does **not** prove the script is safe. Inspect the source and verify hashes first.

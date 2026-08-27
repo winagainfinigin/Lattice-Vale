@@ -1,5 +1,11 @@
 # Current v14.x patch notes
 
+## v14.4.83 Hotfix 2 — canonical public launcher names
+
+Hotfix 2 corrects the public release interface so the documented install/uninstall commands point to real, manifest-covered files named `installer/Install-LatticeVale.ps1` and `installer/Uninstall-LatticeVale.ps1`. Those launchers retain the same source-manifest verification and core invocation behavior as the already-tested v14.4.83 wrappers. The previous lowercase `installer/install.ps1` and `installer/uninstall.ps1` files remain included as backward-compatible entry points so scripts or automation written against v14.4.1-v14.4.83 are not broken.
+
+Current operational documentation, clean-host recognition, WSL-host repair guidance, release-layout regression coverage, and CI now treat the capitalized descriptive filenames as the primary public commands. `installer/verify-release.ps1` remains unchanged. No clean-install, Resume / repair, resource-policy, Redis/Valkey, Ubuntu Pro migration, Docker, Hermes, networking, model, or persistent-data behavior changes in Hotfix 2.
+
 ## v14.4.83 resource/runtime reliability patch
 
 The broad WSL warning/error audit showed two LatticeVale-owned runtime issues: managed Ollama was repeatedly cgroup-OOM-killed at the generated ~2.9 GiB ceiling on a roughly 10 GiB WSL VM, and both Honcho Redis and SearXNG Valkey repeatedly warned that Linux memory overcommit was disabled. The same audit also showed a noisy `wsl-pro.service` bridge even though Ubuntu Pro for WSL was not part of the desired LatticeVale configuration.
@@ -432,7 +438,7 @@ The tool never uses `tailscale serve reset`. It inspects current Serve JSON and 
 
 #### Release rule
 
-The utility is dry-run by default, never invoked automatically, and source-tree deletion requires a recognizable LatticeVale release root (`installer/install.ps1` + `LatticeVale-Core/VERSION.txt`) and refuses filesystem roots.
+The utility is dry-run by default, never invoked automatically, and source-tree deletion requires a recognizable LatticeVale release root (`installer/Install-LatticeVale.ps1` + `LatticeVale-Core/VERSION.txt`) and refuses filesystem roots.
 
 ---
 
@@ -875,7 +881,7 @@ If it reports that `E_UNEXPECTED` persists under mirrored networking, use the re
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\tools\Repair-LatticeVale-WslHost.ps1 -DistroName Ubuntu-24.04 -SkipComponentStoreRepair -ApplyNatFallback
 ```
 
-Only after the helper reports a passing WSL launch probe should `installer/install.ps1` be rerun.
+Only after the helper reports a passing WSL launch probe should `installer/Install-LatticeVale.ps1` be rerun.
 
 #### Microsoft / primary-source references reviewed
 

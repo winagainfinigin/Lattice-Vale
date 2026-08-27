@@ -146,4 +146,4 @@ LatticeVale release defaults use explicit upstream versioned image tags to reduc
 
 ## Uninstaller
 
-`installer/uninstall.ps1` and `LatticeVale-Core/Uninstall-LatticeVale.ps1` are first-party LatticeVale source and use only Windows/WSL/PowerShell facilities already required by the installer; they add no third-party dependency.
+`installer/Uninstall-LatticeVale.ps1` and `LatticeVale-Core/Uninstall-LatticeVale.ps1` are first-party LatticeVale source and use only Windows/WSL/PowerShell facilities already required by the installer; they add no third-party dependency.

@@ -28,7 +28,7 @@ for rel in (
 installer = (CORE / 'Install-LatticeVale.ps1').read_text(encoding='utf-8')
 configure = (CORE / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (CORE / 'stack/manage.sh').read_text(encoding='utf-8')
-install = (ROOT / 'installer/install.ps1').read_text(encoding='utf-8')
+install = (ROOT / 'installer/Install-LatticeVale.ps1').read_text(encoding='utf-8')
 verify = (ROOT / 'installer/verify-release.ps1').read_text(encoding='utf-8')
 manifest_module = (ROOT / 'tools/ReleaseManifest.ps1').read_text(encoding='utf-8')
 

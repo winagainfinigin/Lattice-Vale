@@ -2,6 +2,9 @@
 
 ## 14.4.83 - 2026-08-27
 
+- **Hotfix 2:** adds `installer/Install-LatticeVale.ps1` and `installer/Uninstall-LatticeVale.ps1` as the canonical public install/uninstall entry points and updates current documentation/helper guidance to use those exact filenames.
+- Keeps the previous lowercase `installer/install.ps1` and `installer/uninstall.ps1` entry points for backward compatibility; no v14.4.83 clean/repair runtime behavior is changed by Hotfix 2.
+- Adds deterministic public-entrypoint regression coverage and regenerates exact source-manifest coverage for the two new launchers and Hotfix 2 documentation/test changes.
 - Advances adaptive container resource policy from v3 to **v4**. The aggregate WSL-visible container budget and host/kernel/Docker reserve remain unchanged, but managed Ollama now receives up to a 4096 MiB protected minimum when enough budget remains after the established minima for all other enabled services. Constrained allocations continue to scale coherently instead of consuming the non-container reserve.
 - Makes policy v4 a clean-install and repair/start convergence requirement. Existing adaptive policy-v3 state is detected as stale by `configure-stack.sh`, `manage.sh`, the root stack-start helper, and `state-audit.py`, then regenerated through the existing preservation-first Compose reconciliation path.
 - Adds a root-owned `/etc/sysctl.d/99-latticevale-redis-valkey.conf` prerequisite for selected LatticeVale-managed SearXNG/Valkey or Honcho/Redis workloads and applies/verifies `vm.overcommit_memory=1` on both clean install and Resume / repair. Disabling those services does not destructively reset a sysctl value that another application may also use.
