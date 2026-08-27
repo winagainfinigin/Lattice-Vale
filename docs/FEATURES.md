@@ -1,12 +1,12 @@
-# LatticeVale v14.4.82 — Complete Features and Install Options Reference
+# LatticeVale v14.4.83 — Complete Features and Install Options Reference
 
-> **v14.4.82:** retains the v14.4.81 bounded WSL recovery and fixes only the wrapper return channel so helper console diagnostics remain visible while the installer receives a scalar native exit code and can execute the intended same-run eligibility re-probe.
+> **v14.4.83:** retains the v14.4.82 WSL recovery behavior, advances adaptive resource policy to v4, persistently supplies the Redis/Valkey overcommit prerequisite when selected, and removes the LatticeVale-owned Ubuntu Pro option without modifying external Ubuntu Pro state.
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.4.82 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.4.83 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.82 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.83 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -32,7 +32,6 @@ Core managed layers include:
 - optional Honcho persistent memory
 - optional managed WSL/Docker Ollama or integration with separately installed native Windows Ollama
 - optional adaptive per-container CPU/RAM ceilings
-- optional Ubuntu Pro for WSL
 - optional unattended Ubuntu security updates
 - optional supported WSL service-lifetime policy
 - optional Windows logon auto-start
@@ -527,16 +526,6 @@ Policy v3 reserves 30% of WSL-visible RAM on <=6 GiB, 25% on <=12 GiB, 20% on <=
 
 LatticeVale does not set global WSL `memory` or `autoMemoryReclaim` for this feature. Those are host/user-owned WSL policies. A user `compose.override.yaml` is applied last and remains authoritative.
 
-## 3.20 Ubuntu Pro for WSL
-
-**Prompt:** Install Ubuntu Pro for WSL?
-
-- Fresh suggestion: **No**
-- Windows add-on package ID: `Canonical.UbuntuProforWSL`
-- installed through WinGet when selected/available
-- token attachment/account entitlement remains separate
-- failure/unavailable WinGet does not erase the already installed Linux stack
-
 ## 3.21 Unattended Ubuntu security updates
 
 **Prompt:** Enable unattended Ubuntu security updates?
@@ -672,7 +661,7 @@ The exact change categories are:
 2. **Kanban** — enablement and concurrency limits
 3. **Matrix + Tailscale** — Matrix service and Windows Tailscale exposure
 4. **Local AI** — Honcho / Ollama backend / models
-5. **Runtime/Windows policy** — adaptive container limits, Ubuntu Pro, updates, WSL lifetime, auto-start, shortcuts, timezone
+5. **Runtime/Windows policy** — adaptive container limits, updates, WSL lifetime, auto-start, shortcuts, timezone
 6. **All categories**
 
 Important preservation behavior:
@@ -798,7 +787,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.4.82
+# 8. Current managed software/source pins documented by v14.4.83
 
 The release's declared managed references include:
 
@@ -853,7 +842,6 @@ Depending on user choices, LatticeVale can manage:
 - installer-owned Windows firewall / Hyper-V firewall rules for verified native-service paths
 - Windows Obsidian installation through WinGet
 - Windows-local Obsidian vault path integration
-- Ubuntu Pro for WSL Windows application through WinGet
 - Windows-logon LatticeVale startup task
 - passive relay startup task when required by selected Windows integrations
 - current-user Start / Shut Down desktop shortcuts
@@ -865,7 +853,7 @@ Current normal configuration flows **do not set or switch `[wsl2] networkingMode
 
 # 11. WSL networking behavior
 
-Current v14.4.82 policy:
+Current v14.4.83 policy:
 
 - discover active topology
 - preserve working NAT/default/VirtioProxy-capable paths
@@ -936,7 +924,6 @@ By default/policy it preserves shared prerequisites and externally/user-owned ap
 - native Windows Ollama
 - Windows Tailscale
 - Obsidian
-- Ubuntu Pro
 - unrelated Windows firewall/tasks/settings
 
 A separately selected Windows-backed Obsidian vault is outside `~/hermes-stack` and is not deleted by stack purge.
@@ -1042,7 +1029,7 @@ Current primary documentation and current source take precedence over archived v
 
 # 18. Documentation files reviewed for this consolidation
 
-## Current documentation set after v14.4.8 consolidation (retained by v14.4.82)
+## Current documentation set after v14.4.8 consolidation (retained by v14.4.83)
 
 The v14.4.0 audit originally reviewed a larger set of one-off patch-note files. Those v14.x detailed notes are now preserved in `docs/PATCH-NOTES.md`; `docs/CHANGELOG.md` remains canonical for version history. Current user/maintainer documentation is intentionally split by purpose rather than by individual patch.
 

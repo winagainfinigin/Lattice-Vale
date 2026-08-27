@@ -795,7 +795,7 @@ refresh_adaptive_resource_policy() {
   saved_version="$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_cpus="$(sed -n 's/^CPUS=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_mem="$(sed -n 's/^MEM_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
-  if [[ "$saved_version" != 3 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then
+  if [[ "$saved_version" != 4 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then
     echo "WSL resource allocation changed or has not been fingerprinted (CPUs=${cpus}, RAM=${mem_mib}MiB); recalculating adaptive LatticeVale ceilings."
     timeout --foreground --kill-after=10s 90s ./configure-stack.sh --refresh-resource-policy
     RESOURCE_POLICY_CHANGED=true

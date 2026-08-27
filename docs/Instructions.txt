@@ -1,6 +1,6 @@
-LATTICEVALE v14.4.82 — INSTRUCTIONS
+LATTICEVALE v14.4.83 — INSTRUCTIONS
 
-CURRENT RELEASE: v14.4.82 is the current recommended LatticeVale release. It is a hotfix over v14.4.81 and retains the v14.4.8/v14.4.7 Hermes web-research maintenance plus the inherited v14.4.6/v14.4.5 repair/update behavior.
+CURRENT RELEASE: v14.4.83 is the current recommended LatticeVale release. It retains the v14.4.82 bounded WSL recovery fix and adds adaptive resource policy v4, the Redis/Valkey overcommit prerequisite, and removal of the LatticeVale-owned Ubuntu Pro option while preserving external Ubuntu Pro state.
 
 V14.4.82 WSL RECOVERY HOTFIX: If v14.4.81 printed that WSL recovered after `wsl --shutdown` but then warned that the helper exited with a long block of text followed by `0`, use v14.4.82. It isolates the helper's console output from its scalar exit code so successful recovery continues directly into the normal distro re-probe and Resume / repair eligibility checks.
 
@@ -119,7 +119,7 @@ When a managed stack is detected the installer offers:
      2) Kanban enablement/concurrency
      3) Matrix + Windows Tailscale
      4) Local AI / Honcho / Ollama backend/models
-     5) Runtime/Windows policy: container limits, Ubuntu Pro, updates, WSL lifetime, auto-start, shortcuts, timezone
+     5) Runtime/Windows policy: container limits, updates, WSL lifetime, auto-start, shortcuts, timezone
      6) Select all categories
      7) Finish
 
@@ -153,13 +153,13 @@ Practical image/container rule:
 
 From Windows PowerShell, the simplest full live-stack verification is:
 
-  wsl -d <your-distro-name> -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+  wsl -d <DISTRO> -u <LINUX_USER> -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh verify'
 
 A successful current installation reports:
 
   LatticeVale verification: HEALTHY
 
-For additional detail, open the selected Ubuntu WSL distro and run:
+For additional detail, open the selected Ubuntu WSL distro as the same Linux user chosen during LatticeVale installation, then run:
 
   cd ~/hermes-stack
   ./manage.sh verify
@@ -223,11 +223,11 @@ Use installer option 4 when you want the installer to rerun provider/profile set
 8A. RAM / ADAPTIVE RESOURCE POLICY
 ================================================================================
 
-If you selected adaptive CPU/RAM ceilings, v14.4.6 retains resource policy v3. The audit now measures CPUs available to the WSL process using the same effective semantics as `nproc`; this prevents a processor-limited WSL instance from being falsely marked stale merely because the Windows host has more logical CPUs. RAM fingerprint comparison remains exact.
+If you selected adaptive CPU/RAM ceilings, v14.4.83 uses resource policy v4. The audit now measures CPUs available to the WSL process using the same effective semantics as `nproc`; this prevents a processor-limited WSL instance from being falsely marked stale merely because the Windows host has more logical CPUs. RAM fingerprint comparison remains exact.
 
 If you selected adaptive CPU/RAM ceilings, v14.4.5 introduced resource policy v3. It derives an aggregate container budget from CPU/RAM actually visible inside WSL, leaves additional host/kernel/Docker headroom on smaller WSL VMs, and applies conservative allocator/Synapse/PostgreSQL memory tuning. These values are ceilings/tuning defaults, not a Windows or WSL global RAM reservation.
 
-Clean installs receive policy v3 directly. Existing adaptive installs are refreshed when the saved resource-policy revision is older or WSL-visible CPU/RAM changes. A user `compose.override.yaml` remains last and authoritative.
+Clean installs receive policy v4 directly. Existing adaptive installs, including policy-v3 installs, are refreshed when the saved resource-policy revision is older or WSL-visible CPU/RAM changes. A user `compose.override.yaml` remains last and authoritative.
 
 LatticeVale does not write global WSL `memory` or `autoMemoryReclaim` for this policy. If you manually manage those values in `%USERPROFILE%\.wslconfig`, they remain your host-wide settings and affect more than this stack.
 
@@ -310,6 +310,14 @@ For a newer LatticeVale release:
 4. select the same managed distro/user;
 5. choose option 6 for an immediate controlled software refresh, or option 1 for ordinary repair/migration behavior;
 6. verify afterward with ./manage.sh verify and ./manage.sh status.
+
+From Windows PowerShell, use the exact distro and Linux user selected during installation. The installer prints these exact commands at completion:
+
+  wsl -d <DISTRO> -u <LINUX_USER> -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh verify'
+  wsl -d <DISTRO> -u <LINUX_USER> -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh audit'
+  wsl -d <DISTRO> -u <LINUX_USER> -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh status'
+
+Do not rely on the distro default user if it differs from the Linux user selected for LatticeVale.
 
 ================================================================================
 14. TROUBLESHOOTING / RECOVERY

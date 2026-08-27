@@ -1,8 +1,8 @@
 # Runtime Sources and Supply-Chain Policy
 
-## v14.4.82 source-policy note
+## v14.4.83 source-policy note
 
-v14.4.82 adds no dependency or download source. The hotfix uses the existing PowerShell `Out-Host` cmdlet to keep child-helper diagnostics visible while returning only the native process exit code to the installer. All v14.4.81 WSL tooling and upstream dependencies remain unchanged.
+v14.4.83 adds no dependency or download source. It changes only local installer/runtime policy: adaptive policy v4, a root-owned sysctl.d prerequisite for selected Redis/Valkey workloads, removal of the Ubuntu Pro WinGet integration, and corrected post-install command guidance. v14.4.82 WSL recovery tooling and existing upstream application pins remain unchanged.
 
 ## v14.4.81 source-policy note
 
@@ -54,7 +54,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.82 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.4.83 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 
@@ -62,7 +62,6 @@ LatticeVale v14.4.82 remains distributed as source/configuration only. It does *
 |---|---|---|
 | Tailscale | Transient download from `https://pkgs.tailscale.com/stable/tailscale-setup-latest.exe` with Authenticode verification; `winget` ID `Tailscale.Tailscale` is fallback. The downloaded EXE is deleted after use. | `https://tailscale.com/download/windows` |
 | Obsidian | `winget` exact package ID `Obsidian.Obsidian`; no installer is bundled. | `https://obsidian.md/download` |
-| Ubuntu Pro for WSL | `winget` exact package ID `Canonical.UbuntuProforWSL`; no installer/package is bundled. | `https://documentation.ubuntu.com/pro-for-wsl/` |
 
 ## Ubuntu / Docker packages
 

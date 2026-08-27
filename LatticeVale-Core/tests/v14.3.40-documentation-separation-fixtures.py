@@ -6,7 +6,7 @@ instructions = (ROOT / "docs" / "Instructions.txt").read_text(encoding="utf-8")
 description = (ROOT / "docs" / "Installer Description.txt").read_text(encoding="utf-8")
 changelog = (ROOT / "docs" / "CHANGELOG.md").read_text(encoding="utf-8")
 
-assert version in {"14.3.40", "14.3.41","14.3.42","14.3.43","14.4.0","14.4.1","14.4.2","14.4.3","14.4.4","14.4.5","14.4.6","14.4.7","14.4.8","14.4.81","14.4.82"}
+assert version in {"14.3.40", "14.3.41","14.3.42","14.3.43","14.4.0","14.4.1","14.4.2","14.4.3","14.4.4","14.4.5","14.4.6","14.4.7","14.4.8","14.4.81","14.4.82","14.4.83"}
 assert instructions.startswith(f"LATTICEVALE v{version} — INSTRUCTIONS")
 assert description.startswith(f"LATTICEVALE v{version} — INSTALLER DESCRIPTION")
 assert "procedural operator guide" in instructions

@@ -1,6 +1,6 @@
-# LatticeVale v14.4.82 — Stable
+# LatticeVale v14.4.83 — Stable
 
-> **v14.4.82:** keeps the v14.4.81 bounded WSL recovery design unchanged and fixes its PowerShell return path so successful helper diagnostics are displayed without contaminating the scalar exit code. A successful `wsl --shutdown` recovery now triggers the intended same-run distro eligibility re-probe. See [`PATCH-NOTES.md`](PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
+> **v14.4.83:** retains the v14.4.82 WSL recovery fix and adds a narrow runtime reliability migration: adaptive resource policy v4 protects managed Ollama from the observed ~3 GiB cgroup ceiling when the existing aggregate budget can safely provide more headroom; selected Redis/Valkey workloads receive a persistent `vm.overcommit_memory=1` prerequisite; and the LatticeVale-owned Ubuntu Pro option is removed without uninstalling external Ubuntu Pro state. See [`PATCH-NOTES.md`](PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
 
 **Unofficial, inspectable Windows + WSL2 installer and lifecycle manager for a self-hosted Hermes Agent stack.**
 
@@ -8,7 +8,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.82 retains those mechanics, v14.4.8's Hermes/web maintenance, and v14.4.6's replacement of the version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.83 retains those mechanics and migrates enabled policy-v3 state to policy v4, v14.4.8's Hermes/web maintenance, and v14.4.6's replacement of the version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
 
 For detailed history, use `CHANGELOG.md`. Detailed implementation/audit notes for the v14.x patch line are consolidated in `PATCH-NOTES.md`; the v13 archive remains under `legacy-patch-notes/`.
 
@@ -27,7 +27,7 @@ Run public entry points from the repository root using `./installer/...` as show
 
 ### Inherited v14.4.3 RAM-efficiency policy
 
-When adaptive container resource limits are enabled, policy v3:
+When adaptive container resource limits are enabled, policy v4:
 
 - derives ceilings from CPU/RAM actually visible inside WSL while reserving 30% on <=6 GiB, 25% on <=12 GiB, 20% on <=24 GiB, and 15% above that, with bounded reserve floors/caps;
 - applies `MALLOC_ARENA_MAX` to long-lived glibc/Python services to limit allocator arena growth;
@@ -181,7 +181,6 @@ Before the Honcho/local-AI questions, the installer now states the Ollama owners
 - Ollama backend ownership (managed WSL/Docker or verified existing native Windows Ollama when available)
 - Ollama text/embedding model choices and managed acceleration policy
 - optional adaptive per-container CPU/RAM ceilings
-- Ubuntu Pro integration
 - unattended updates
 - WSL service lifetime policy
 - optional Windows logon startup
@@ -258,7 +257,7 @@ The Dashboard normally remains on `http://localhost:9119`. Matrix/Synapse is loc
 
 Repair checkpoints are recorded in `.installer-state.json`, but they never override live validation. **The state file is only a hint**: repair stages still verify the components they own and rerun required migrations when the installed release changes.
 
-In v14.4.5, adaptive runtime/RAM policy is reconciled outside the old `prepare_config` checkpoint. If policy v3 is missing/stale or the WSL-visible CPU/RAM fingerprint changed, repair regenerates the installer-owned overlay, marks infrastructure/full-stack reconciliation pending, and requires a final live policy verification before declaring success.
+In v14.4.5, adaptive runtime/RAM policy is reconciled outside the old `prepare_config` checkpoint. If policy v4 is missing/stale or the WSL-visible CPU/RAM fingerprint changed, repair regenerates the installer-owned overlay, marks infrastructure/full-stack reconciliation pending, and requires a final live policy verification before declaring success.
 
 Managed software refresh is policy-aware rather than version-number-driven. Normal Resume / repair runs the bounded installer-owned package/image/source refresh when the 30-day age gate is due, the `MANAGED_REPAIR_REFRESH_REVISION` changes, or a legacy install lacks valid refresh state. The marker still records the installer version for provenance, but a version change alone does not trigger another pull/build cycle. An interrupted refresh with the same refresh-policy revision resumes its user-level phase without repeating completed root package work; a revision mismatch reruns the bounded root phase. Explicit Update / repair always forces the current bundle's managed refresh.
 

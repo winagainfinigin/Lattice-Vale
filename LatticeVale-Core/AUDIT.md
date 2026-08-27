@@ -1,4 +1,12 @@
-# LatticeVale v14.4.82 audit
+# LatticeVale v14.4.83 audit
+
+## v14.4.83 runtime-policy / Redis-Valkey / Ubuntu Pro audit
+
+- Adaptive resource fingerprints now require `POLICY_VERSION=4` across generator, repair verifier, runtime start/restart refresh, root startup helper, and read-only state audit. Policy-v3 state must converge through the existing Compose reconciliation path rather than being treated as current.
+- Policy v4 preserves the existing aggregate WSL container budget/reserve and the established non-Ollama minima. Managed Ollama receives additional protected minimum memory only from budget that remains after those minima; it does not take ownership of global WSL memory/reclaim settings or bypass `compose.override.yaml`.
+- When SearXNG/Valkey or Honcho/Redis is selected, root bootstrap writes `/etc/sysctl.d/99-latticevale-redis-valkey.conf`, applies `vm.overcommit_memory=1`, and verifies the effective kernel value. `state-audit.py` reports stale/missing effective overcommit as a repairable runtime-policy issue.
+- The current installer/config schema no longer emits or consumes `ubuntuPro`; current Windows add-on handling is Obsidian-only. No uninstall/purge action for Canonical Ubuntu Pro packages or externally attached Pro state was added.
+- Final Windows commands explicitly include both the selected distro and selected Linux user so `$HOME/hermes-stack` resolves to the managed stack account.
 
 ## v14.4.82 WSL helper exit-code audit
 

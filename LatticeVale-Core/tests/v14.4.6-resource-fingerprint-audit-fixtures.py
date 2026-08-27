@@ -9,7 +9,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 STATE_AUDIT = ROOT / "stack" / "state-audit.py"
 VERSION = (ROOT / "VERSION.txt").read_text(encoding="utf-8").strip()
-assert VERSION in {"14.4.6","14.4.7","14.4.8","14.4.81","14.4.82"}, VERSION
+assert VERSION in {"14.4.6","14.4.7","14.4.8","14.4.81","14.4.82","14.4.83"}, VERSION
 
 text = STATE_AUDIT.read_text(encoding="utf-8")
 assert "def visible_cpu_count() -> int:" in text

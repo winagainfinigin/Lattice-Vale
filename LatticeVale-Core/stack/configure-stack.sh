@@ -28,7 +28,7 @@ if not isinstance(d,dict):
 bool_keys=(
     'dashboard','multiAgent','kanban','matrix','tailscale','installWindowsTailscale',
     'tailscaleDashboard','tailscaleMatrix','searxng','qmd','honcho','hermesLocalAI',
-    'obsidian','ubuntuPro','unattendedUpdates','autoStart','windowsShortcuts','keepWslServicesRunning','containerResourceLimits','resetCheckpoints',
+    'obsidian','unattendedUpdates','autoStart','windowsShortcuts','keepWslServicesRunning','containerResourceLimits','resetCheckpoints',
     'forceProviderSetup','forceProfileSetup','rebuildMatrixIdentity','repairMaintenance','forceManagedUpdate',
 )
 for key in bool_keys:
@@ -484,8 +484,16 @@ specs=[('hermes',5,512,4096)]
 if matrix: specs += [('synapse-db',2,256,2048),('synapse',2,256,1536)]
 if searxng: specs += [('searxng-valkey',1,128,768),('searxng',2,256,1536)]
 if qmd: specs += [('qmd',2,256,2048),('qmd-indexer',2,256,2048)]
-if ollama: specs += [('ollama',12,1536,32768)]
 if honcho: specs += [('honcho-db',2,256,2048),('honcho-redis',1,128,768),('honcho-api',3,384,3072),('honcho-deriver',3,384,3072)]
+# Policy v4 protects managed Ollama from the ~3 GiB hard ceiling observed under a
+# normal full-stack 10 GiB WSL allocation. Preserve the same aggregate container
+# budget: raise Ollama only when enough budget remains after the established minima
+# for all other enabled services. Constrained hosts still scale coherently rather than
+# borrowing from WSL/kernel/Docker reserve or changing global WSL memory settings.
+if ollama:
+    other_min_total=sum(m for _n,_w,m,_c in specs)
+    ollama_floor=max(2048,min(4096,budget-other_min_total-256))
+    specs += [('ollama',12,ollama_floor,32768)]
 mins={n:m for n,w,m,c in specs}; caps={n:c for n,w,m,c in specs}; weights={n:w for n,w,m,c in specs}
 alloc={n:0 for n,_,_,_ in specs}
 min_total=sum(mins.values())
@@ -596,9 +604,9 @@ PY_RESOURCE_PLAN
   [[ -s compose.override.yaml ]] && compose_files+=':compose.override.yaml'
   set_env .env COMPOSE_FILE "$compose_files"
   if [[ "$limits" == true ]]; then
-    printf 'POLICY_VERSION=3\nCPUS=%s\nMEM_MIB=%s\nRESERVE_MIB=%s\nBUDGET_MIB=%s\n' "$cpus" "$mem_mib" "$reserve_mib" "$budget_mib" > .latticevale-resource-state
+    printf 'POLICY_VERSION=4\nCPUS=%s\nMEM_MIB=%s\nRESERVE_MIB=%s\nBUDGET_MIB=%s\n' "$cpus" "$mem_mib" "$reserve_mib" "$budget_mib" > .latticevale-resource-state
     chmod 0600 .latticevale-resource-state
-    echo "Adaptive container ceilings: WSL CPUs=$cpus, RAM=${mem_mib}MiB, reserved=${reserve_mib}MiB, container budget=${budget_mib}MiB across ${active_count} enabled services; RAM-efficiency tuning: malloc arenas=${malloc_arena_max}, Synapse cache factor=${synapse_cache_factor}, PostgreSQL shared_buffers=${pg_shared_buffers}; user compose.override.yaml is applied last."
+    echo "Adaptive container ceilings (policy v4): WSL CPUs=$cpus, RAM=${mem_mib}MiB, reserved=${reserve_mib}MiB, container budget=${budget_mib}MiB across ${active_count} enabled services; managed Ollama receives additional protected headroom when the aggregate budget safely permits it; RAM-efficiency tuning: malloc arenas=${malloc_arena_max}, Synapse cache factor=${synapse_cache_factor}, PostgreSQL shared_buffers=${pg_shared_buffers}; user compose.override.yaml is applied last."
   else
     rm -f .latticevale-resource-state
     echo 'Adaptive container ceilings: disabled; any existing user compose.override.yaml remains authoritative.'
@@ -616,7 +624,7 @@ verify_adaptive_runtime_policy() {
   saved_version="$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_cpus="$(sed -n 's/^CPUS=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_mem="$(sed -n 's/^MEM_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
-  [[ "$saved_version" == 3 && "$saved_cpus" == "$cpus" && "$saved_mem" == "$mem_mib" ]] || return 1
+  [[ "$saved_version" == 4 && "$saved_cpus" == "$cpus" && "$saved_mem" == "$mem_mib" ]] || return 1
   [[ -s compose.latticevale.yaml && ! -L compose.latticevale.yaml ]] || return 1
   overlay="$(cat compose.latticevale.yaml 2>/dev/null)" || return 1
   grep -q 'MALLOC_ARENA_MAX:' <<<"$overlay" || return 1

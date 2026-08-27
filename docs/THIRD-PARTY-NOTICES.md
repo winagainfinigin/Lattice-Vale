@@ -1,6 +1,6 @@
 # Third-party notices
 
-The v14.4.7 web-extraction change, v14.4.8 Hermes clean/repair maintenance, v14.4.81 WSL launch-recovery hotfix, and v14.4.82 helper return-value hotfix add no redistributed third-party binary, image, package, or license. Local browser support uses the Chromium/Playwright runtime already provided by the separately obtained Hermes Agent image.
+The v14.4.7 web-extraction change, v14.4.8 Hermes clean/repair maintenance, v14.4.81/v14.4.82 WSL recovery hotfixes, and v14.4.83 runtime-policy/sysctl/Ubuntu-Pro-option-removal patch add no redistributed third-party binary, image, package, or license. Local browser support uses the Chromium/Playwright runtime already provided by the separately obtained Hermes Agent image.
 
 ## v14.3.38 notice
 

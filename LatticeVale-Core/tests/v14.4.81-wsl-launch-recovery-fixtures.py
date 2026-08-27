@@ -5,7 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE = ROOT.parent
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert VERSION in {'14.4.81','14.4.82'}, VERSION
+assert VERSION in {'14.4.81','14.4.82','14.4.83'}, VERSION
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 helper = (RELEASE / 'tools' / 'Repair-LatticeVale-WslHost.ps1').read_text(encoding='ascii')
 compat = (ROOT / 'compatibility.conf').read_text(encoding='ascii')

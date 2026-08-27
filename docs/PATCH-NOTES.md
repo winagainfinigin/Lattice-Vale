@@ -1,3 +1,27 @@
+# Current v14.x patch notes
+
+## v14.4.83 resource/runtime reliability patch
+
+The broad WSL warning/error audit showed two LatticeVale-owned runtime issues: managed Ollama was repeatedly cgroup-OOM-killed at the generated ~2.9 GiB ceiling on a roughly 10 GiB WSL VM, and both Honcho Redis and SearXNG Valkey repeatedly warned that Linux memory overcommit was disabled. The same audit also showed a noisy `wsl-pro.service` bridge even though Ubuntu Pro for WSL was not part of the desired LatticeVale configuration.
+
+### Adaptive policy v4
+
+Policy v4 preserves the v14.4.3-v14.4.6 aggregate budget/reserve model and existing service minima/caps. When managed Ollama is selected, the planner now computes its preferred minimum from the budget remaining after all other enabled-service minima, with a bounded target between 2048 and 4096 MiB and a 256 MiB margin. On the observed full-stack ~10 GiB WSL allocation this yields a 4096 MiB Ollama floor instead of the previous ~2944 MiB ceiling, while the aggregate generated limits still remain inside the same container budget. Constrained hosts continue through the existing proportional scaling path rather than consuming the WSL/kernel/Docker reserve.
+
+`POLICY_VERSION=4` is enforced by clean generation, the uncheckpointed Resume / repair verifier, `manage.sh` start/restart refresh, the root stack-start helper, and `state-audit.py`. Existing adaptive policy-v3 installations therefore converge automatically without a version-only managed image/source refresh.
+
+### Redis / Valkey overcommit prerequisite
+
+When either SearXNG/Valkey or Honcho/Redis is selected, the root bootstrap idempotently writes `/etc/sysctl.d/99-latticevale-redis-valkey.conf` containing `vm.overcommit_memory = 1`, applies the effective value, and fails the root prerequisite stage if the value cannot be verified. The read-only state audit reports a repairable policy issue when an enabled Redis/Valkey workload sees a different effective value. If those workloads are later disabled, LatticeVale does not force-reset the kernel setting or delete external sysctl state because another application may also depend on it.
+
+### Ubuntu Pro option removal
+
+The current LatticeVale installer no longer prompts for Ubuntu Pro, stores an `ubuntuPro` option, installs `Canonical.UbuntuProforWSL`, or audits that Windows add-on. Current documentation and tests no longer present Ubuntu Pro as a LatticeVale option. The migration is intentionally non-destructive: pre-existing Ubuntu Pro packages, attachments, tokens, services, or externally managed state are not purged or detached.
+
+### Post-install command correction
+
+The installer and root README now include the selected Linux user in Windows `wsl` commands and resolve the stack from that account's `$HOME`. This avoids running `manage.sh` against the wrong home directory when the selected LatticeVale account is not the distro's default user.
+
 # Consolidated Patch Notes
 
 `CHANGELOG.md` is the canonical version history. This file preserves the more detailed implementation, audit, migration, and compatibility notes that were previously split across many one-off v14.x patch-note files. Historical v13 notes remain under `legacy-patch-notes/`.

@@ -3,7 +3,6 @@ name: Validate release source
 on:
   push:
   pull_request:
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,7 +31,7 @@ jobs:
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
       - name: Static audit
         run: python tests/static-audit.py
-      - name: Current v14.4.82 release identity and inherited policy regressions
+      - name: Current v14.4.83 release identity and inherited policy regressions
         run: |
           python tests/v14.3.38-kanban-skill-policy-fixtures.py
           python tests/v14.3.39-existing-install-qc-fixtures.py
@@ -51,15 +50,16 @@ jobs:
           python tests/v14.4.7-web-extraction-fixtures.py
           python tests/v14.4.81-wsl-launch-recovery-fixtures.py
           python tests/v14.4.82-wsl-helper-exitcode-fixtures.py
+          python tests/v14.4.83-runtime-policy-overcommit-ubuntu-pro-fixtures.py
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |
-          grep -q '^14.4.82$' LatticeVale-Core/VERSION.txt
-          grep -q '^# LatticeVale v14.4.82' README.md
-          grep -q '^LATTICEVALE v14.4.82' docs/Instructions.txt
-          grep -q '^LATTICEVALE v14.4.82' 'docs/Installer Description.txt'
-          grep -q '^## 14.4.82 ' docs/CHANGELOG.md
-          grep -q 'placeholder: 14.4.82' .github/ISSUE_TEMPLATE/bug_report.yml
+          grep -q '^14.4.83$' LatticeVale-Core/VERSION.txt
+          grep -q '^# LatticeVale v14.4.83' README.md
+          grep -q '^LATTICEVALE v14.4.83' docs/Instructions.txt
+          grep -q '^LATTICEVALE v14.4.83' 'docs/Installer Description.txt'
+          grep -q '^## 14.4.83 ' docs/CHANGELOG.md
+          grep -q 'placeholder: 14.4.83' .github/ISSUE_TEMPLATE/bug_report.yml
           grep -q 'Existing-stack Resume / repair adopts required migrations' .github/PULL_REQUEST_TEMPLATE.md
           grep -q 'PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md docs/SUPPORT.md docs/RELEASE.md
           grep -q 'PATCH-NOTES.md' README.md LatticeVale-Core/README.md

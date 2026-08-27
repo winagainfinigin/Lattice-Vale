@@ -1,5 +1,14 @@
 # Changelog
 
+## 14.4.83 - 2026-08-27
+
+- Advances adaptive container resource policy from v3 to **v4**. The aggregate WSL-visible container budget and host/kernel/Docker reserve remain unchanged, but managed Ollama now receives up to a 4096 MiB protected minimum when enough budget remains after the established minima for all other enabled services. Constrained allocations continue to scale coherently instead of consuming the non-container reserve.
+- Makes policy v4 a clean-install and repair/start convergence requirement. Existing adaptive policy-v3 state is detected as stale by `configure-stack.sh`, `manage.sh`, the root stack-start helper, and `state-audit.py`, then regenerated through the existing preservation-first Compose reconciliation path.
+- Adds a root-owned `/etc/sysctl.d/99-latticevale-redis-valkey.conf` prerequisite for selected LatticeVale-managed SearXNG/Valkey or Honcho/Redis workloads and applies/verifies `vm.overcommit_memory=1` on both clean install and Resume / repair. Disabling those services does not destructively reset a sysctl value that another application may also use.
+- Removes the Ubuntu Pro for WSL option from the installer questionnaire, persisted LatticeVale options, Windows add-on installation/audit flow, current documentation, and regression expectations. Existing external Ubuntu Pro packages/attachment/state are deliberately left untouched.
+- Fixes installer completion and README verification/audit/status commands to specify both the selected WSL distro and selected Linux user before resolving `$HOME/hermes-stack`.
+- Adds `v14.4.83-runtime-policy-overcommit-ubuntu-pro-fixtures.py` and updates release identity/manifest coverage without changing unrelated service pins, Hermes model/prompt policy, Tailscale topology, WSL distro ownership, or clean/repair storage thresholds.
+
 ## 14.4.82 - 2026-08-21
 
 - Fixes the v14.4.81 bounded WSL recovery wrapper so helper diagnostics are displayed through `Out-Host` instead of being returned through the function success stream. The caller now receives only the scalar native process exit code.

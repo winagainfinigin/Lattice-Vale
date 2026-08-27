@@ -6,14 +6,14 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82'}, version
+assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'}, version
 
 cfg = (root / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (root / 'stack/manage.sh').read_text(encoding='utf-8')
 boot = (root / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 compat = (root / 'compatibility.conf').read_text(encoding='utf-8')
 
-# Resume / repair must explicitly reconcile policy v3 even when prepare_config has an
+# Resume / repair must explicitly reconcile current policy v4 even when prepare_config has an
 # old completed checkpoint. The final installer state must not become complete while
 # that live policy is still stale/partial.
 for token in (
@@ -39,7 +39,7 @@ assert pos == sorted(pos), pos
 
 # Policy verification must require the current fingerprint and all v3 RAM controls.
 for token in (
-    'saved_version" == 3',
+    'saved_version" == 4',
     'MALLOC_ARENA_MAX:',
     'SYNAPSE_CACHE_FACTOR:',
     'shared_buffers=',
@@ -77,7 +77,7 @@ write_latticevale_compose_overlay() {
   cpus="$(nproc)"
   mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo)"
   cat > .latticevale-resource-state <<EOF
-POLICY_VERSION=3
+POLICY_VERSION=4
 CPUS=$cpus
 MEM_MIB=$mem_mib
 RESERVE_MIB=1024
@@ -117,7 +117,7 @@ repair_runtime_policy_reconcile
 verify_adaptive_runtime_policy
 [[ "$(grep -c '^infrastructure|pending|' state.log)" == 1 ]]
 [[ "$(grep -c '^reconcile|pending|' state.log)" == 1 ]]
-[[ "$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state)" == 3 ]]
+[[ "$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state)" == 4 ]]
 grep -q '^COMPOSE_FILE=compose.yaml:compose.latticevale.yaml:compose.override.yaml$' .env
 before="$(wc -l < state.log)"
 repair_runtime_policy_reconcile
@@ -130,7 +130,7 @@ repair_runtime_policy_reconcile
 
 # Normal starts use the same policy version as the generator; do not regenerate v3
 # forever because of a stale v2 comparison constant.
-assert 'if [[ "$saved_version" != 3 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then' in manage
+assert 'if [[ "$saved_version" != 4 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then' in manage
 assert 'if [[ "$saved_version" != 2 ||' not in manage
 
 # If manage.sh itself refreshes the policy during restart, it must reconcile Compose

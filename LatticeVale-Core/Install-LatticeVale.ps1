@@ -5027,8 +5027,7 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
     Write-Host "`n== Windows-side live audit ==" -ForegroundColor Cyan
 
     foreach ($pkg in @(
-        @{ Label = 'Obsidian'; Id = 'Obsidian.Obsidian'; Selected = [bool](Get-OptionValue $Options 'obsidian' $false) },
-        @{ Label = 'Ubuntu Pro for WSL'; Id = 'Canonical.UbuntuProforWSL'; Selected = [bool](Get-OptionValue $Options 'ubuntuPro' $false) }
+        @{ Label = 'Obsidian'; Id = 'Obsidian.Obsidian'; Selected = [bool](Get-OptionValue $Options 'obsidian' $false) }
     )) {
         if (-not $pkg.Selected) { Write-Info "$($pkg.Label): DISABLED"; continue }
         $present = Test-WingetPackageInstalled $pkg.Id
@@ -5251,7 +5250,7 @@ switch ($stackState) {
                         'Kanban enablement and worker-concurrency limits',
                         'Matrix service and Windows Tailscale exposure',
                         'Local AI / Honcho / Ollama backend and models',
-                        'Runtime/Windows policy: container limits, Ubuntu Pro, updates, WSL lifetime, auto-start, shortcuts, timezone',
+                        'Runtime/Windows policy: container limits, updates, WSL lifetime, auto-start, shortcuts, timezone',
                         'Select ALL change categories above',
                         'Finish selecting categories and continue'
                     )
@@ -5546,7 +5545,6 @@ if ($reusePriorChoices) {
         Write-Info "Windows Obsidian vault: $obsidianVaultWindowsPath"
         Write-Info "Hermes/QMD will mount it from WSL path: $obsidianVaultWslPath"
     }
-    $ubuntuPro = [bool](Get-OptionValue $existingOptions 'ubuntuPro' $false)
     $unattended = [bool](Get-OptionValue $existingOptions 'unattendedUpdates' $true)
     if ($wslLifetimeSupported) {
         $savedLifetimeChoice = $existingOptions.PSObject.Properties['keepWslServicesRunning']
@@ -5731,7 +5729,6 @@ if ($reusePriorChoices) {
         if ($changeScopes -contains 'runtime') {
             Write-Host "`n-- Runtime and Windows integration policy --" -ForegroundColor White
             $containerResourceLimits = Read-Choice 'Apply adaptive CPU/RAM ceilings to LatticeVale containers?' 'Recalculates one safe container-memory budget from the CPU/RAM currently visible to WSL, leaves extra WSL/Windows headroom, and applies conservative allocator/Synapse/PostgreSQL RAM tuning to enabled services. It auto-refreshes after a WSL restart when those limits change. User compose.override.yaml remains authoritative.' 'LatticeVale container ceilings are disabled.' $containerResourceLimits
-            $ubuntuPro = Read-Choice 'Install Ubuntu Pro for WSL?' "Changes only Canonical's optional Windows integration selection." 'Ubuntu Pro integration is disabled.' $ubuntuPro
             $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Changes only the managed unattended-updates policy.' 'Ubuntu security updates remain manual.' $unattended
             if ($wslLifetimeSupported) {
                 $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Changes only LatticeVale ownership of the supported global instanceIdleTimeout policy.' 'The existing LatticeVale WSL lifetime policy is disabled.' $keepWslServicesRunning
@@ -6059,7 +6056,6 @@ if ($reusePriorChoices) {
             $resourceDefault = [bool](Get-OptionValue $old 'containerResourceLimits' $true)
         }
         $containerResourceLimits = Read-Choice 'Apply adaptive CPU/RAM ceilings to LatticeVale containers?' 'Measures the CPU/RAM actually visible inside WSL, reserves WSL/Docker/Windows headroom, divides the remaining memory budget across only enabled services, and applies conservative allocator/Synapse/PostgreSQL RAM tuning on smaller WSL VMs. It does not assume fallback hardware values and recalculates after a WSL restart if the allocation changes. Limits are ceilings, not reservations; compose.override.yaml remains authoritative.' 'Containers remain unrestricted by LatticeVale; Docker/WSL global limits and any user compose.override.yaml still apply.' $resourceDefault
-        $ubuntuPro = Read-Choice 'Install Ubuntu Pro for WSL?' "Installs Canonical's Windows integration; token attachment remains separate." 'Ubuntu Pro is skipped; normal Ubuntu updates continue.' ([bool](Get-OptionValue $old 'ubuntuPro' $false))
         $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Automatically installs eligible Ubuntu security updates inside WSL.' 'Updates must be applied manually.' ([bool](Get-OptionValue $old 'unattendedUpdates' $true))
         $keepWslServicesRunning = $false
         if ($wslLifetimeSupported) {
@@ -6278,7 +6274,6 @@ $options = [ordered]@{
     obsidian = $obsidian
     obsidianVaultWindowsPath = $obsidianVaultWindowsPath
     obsidianVaultWslPath = $obsidianVaultWslPath
-    ubuntuPro = $ubuntuPro
     unattendedUpdates = $unattended
     keepWslServicesRunning = $keepWslServicesRunning
     autoStart = $autoStart
@@ -6316,7 +6311,7 @@ Write-Host "  WSL implementation: $(if ($wslInfo.Modern) { 'Store/MSIX' } else {
     "Hermes self-hosted Ollama AI: $hermesLocalAI$(if ($hermesLocalAI) { " ($localTextModel)" } else { '' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
     "Local ports: Hermes API=$hermesApiPort$(if ($dashboard) { ", Dashboard=$dashboardLocalPort" } else { '' })$(if ($matrix) { ", Matrix=$matrixLocalPort" } else { '' })$(if ($searxng) { ", SearXNG=$searxngLocalPort" } else { '' })$(if ($honcho) { ", Honcho=$honchoLocalPort" } else { '' })",
     "Windows bridge ports: $(if ($tailscaleDashboard) { "Dashboard=$dashboardBridgePort " } else { '' })$(if ($tailscaleMatrix) { "Matrix=$matrixBridgePort" } else { '' })",
-    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Ubuntu Pro for WSL: $ubuntuPro", "Unattended updates: $unattended", "Repair maintenance: $repairMaintenance", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
+    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Unattended updates: $unattended", "Repair maintenance: $repairMaintenance", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
 ) | ForEach-Object { Write-Host "  $_" }
 Write-Info 'Recovery model: verify live state first, preserve completed work, then resume the earliest incomplete/broken stage. Matrix precedes Hermes setup; Windows add-ons/Tailscale/auto-start remain last.'
 if ($kanban) {
@@ -6529,47 +6524,35 @@ foreach ($endpoint in @(
     }
 }
 
-$windowsAppsState = if ($obsidian -or $ubuntuPro) { 'PARTIAL' } else { 'DISABLED' }
-$windowsAppsDetail = if ($obsidian -or $ubuntuPro) { 'Selected Windows add-ons have not yet been verified in this run.' } else { 'No Windows add-ons selected.' }
+$windowsAppsState = if ($obsidian) { 'PARTIAL' } else { 'DISABLED' }
+$windowsAppsDetail = if ($obsidian) { 'Selected Windows add-on has not yet been verified in this run.' } else { 'No Windows add-ons selected.' }
 
 # Optional Windows applications are deliberately installed only after the Linux/Docker stack has
 # configured successfully. A failure in the core stack therefore does not leave unrelated Windows
 # applications installed as a side effect of a partial run.
-if ($obsidian -or $ubuntuPro) {
+if ($obsidian) {
     Write-Step 'Installing selected Windows applications'
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     if (-not $winget) {
-        Write-Warning 'winget is not installed. Obsidian/Ubuntu Pro Windows add-ons will be skipped; the Linux stack remains installed.'
+        Write-Warning 'winget is not installed. The selected Obsidian Windows add-on will be skipped; the Linux stack remains installed.'
         $windowsAppsState = 'PARTIAL'
-        $windowsAppsDetail = 'winget unavailable; one or more selected Windows add-ons were skipped.'
+        $windowsAppsDetail = 'winget unavailable; the selected Windows add-on was skipped.'
     } else {
         $windowsAppsOk = $true
-        if ($obsidian) {
-            $present = Test-WingetPackageInstalled 'Obsidian.Obsidian'
-            if ($present -eq $true) {
-                Write-Info 'Obsidian is already installed; treating the requested Windows add-on as configured.'
-            } else {
-                $appProbe = Invoke-NativeProcessPassthrough 'winget.exe' @('install','--exact','--id','Obsidian.Obsidian','--accept-package-agreements','--accept-source-agreements','--silent','--disable-interactivity') 1200
-                $presentAfter = Test-WingetPackageInstalled 'Obsidian.Obsidian'
-                if (-not $appProbe.Success -and $presentAfter -ne $true) { $windowsAppsOk = $false; Write-Warning 'Obsidian is still not present after the bounded WinGet install attempt; install it manually if desired.' }
-            }
-        }
-        if ($ubuntuPro) {
-            $present = Test-WingetPackageInstalled 'Canonical.UbuntuProforWSL'
-            if ($present -eq $true) {
-                Write-Info 'Ubuntu Pro for WSL is already installed; treating the requested Windows add-on as configured.'
-            } else {
-                $appProbe = Invoke-NativeProcessPassthrough 'winget.exe' @('install','--exact','--id','Canonical.UbuntuProforWSL','--accept-package-agreements','--accept-source-agreements','--silent','--disable-interactivity') 1200
-                $presentAfter = Test-WingetPackageInstalled 'Canonical.UbuntuProforWSL'
-                if (-not $appProbe.Success -and $presentAfter -ne $true) { $windowsAppsOk = $false; Write-Warning 'Ubuntu Pro for WSL is still not present after the bounded WinGet install attempt; install it manually if desired.' }
-            }
+        $present = Test-WingetPackageInstalled 'Obsidian.Obsidian'
+        if ($present -eq $true) {
+            Write-Info 'Obsidian is already installed; treating the requested Windows add-on as configured.'
+        } else {
+            $appProbe = Invoke-NativeProcessPassthrough 'winget.exe' @('install','--exact','--id','Obsidian.Obsidian','--accept-package-agreements','--accept-source-agreements','--silent','--disable-interactivity') 1200
+            $presentAfter = Test-WingetPackageInstalled 'Obsidian.Obsidian'
+            if (-not $appProbe.Success -and $presentAfter -ne $true) { $windowsAppsOk = $false; Write-Warning 'Obsidian is still not present after the bounded WinGet install attempt; install it manually if desired.' }
         }
         if ($windowsAppsOk) {
             $windowsAppsState = 'CONFIGURED'
-            $windowsAppsDetail = 'Selected Windows add-ons are present/configured according to live WinGet inventory.'
+            $windowsAppsDetail = 'Selected Windows add-on is present/configured according to live WinGet inventory.'
         } else {
             $windowsAppsState = 'PARTIAL'
-            $windowsAppsDetail = 'One or more selected Windows add-ons did not complete.'
+            $windowsAppsDetail = 'The selected Windows add-on did not complete.'
         }
     }
 }
@@ -6909,8 +6892,9 @@ $legacyStackUnc = Convert-LinuxPathToWslUnc $DistroName $stackLinuxPath -Legacy
 Write-Host "`nInstallation/configuration complete." -ForegroundColor Green
 Write-Host "Stack folder: $stackUnc"
 Write-Info "If an older WSL build does not resolve \\wsl.localhost, use: $legacyStackUnc"
-Write-Host "Verify (recommended): wsl -d $DistroName -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'"
-Write-Host "Status snapshot:       wsl -d $DistroName -- bash -lc 'cd ~/hermes-stack && ./manage.sh status'"
+Write-Host "Verify (recommended): wsl -d $DistroName -u $linuxUser -- bash -lc 'cd `"`$HOME/hermes-stack`" && ./manage.sh verify'"
+Write-Host "Detailed audit:       wsl -d $DistroName -u $linuxUser -- bash -lc 'cd `"`$HOME/hermes-stack`" && ./manage.sh audit'"
+Write-Host "Status snapshot:      wsl -d $DistroName -u $linuxUser -- bash -lc 'cd `"`$HOME/hermes-stack`" && ./manage.sh status'"
 if ($windowsShortcuts -and $shortcutState -eq 'CONFIGURED') {
     Write-Host "Start shortcut:         $($shortcutResult.Paths.StartShortcut)"
     Write-Host "Shutdown shortcut:      $($shortcutResult.Paths.ShutdownShortcut)"
@@ -6928,4 +6912,3 @@ if ($obsidian) {
     Write-Host "Hermes/QMD vault source (WSL): $obsidianVaultWslPath"
     Write-Host 'Open that Windows folder as the vault in the Obsidian app. Do not open the \\wsl.localhost stack path as a Windows Obsidian vault.'
 }
-if ($ubuntuPro) { Write-Host 'Ubuntu Pro for WSL was requested; open its Windows app to attach a token if you use Ubuntu Pro.' }

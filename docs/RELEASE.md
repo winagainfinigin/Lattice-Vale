@@ -24,14 +24,14 @@ For live existing-install repair/update testing, begin with the selected Lattice
 - Verify a fixture where `os.cpu_count()` reports 8 but `os.sched_getaffinity(0)` exposes 4 returns 4 from the audit CPU helper.
 - Verify the helper falls back to `nproc` when affinity is unavailable and only then to `os.cpu_count()`.
 - Verify state audit no longer uses `os.cpu_count()` directly for the adaptive resource fingerprint.
-- Verify RAM fingerprint comparison remains exact and policy v3/Compose RAM controls remain unchanged.
+- Verify RAM fingerprint comparison remains exact and policy v4/Compose RAM controls remain current, including protected managed-Ollama headroom and the Redis/Valkey overcommit audit.
 - Re-run inherited v14.4.5 repair/runtime-update, v14.4.4 metadata-race, and v14.4.3 RAM/uninstaller fixtures.
 
 ## v14.4.5 repair runtime-policy / managed-update checks
 
 Implementation context: `PATCH-NOTES.md`.
 
-Test a managed v14.4.4-style install whose adaptive resource fingerprint/overlay is missing or policy-v2 while `prepare_config` is already checkpointed complete. Resume / repair must regenerate policy v3, retain `compose.override.yaml` as the final layer, mark runtime reconciliation pending, and apply the changed Compose configuration to running containers before final success. A post-run `./manage.sh audit` must report `runtimePolicy CONFIGURED`.
+Test a managed v14.4.4-style install whose adaptive resource fingerprint/overlay is missing or policy-v2 while `prepare_config` is already checkpointed complete. Resume / repair must regenerate policy v4, retain `compose.override.yaml` as the final layer, mark runtime reconciliation pending, and apply the changed Compose configuration to running containers before final success. A post-run `./manage.sh audit` must report `runtimePolicy CONFIGURED`.
 
 Test both refresh-revision upgrade and version-only upgrade paths. From a public 14.4.2-style marker (`POLICY_REVISION=1`), v14.4.82 (which retains `MANAGED_REPAIR_REFRESH_REVISION=2`) must trigger the bounded installer-owned package/image/source refresh even when the age window is not due. From a fresh 14.4.5-style marker (`POLICY_REVISION=2`) with a different recorded installer version, ordinary v14.4.82 Resume / repair must remain local-first and must not pull/rebuild solely because `VERSION.txt` changed. Explicit Option 6 must still force refresh. Verify custom/unowned SearXNG/Ollama/Honcho refs remain preserved and successful refresh markers record current provenance.
 
@@ -47,7 +47,7 @@ Confirm a Resume / repair can reconcile `data/hermes` while a SQLite-style `*-sh
 
 Implementation context: `PATCH-NOTES.md`.
 
-Verify the inherited v14.4.3 behavior remains intact: a clean adaptive install generates resource policy v3, an existing policy-v2 adaptive install regenerates to v3 on repair/start, the WSL-visible resource fingerprint is persisted, `compose.override.yaml` remains last, and Honcho PostgreSQL retains `max_connections=200`. Verify LatticeVale does not write global WSL `memory` or `autoMemoryReclaim` settings for this feature.
+Verify the inherited v14.4.3 behavior remains intact: a clean adaptive install generates resource policy v4, an existing policy-v2/v3 adaptive install regenerates to v4 on repair/start, the WSL-visible resource fingerprint is persisted, `compose.override.yaml` remains last, and Honcho PostgreSQL retains `max_connections=200`. Verify LatticeVale does not write global WSL `memory` or `autoMemoryReclaim` settings for this feature.
 
 Exercise/fixture the preservation-first uninstaller cases: (1) Docker runtime evidence + unavailable Docker daemon aborts before Windows integration cleanup; (2) modified/unowned same-name tasks or shortcuts remain untouched and their referenced support files remain present; (3) installer-owned `OLLAMA_HOST` restore broadcasts `WM_SETTINGCHANGE`; (4) non-LatticeVale same-name firewall state is preserved; (5) another recognizable stack prevents removal of shared distro-level dockerd logging/policy state. Regenerate `installer/SOURCE-SHA256SUMS.txt` only after all release files are final and verify the complete extracted tree.
 

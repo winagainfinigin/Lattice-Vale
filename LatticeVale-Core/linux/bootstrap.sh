@@ -165,7 +165,7 @@ case " ${SUPPORTED_UBUNTU_VERSIONS} " in
   *) echo "Unsupported Ubuntu release ${VERSION_ID:-unknown}. Supported releases for this installer build: ${SUPPORTED_UBUNTU_VERSIONS}." >&2; exit 3;;
 esac
 export DEBIAN_FRONTEND=noninteractive
-prereq_packages=(ca-certificates curl git gnupg jq openssl python3 python3-yaml sudo tzdata uidmap)
+prereq_packages=(ca-certificates curl git gnupg jq openssl procps python3 python3-yaml sudo tzdata uidmap)
 missing_prereqs=()
 for pkg in "${prereq_packages[@]}"; do
   dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -qx 'install ok installed' || missing_prereqs+=("$pkg")
@@ -189,6 +189,8 @@ else
   fi
 fi
 python3 -m json.tool "$tmp_options" >/dev/null
+
+
 # Parse every root-affecting option structurally before GPU/runtime or permission
 # behavior consumes it. This is deliberately narrower than configure-stack's full
 # schema validation, which still runs before stack-level mutations.
@@ -215,17 +217,36 @@ if backend == 'windows-native' and transport not in ('windows-gateway-relay','ws
 if backend != 'windows-native':
     transport='windows-gateway-relay'
 local_ai = d.get('honcho',False) or d.get('hermesLocalAI',False)
-for key in ('honcho','hermesLocalAI'):
+for key in ('honcho','hermesLocalAI','searxng'):
     if key in d and not isinstance(d[key],bool):
         raise SystemExit(f'Invalid install options: {key} must be true or false.')
-print('\t'.join((flag('repairMaintenance'),flag('obsidian'),'true' if local_ai else 'false',accel,backend,transport)))
+redis_like = d.get('searxng',False) is True or d.get('honcho',False) is True
+print('\t'.join((flag('repairMaintenance'),flag('obsidian'),'true' if local_ai else 'false','true' if redis_like else 'false',accel,backend,transport)))
 PY_BOOTSTRAP_OPTIONS
 )"
-IFS=$'\t' read -r requested_repair obsidian_selected local_ai_requested ollama_acceleration ollama_backend ollama_transport <<< "$parsed_bootstrap_options"
+IFS=$'\t' read -r requested_repair obsidian_selected local_ai_requested redis_like_required ollama_acceleration ollama_backend ollama_transport <<< "$parsed_bootstrap_options"
 # Existing installer-owned state remains sufficient to select repair-safe package
 # behavior even if a reconfigure run intentionally records repairMaintenance=false.
 [[ "$requested_repair" == true ]] && repair_run=true
 unset parsed_bootstrap_options requested_repair
+
+# LatticeVale-managed Redis/Valkey services require Linux memory overcommit for
+# reliable fork/background-save behavior. This is a narrow, idempotent kernel sysctl
+# prerequisite, not a WSL memory-size/reclaim policy. Manage one root-owned drop-in
+# on both clean install and Resume / repair when those workloads are selected. If they
+# are later disabled, preserve any existing drop-in/effective value rather than
+# destructively guessing whether another application also relies on overcommit.
+if [[ "$redis_like_required" == true ]]; then
+  overcommit_file=/etc/sysctl.d/99-latticevale-redis-valkey.conf
+  cat > "$overcommit_file" <<'EOF_LATTICEVALE_OVERCOMMIT'
+# Managed by LatticeVale for local Redis/Valkey workloads.
+vm.overcommit_memory = 1
+EOF_LATTICEVALE_OVERCOMMIT
+  chmod 0644 "$overcommit_file"
+  sysctl -w vm.overcommit_memory=1 >/dev/null
+  [[ "$(sysctl -n vm.overcommit_memory 2>/dev/null || true)" == 1 ]] || { echo 'Could not apply required vm.overcommit_memory=1 for LatticeVale Redis/Valkey workloads.' >&2; exit 4; }
+fi
+unset redis_like_required
 
 # Avoid redoing Docker package surgery on every recovery run only when ALL
 # packages required by Docker's official Ubuntu installation are installed.
@@ -500,7 +521,7 @@ if [[ "\$resource_limits_enabled" == true ]]; then
     saved_cpus=''
     saved_mem=''
   fi
-  if [[ "\$saved_version" != 3 || "\$saved_cpus" != "\$current_cpus" || "\$saved_mem" != "\$current_mem_mib" ]]; then
+  if [[ "\$saved_version" != 4 || "\$saved_cpus" != "\$current_cpus" || "\$saved_mem" != "\$current_mem_mib" ]]; then
     runuser -u "\$stack_user" -- env HOME="\$stack_home" USER="\$stack_user" DOCKER_HOST=unix:///var/run/docker.sock \
       bash -c 'cd "\$1" && ./configure-stack.sh --refresh-resource-policy' bash "\$stack_dir" || { echo 'Could not refresh LatticeVale adaptive resource policy.' >&2; exit 1; }
   fi

@@ -1,6 +1,6 @@
-# LatticeVale v14.4.82
+# LatticeVale v14.4.83
 
-> **Hotfix Release — v14.4.82**  
+> **Patch Release — v14.4.83**  
 > Current recommended release and cumulative upgrade target from the public **v14.4.2 Main Release**.
 
 LatticeVale is a source-visible **Windows + WSL2 installer, integration layer, and lifecycle manager for a self-hosted Hermes Agent stack**.
@@ -51,6 +51,20 @@ Depending on the selected installation options, LatticeVale can provide:
 - verification, audit, repair, update, backup, and controlled uninstall
 
 Persistent Hermes profiles, sessions, memory, Matrix state, Honcho data, Ollama models, QMD data, credentials, backups, Obsidian data, and explicit Compose overrides are preserved during normal repair and update operations.
+
+---
+
+## v14.4.83 resource/runtime repair patch
+
+v14.4.83 is a narrow reliability patch based on real WSL runtime evidence. It preserves the existing LatticeVale architecture and ownership boundaries while correcting three managed behaviors:
+
+- **Adaptive resource policy v4:** managed WSL/Docker Ollama receives additional protected memory headroom when the existing aggregate container budget can safely support it. The overall WSL-visible container budget and non-container reserve remain bounded; LatticeVale still does not write global WSL `memory` or `autoMemoryReclaim` settings.
+- **Redis/Valkey prerequisite:** clean install and Resume / repair persistently ensure `vm.overcommit_memory=1` through the root-owned `/etc/sysctl.d/99-latticevale-redis-valkey.conf` drop-in whenever LatticeVale-managed SearXNG/Valkey or Honcho/Redis is selected. The effective value is verified by the state-aware audit.
+- **Ubuntu Pro integration removed:** LatticeVale no longer offers, stores, installs, verifies, or manages Ubuntu Pro for WSL. Existing Ubuntu Pro packages, attachment, or external configuration are not uninstalled or altered by this migration.
+
+Policy v4 is a repair/start migration. Existing adaptive policy-v3 installations are regenerated through the existing uncheckpointed runtime-policy reconciliation path, and affected containers are reconciled through Compose before repair can report success.
+
+The installer completion output and this README now use the **selected Linux user explicitly** for `manage.sh` commands. This avoids accidentally resolving `~` to the wrong WSL account on distros whose default user differs from the account selected for LatticeVale.
 
 ---
 
@@ -260,7 +274,8 @@ After installation or repair, use the exact WSL distribution name selected for L
 ```powershell
 wsl --list --verbose
 $Distro = Read-Host "Enter the exact WSL distro name used by LatticeVale"
-wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+$LinuxUser = Read-Host "Enter the Linux user selected for LatticeVale"
+wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh verify'
 ```
 
 A successful installation reports:
@@ -272,13 +287,13 @@ LatticeVale verification: HEALTHY
 For the detailed state-aware audit:
 
 ```powershell
-wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
+wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh audit'
 ```
 
 For a status snapshot:
 
 ```powershell
-wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh status'
+wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh status'
 ```
 
 `manage.sh` belongs to the installed Linux stack and should therefore be invoked through WSL when running from Windows PowerShell.
@@ -287,7 +302,7 @@ wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh status'
 
 ## Adaptive RAM and resource policy
 
-LatticeVale resource policy **v3** is designed to reduce unnecessary WSL/Docker memory pressure while retaining operational headroom.
+LatticeVale resource policy **v4** is designed to reduce unnecessary WSL/Docker memory pressure while retaining operational headroom.
 
 Depending on the enabled services, it can apply:
 
@@ -296,6 +311,7 @@ Depending on the enabled services, it can apply:
 - reduced glibc allocator arenas
 - Synapse cache tuning
 - reduced PostgreSQL fixed `shared_buffers`
+- protected managed-Ollama memory headroom within the aggregate WSL container budget
 - controlled Ollama model residency
 - bounded Ollama parallelism
 - short Ollama model keep-alive behavior
@@ -367,7 +383,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.4.6** | **Main Release** | CPU fingerprinting and managed-refresh refinement |
 | **v14.4.7** | Patch | Keyless web extraction and conservative Hermes web/browser defaults |
 | **v14.4.81** | Hotfix | Bounded same-run recovery for WSL `E_UNEXPECTED` launch failures |
-| **v14.4.82** | **Hotfix** | Correct successful WSL-recovery exit-code handling; current recommended release |
+| **v14.4.82** | Hotfix | Correct successful WSL-recovery exit-code handling |
+| **v14.4.83** | **Patch** | Ollama policy v4, Redis/Valkey overcommit prerequisite, Ubuntu Pro integration removal; current recommended release |
 
 ### v14.4.1
 
@@ -414,6 +431,10 @@ Added bounded same-run recovery for WSL host/service `E_UNEXPECTED` launch failu
 
 Corrects the helper return-channel handling so a successful v14.4.81 WSL recovery is recognized as successful and the installer immediately re-probes the recovered distro.
 
+### v14.4.83
+
+Advances adaptive runtime policy to v4 with protected managed-Ollama headroom, persistently manages the Redis/Valkey `vm.overcommit_memory=1` prerequisite, removes the LatticeVale-owned Ubuntu Pro option/integration without uninstalling external state, and makes the documented/final `manage.sh` commands explicitly target the selected Linux user.
+
 ```text
 v14.4.1   release-layout patch
     ↓
@@ -431,7 +452,9 @@ v14.4.7   web extraction + Hermes reliability
     ↓
 v14.4.81  WSL E_UNEXPECTED recovery
     ↓
-v14.4.82  WSL recovery return-channel hotfix / current recommended release
+v14.4.82  WSL recovery return-channel hotfix
+    ↓
+v14.4.83  resource/runtime repair patch / current recommended release
 ```
 
 ---
@@ -531,13 +554,14 @@ Use the exact WSL distribution name selected during LatticeVale installation. If
 ```powershell
 wsl --list --verbose
 $Distro = Read-Host "Enter the exact WSL distro name used by LatticeVale"
-wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh verify'
+$LinuxUser = Read-Host "Enter the Linux user selected for LatticeVale"
+wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh verify'
 ```
 
 For the detailed state-aware audit, reuse the same `$Distro` value:
 
 ```powershell
-wsl -d $Distro -- bash -lc 'cd ~/hermes-stack && ./manage.sh audit'
+wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh audit'
 ```
 
 ### Uninstall

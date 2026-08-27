@@ -7,9 +7,9 @@ boot=(root/'linux/bootstrap.sh').read_text()
 audit=(root/'stack/state-audit.py').read_text()
 installer=(root/'Install-LatticeVale.ps1').read_text()
 
-assert "POLICY_VERSION=3" in cs
-assert 'saved_version" != 3' in boot
-assert 'values.get("POLICY_VERSION") != "3"' in audit
+assert "POLICY_VERSION=4" in cs
+assert 'saved_version" != 4' in boot
+assert 'values.get("POLICY_VERSION") != "4"' in audit
 assert 'mem_mib <= 6144 )); then reserve_pct=30' in cs
 assert 'mem_mib <= 12288 )); then reserve_pct=25' in cs
 assert 'mem_mib <= 24576 )); then reserve_pct=20' in cs

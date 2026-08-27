@@ -61,7 +61,7 @@ assert 'mv data/honcho-db "backups/honcho-db-pre-local-$stamp"' in configure
 assert "cfg.get('baseUrl')=='http://honcho-api:8000'" in configure, 'Hermes self-hosted Honcho route verifier missing'
 
 # Deliberate external exceptions remain documented rather than pretending they are self-hosted.
-assert 'Windows Tailscale' in readme and 'Ubuntu Pro' in readme
+assert 'Windows Tailscale' in readme and 'Ubuntu Pro' in readme and 'no longer offers or manages Ubuntu Pro for WSL' in readme
 assert 'SearXNG itself is local' in readme or 'SearXNG + Valkey' in readme
 
 print('SELF-HOSTING FIXTURES: PASS')

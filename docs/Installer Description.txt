@@ -1,6 +1,6 @@
-LATTICEVALE v14.4.82 — INSTALLER DESCRIPTION
+LATTICEVALE v14.4.83 — INSTALLER DESCRIPTION
 
-CURRENT RELEASE: v14.4.82 is the current recommended LatticeVale release. It is a narrowly scoped hotfix over v14.4.81 and retains the current v14.4.8/v14.4.7 Hermes web-research behavior plus the inherited repair, update, resource, preservation, and ownership policies documented throughout the release.
+CURRENT RELEASE: v14.4.83 is the current recommended LatticeVale release. It retains v14.4.82 WSL recovery behavior while advancing adaptive resource policy to v4, persistently managing the Redis/Valkey overcommit prerequisite when those services are selected, and removing the LatticeVale-owned Ubuntu Pro option without altering external Ubuntu Pro state.
 
 V14.4.82 WSL RECOVERY HOTFIX: The v14.4.81 recovery helper behavior is unchanged, but its console diagnostics are now sent directly to the host while only the native integer exit code is returned to the installer. A successful bounded recovery therefore triggers the intended same-run distro eligibility re-probe instead of being misread as a failed helper exit.
 
@@ -37,7 +37,7 @@ A typical selected stack can include:
 - LatticeVale-managed WSL/Docker Ollama, or integration with separately installed native Windows Ollama
 - Windows Tailscale private exposure for selected local services
 - Docker Engine/CLI/containerd/Buildx/Compose inside the selected Ubuntu distro
-- optional Ubuntu Pro/unattended-updates integration
+- optional unattended-updates integration
 - optional Windows logon/start/shutdown helpers
 
 Everything is optional except the core prerequisites and Hermes/Docker layer required by the selected installation mode.
@@ -213,7 +213,7 @@ J. RESOURCE LIMITS — REVIEW FOR YOUR MACHINE
 
 LatticeVale can generate adaptive per-container CPU/RAM ceilings from resources visible inside WSL. In v14.4.6, read-only audit CPU fingerprinting uses the CPUs actually available to the WSL process (matching the generator/`nproc` view) rather than a potentially broader host logical-CPU count. This keeps a valid processor-limited WSL policy from being falsely marked stale; genuine CPU or RAM allocation changes are still detected.
 
-LatticeVale can generate adaptive per-container CPU/RAM ceilings from resources visible inside WSL. In v14.4.5, adaptive policy v3 leaves more non-container headroom on smaller WSL VMs and adds conservative glibc allocator, Synapse-cache, and PostgreSQL-buffer tuning to reduce avoidable resident-memory pressure. Clean installs receive policy v3 directly and repair/start migrates enabled older overlays when needed. These are ceilings/tuning defaults, not reservations, and they do not replace Windows/WSL global resource policy. LatticeVale does not write global WSL `memory` or `autoMemoryReclaim`; user `compose.override.yaml` remains the final service-level override.
+LatticeVale can generate adaptive per-container CPU/RAM ceilings from resources visible inside WSL. In v14.4.5, adaptive policy v3 leaves more non-container headroom on smaller WSL VMs and adds conservative glibc allocator, Synapse-cache, and PostgreSQL-buffer tuning to reduce avoidable resident-memory pressure. Clean installs receive policy v4 directly and repair/start migrates enabled older overlays, including policy v3, when needed. These are ceilings/tuning defaults, not reservations, and they do not replace Windows/WSL global resource policy. LatticeVale does not write global WSL `memory` or `autoMemoryReclaim`; user `compose.override.yaml` remains the final service-level override.
 
 Users may still want to tune:
 - WSL CPU/RAM allocation outside LatticeVale;
@@ -240,7 +240,7 @@ LatticeVale can install and preserve the Honcho memory layer. Users should still
 
 M. WINDOWS INTEGRATIONS — OPTIONAL
 
-Depending on choices, LatticeVale can configure desktop Start/Shut Down shortcuts, Windows-logon startup, Windows Tailscale integration, Obsidian paths, and Ubuntu Pro for WSL-related integration.
+Depending on choices, LatticeVale can configure desktop Start/Shut Down shortcuts, Windows-logon startup, Windows Tailscale integration, and Obsidian paths. Ubuntu Pro for WSL is not installed or managed by LatticeVale.
 
 These are not mandatory for Hermes itself. Users can leave them disabled when they do not want LatticeVale to affect those Windows-side behaviors.
 

@@ -711,10 +711,19 @@ def main() -> int:
                     if line.startswith("MemTotal:"):
                         mem_kib=int(line.split()[1]); break
                 current_mem_mib=mem_kib//1024
-                if values.get("POLICY_VERSION") != "3" or str(current_cpus) != values.get("CPUS") or str(current_mem_mib) != values.get("MEM_MIB"):
+                if values.get("POLICY_VERSION") != "4" or str(current_cpus) != values.get("CPUS") or str(current_mem_mib) != values.get("MEM_MIB"):
                     policy_issues.append("adaptive resource policy revision or WSL CPU/RAM allocation changed; next LatticeVale start or repair will recalculate the overlay")
             except Exception:
                 policy_issues.append("adaptive resource fingerprint is unreadable")
+
+    # Redis/Valkey background-save/fork operations require Linux memory overcommit.
+    # LatticeVale owns a sysctl.d drop-in for this prerequisite when either managed
+    # Redis/Valkey workload is selected; audit the effective kernel value read-only.
+    redis_like_enabled = bool(isinstance(opts, dict) and (opts.get("searxng") is True or opts.get("honcho") is True))
+    if redis_like_enabled:
+        rc, out = run(["sysctl", "-n", "vm.overcommit_memory"])
+        if rc != 0 or out.strip() != "1":
+            policy_issues.append("vm.overcommit_memory is not 1; Resume / repair will restore the LatticeVale Redis/Valkey prerequisite")
 
     accel_managed = isinstance(opts, dict) and "ollamaAcceleration" in opts
     requested_accel = str(opts.get("ollamaAcceleration", "cpu")).strip().lower() if accel_managed else "legacy"

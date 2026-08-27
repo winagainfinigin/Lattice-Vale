@@ -63,7 +63,6 @@ For a managed stack, start in the LatticeVale stack directory with `./manage.sh 
 | Ollama | Optional local model runtime, either managed in Linux or integrated with native Windows Ollama | [Ollama docs](https://docs.ollama.com/) · [Troubleshooting](https://docs.ollama.com/troubleshooting) · [Windows](https://docs.ollama.com/windows) |
 | Tailscale | Optional Windows-host remote access to selected LatticeVale services | [Troubleshooting](https://tailscale.com/docs/reference/troubleshooting) · [CLI diagnostics](https://tailscale.com/docs/reference/tailscale-cli) |
 | Obsidian | Optional Windows-native vault integrated with QMD/Hermes | [Obsidian Help](https://obsidian.md/help/) |
-| Ubuntu Pro | Optional Ubuntu Pro attachment and maintenance integration | [Ubuntu Pro documentation](https://documentation.ubuntu.com/pro/) · [Pro Client documentation](https://documentation.ubuntu.com/pro-client/en/latest/tutorials/) |
 | PowerShell | Windows installer, verification, repair, and relay scripts | [Microsoft PowerShell documentation](https://learn.microsoft.com/powershell/) |
 | Playwright / Chromium | Browser runtime underlying the local-browser path in the pinned Hermes environment | [Playwright browser documentation](https://playwright.dev/docs/browsers) · [Hermes browser automation](https://hermes-agent.nousresearch.com/docs/user-guide/features/browser/) |
 
@@ -91,7 +90,7 @@ If `./manage.sh audit` reports `runtimePolicy PARTIAL` even though `.latticevale
 
 If `./manage.sh audit` reports `runtimePolicy PARTIAL` after an older repair, rerun Resume / repair with v14.4.5 or newer. The installer now treats adaptive policy convergence as an explicit repair step and will not report final success until the selected policy-v3 fingerprint and RAM controls verify. When that overlay changes, affected containers are reconciled through Compose so the settings become live.
 
-v14.4.6 refines the managed-update trigger introduced in v14.4.5: a bundle-version change alone no longer forces package/image/source refresh. Resume / repair refreshes that layer when the 30-day gate is due, the managed-refresh policy revision changes, or valid legacy refresh state is missing. Use explicit **Update / repair installer-managed software** when you intentionally want to force the current bundle's managed refresh immediately. Public 14.4.2→14.4.82 still refreshes because the managed-refresh revision advances from 1 to 2. The v14.4.7 extraction migration and v14.4.8 browser/timeout integration migration do not by themselves force that package/image/source refresh.
+v14.4.6 refines the managed-update trigger introduced in v14.4.5: a bundle-version change alone no longer forces package/image/source refresh. Resume / repair refreshes that layer when the 30-day gate is due, the managed-refresh policy revision changes, or valid legacy refresh state is missing. Use explicit **Update / repair installer-managed software** when you intentionally want to force the current bundle's managed refresh immediately. Public 14.4.2→14.4.83 still refreshes because the managed-refresh revision advances from 1 to 2. The v14.4.7 extraction migration and v14.4.8 browser/timeout integration migration do not by themselves force that package/image/source refresh.
 
 ## v14.4.4 repair metadata-race support note
 
@@ -99,7 +98,7 @@ Implementation details: `PATCH-NOTES.md`.
 
 Resume / repair no longer fails merely because a live SQLite `*-shm`/`*-wal` sidecar or rotated log disappears during root-assisted ownership reconciliation. Rerun Resume / repair with v14.4.4; the bootstrap tolerates only paths that actually vanished and will still stop on a genuine ownership/permission error for an entry that remains present.
 
-The v14.4.3 RAM-efficiency and uninstaller behavior remains current: adaptive policy v3 is still used, user `compose.override.yaml` remains authoritative, global WSL RAM/reclaim settings remain user-owned, and Docker-unavailable uninstall still fails closed when runtime may remain.
+The v14.4.3 RAM-efficiency and uninstaller behavior remains inherited, while v14.4.83 advances the active adaptive policy to v4; user `compose.override.yaml` remains authoritative, global WSL RAM/reclaim settings remain user-owned, and Docker-unavailable uninstall still fails closed when runtime may remain.
 
 ## v14.4.1 layout note
 

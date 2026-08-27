@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
     opts={
         'schema':16,'installerVersion':'14.3.0','timezone':'Etc/UTC','dashboard':False,'multiAgent':False,'workers':[],'ollamaAcceleration':'cpu','containerResourceLimits':False,
         'kanban':False,'matrix':False,'tailscale':False,'tailscaleDashboard':False,'tailscaleMatrix':False,
-        'searxng':False,'qmd':False,'honcho':False,'hermesLocalAI':False,'localTextModel':'qwen3.5:4b','localEmbeddingModel':'qwen3-embedding:4b','obsidian':False,'ubuntuPro':False,'unattendedUpdates':False,
+        'searxng':False,'qmd':False,'honcho':False,'hermesLocalAI':False,'localTextModel':'qwen3.5:4b','localEmbeddingModel':'qwen3-embedding:4b','obsidian':False,'unattendedUpdates':False,
         'autoStart':False,'windowsShortcuts':False,'resetCheckpoints':False,'forceProviderSetup':False,'forceProfileSetup':False,
         'rebuildMatrixIdentity':False,'installerMode':'resume'
     }
