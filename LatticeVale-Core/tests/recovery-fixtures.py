@@ -59,7 +59,8 @@ for line in (
     'wait_http SearXNG http://127.0.0.1:${SEARXNG_HOST_PORT}/ 1 || return 1',
     'qmd_health_ok || return 1',
     'wait_http Honcho http://127.0.0.1:${HONCHO_HOST_PORT}/health 1 || return 1',
-    'wait_http Matrix http://127.0.0.1:${MATRIX_HOST_PORT}/health 1 || return 1',
+    'matrix_client_api_ready || return 1',
+    'matrix_backend_ready_from_hermes || return 1',
 ):
     assert line in cfg, line
 
