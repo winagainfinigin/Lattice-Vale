@@ -51,13 +51,13 @@ assert 'Profile gateway running with Matrix backend verified' in selected
 # Synapse first, then prove in-container reachability and recycle the default gateway.
 stage=cfg[cfg.index('stage_reconcile()'):cfg.index('stage_kanban_gateway()')]
 assert stage.index('ensure_matrix_online 60') < stage.index('docker compose up -d --pull never --no-build --remove-orphans')
-assert stage.index('wait_matrix_backend_from_hermes 60') < stage.index('hermes gateway restart')
+assert stage.index('wait_matrix_backend_from_hermes 60') < stage.index('start_or_restart_default_gateway_exact')
 kanban=cfg[cfg.index('stage_kanban_gateway()'):cfg.index('stage_finalize()')]
 assert 'ensure_matrix_online 60' in kanban
 assert 'wait_matrix_backend_from_hermes 60' in kanban
 checkpoint=cfg[cfg.index('checkpoint_revision()'):cfg.index('matrix_profile_activation_pending()')]
-assert "kanban_gateway) printf '3'" in checkpoint
-assert "reconcile) printf '2'" in checkpoint
+assert "kanban_gateway) printf '4'" in checkpoint
+assert "reconcile) printf '4'" in checkpoint  # Hotfix 2 advances both lifecycle stages; Hotfix 1 ordering remains covered.
 
 # Audit must stop claiming RUNNING when only the gateway process is alive.
 assert 'matrix_backend_reachable_from_hermes' in audit

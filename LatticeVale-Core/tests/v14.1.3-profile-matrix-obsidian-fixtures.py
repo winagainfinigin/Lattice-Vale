@@ -40,7 +40,8 @@ assert 'MATRIX_ALLOWED_ROOMS' in cfg
 # Profile model creation/selection is complete before Matrix identity/gateway provisioning.
 assert cfg.index("run_stage profiles '") < cfg.index("run_stage matrix_profiles '")
 assert 'hermes_model_configured "$pdir/config.yaml"' in cfg
-assert cfg.index('hermes_model_configured "$pdir/config.yaml"') < cfg.index('gateway restart >/dev/null', cfg.index('stage_matrix_profiles()'))
+matrix_stage = cfg[cfg.index('stage_matrix_profiles()'):cfg.index('stage_integrations()')]
+assert matrix_stage.index('hermes_model_configured "$pdir/config.yaml"') < matrix_stage.index('start_or_restart_profile_gateway_exact "$name"')
 assert 'HERMES_MODEL=$model' in cfg
 assert "sed -n 's/^HERMES_MODEL=//p' \"$info\"" in cfg, 'repair verification must detect profile-model metadata drift'
 assert 'info_model == model' in audit, 'state audit must verify Matrix binding metadata matches the profile current model'

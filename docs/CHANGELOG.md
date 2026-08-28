@@ -1,5 +1,12 @@
 # Changelog
 
+## v14.4.84 Hotfix 2
+
+- Fixes both reconcile validation races found during Hotfix 2 pre-release testing: selected managed services such as Ollama can still be settling after Compose reports them running, and Hermes API/Dashboard readiness can be invalidated by the final default-gateway restart.
+- Adds bounded managed-Ollama startup health handling, internal Matrix/Synapse reachability checks, component-specific reconcile diagnostics, and API/Dashboard readiness verification after the final gateway mutation.
+- Applies the same final readiness ordering to `reconcile`, `kanban_gateway`, and normal Start/Restart/Update lifecycle commands; uses exact s6-scoped default-gateway fallback when needed.
+- Advances only internal `reconcile` and `kanban_gateway` checkpoints to revision 4 so Hotfix 1 installations replay the final Hotfix 2 lifecycle during Resume / repair. Public version remains 14.4.84.
+
 ## v14.4.84 Hotfix 1
 
 - Repairs Matrix gateway startup ordering after real Element communication loss following a LatticeVale stop/start cycle. Synapse is now brought ready first, Docker DNS/API reachability is verified from inside `hermes-agent`, and default/named Matrix gateways are recycled only after that probe succeeds.

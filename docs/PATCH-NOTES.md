@@ -1,5 +1,17 @@
 # Current v14.x patch notes
 
+## v14.4.84 Hotfix 2 — startup-aware reconcile and post-gateway readiness
+
+- Fixes the repair/fresh-install reconcile validation races found while validating Hotfix 2 before release.
+- Waits boundedly for managed Ollama health instead of treating Docker's normal `starting` health state as terminal failure.
+- Rechecks Matrix from both the WSL host and inside `hermes-agent`, including `synapse:8008` Docker DNS/API reachability.
+- Reports the exact failed reconcile component instead of only a generic live-verification failure.
+- Fixes the exact `Reconcile verification failed: Hermes API health endpoint is not ready.` ordering failure: API/Dashboard readiness is now checked after the final default-gateway lifecycle mutation, not only before it.
+- Applies the post-gateway API/Dashboard readiness barrier in both `reconcile` and the later `kanban_gateway` stage so the second gateway reload cannot recreate the race.
+- Uses exact s6-scoped default-gateway fallback instead of silently ignoring a failed gateway restart.
+- Applies the same post-gateway readiness barrier to normal Start/Restart/Update commands.
+- Keeps public `VERSION.txt` at `14.4.84`; internal `reconcile` and `kanban_gateway` checkpoint revisions are both 4 so existing Hotfix 1 installs replay the complete corrected lifecycle during Resume / repair. Fresh installs record revision 4 immediately.
+
 ## v14.4.84 Hotfix 1 — Matrix gateway startup/readiness repair
 
 - Keeps the public version at **14.4.84**; this is a same-version hotfix for users who already released/installed the initial v14.4.84 bundle.

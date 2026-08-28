@@ -229,6 +229,27 @@ wait_matrix_backend_from_hermes() {
   return 1
 }
 
+wait_managed_ollama_healthy() {
+  local tries="${1:-60}" i status
+  managed_ollama_enabled || return 0
+  for i in $(seq 1 "$tries"); do
+    status="$(docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null || true)"
+    [[ "$status" == healthy ]] && return 0
+    # Fail promptly on a terminal unhealthy state after Docker's own start-period/retries,
+    # but tolerate the normal starting state during repair/startup reconciliation.
+    [[ "$status" == unhealthy ]] && {
+      echo 'LatticeVale-managed Ollama became unhealthy during reconciliation.' >&2
+      docker logs --tail 120 hermes-ollama 2>&1 | tail -n 120 >&2 || true
+      return 1
+    }
+    sleep 2
+  done
+  status="$(docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null || true)"
+  echo "LatticeVale-managed Ollama did not become healthy within the bounded reconciliation window (last health state: ${status:-unknown})." >&2
+  docker logs --tail 120 hermes-ollama 2>&1 | tail -n 120 >&2 || true
+  return 1
+}
+
 ensure_matrix_online() {
   # A repair must not assume Synapse remained running from an earlier stage or prior
   # installer attempt. Start only the installer-managed Matrix services, then require
@@ -1355,9 +1376,9 @@ CURRENT_STAGE="startup"
 checkpoint_revision() {
   case "$1" in
     matrix_profiles|matrix_profile_cross_signing) printf '3' ;;
-    kanban_gateway) printf '3' ;;
+    kanban_gateway) printf '4' ;;
     finalize) printf '2' ;;
-    reconcile) printf '2' ;;
+    reconcile) printf '4' ;;
     integrations) printf '4' ;;
     prepare_config|infrastructure|matrix_bootstrap|provider_setup|profiles|matrix_cross_signing) printf '1' ;;
     *) printf '1' ;;
@@ -1584,6 +1605,28 @@ http_status_ok() {
   local url="$1" code
   code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null || true)"
   [[ "$code" =~ ^(2|3|401|403) ]]
+}
+
+
+wait_hermes_gateway_surfaces() {
+  local context="${1:-gateway lifecycle}" tries="${2:-60}" i api_ok dashboard_ok
+  for i in $(seq 1 "$tries"); do
+    api_ok=false
+    dashboard_ok=true
+    if timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 && \
+       http_status_ok "http://127.0.0.1:${HERMES_API_HOST_PORT}/health"; then
+      api_ok=true
+    fi
+    if [[ "$(opt_bool dashboard)" == true ]] && ! http_status_ok "http://127.0.0.1:${DASHBOARD_HOST_PORT}/"; then
+      dashboard_ok=false
+    fi
+    [[ "$api_ok" == true && "$dashboard_ok" == true ]] && return 0
+    sleep 2
+  done
+  echo "Hermes gateway surfaces did not recover after ${context}: API health and/or Dashboard remained unavailable after the bounded wait." >&2
+  timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1 >&2 || true
+  timeout --foreground --kill-after=5s 15s docker logs --tail 120 hermes-agent 2>&1 | tail -n 120 >&2 || true
+  return 1
 }
 
 verify_prepare_config() {
@@ -1947,6 +1990,50 @@ start_or_restart_profile_gateway_exact() {
   return 0
 }
 
+
+start_or_restart_default_gateway_exact() {
+  local state action service="/run/service/gateway-default"
+  if ! state="$(profile_gateway_s6_state default)"; then
+    echo 'Unable to determine exact s6 state for the default gateway before activation.' >&2
+    return 1
+  fi
+  case "$state" in
+    up) action=restart ;;
+    down) action=start ;;
+    absent)
+      echo 'Default gateway has no registered s6 service slot; refusing to guess or recreate it automatically.' >&2
+      profile_gateway_log_tail_exact default
+      return 1
+      ;;
+    *)
+      echo "Default gateway exact s6 state is '$state'; refusing an ambiguous lifecycle action." >&2
+      return 1
+      ;;
+  esac
+  if ! timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway "$action" >/dev/null 2>&1; then
+    echo "WARNING: Hermes default gateway $action command failed; retrying only its exact s6 service slot." >&2
+    if [[ "$action" == start ]]; then
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || {
+        echo 'Default gateway exact s6 start fallback failed.' >&2
+        profile_gateway_log_tail_exact default
+        return 1
+      }
+    else
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || {
+        echo 'Default gateway exact s6 restart fallback failed.' >&2
+        profile_gateway_log_tail_exact default
+        return 1
+      }
+    fi
+  fi
+  if ! wait_profile_gateway_up_exact default; then
+    echo "Default gateway exact s6 service did not become running after $action." >&2
+    profile_gateway_log_tail_exact default
+    return 1
+  fi
+  return 0
+}
+
 wait_profile_gateway_down_exact() {
   local name="$1" i state
   for i in $(seq 1 20); do
@@ -2291,36 +2378,93 @@ PY_VERIFY_INTEGRATIONS
 
 
 verify_reconcile() {
-  docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 || return 1
-  http_status_ok http://127.0.0.1:${HERMES_API_HOST_PORT}/health || return 1
-  if [[ "$(opt_bool dashboard)" == true ]]; then http_status_ok http://127.0.0.1:${DASHBOARD_HOST_PORT}/ || return 1; fi
-  if managed_ollama_enabled; then docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null | grep -qx healthy || return 1; fi
+  # This verifier is called both to adopt an already-complete checkpoint and after the
+  # reconcile action. Keep it strict about real failures, but make startup settling
+  # explicit and diagnostic instead of returning a generic exit 1.
+  if ! docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1; then
+    echo 'Reconcile verification failed: Hermes CLI is not ready inside hermes-agent.' >&2
+    return 1
+  fi
+  if ! http_status_ok http://127.0.0.1:${HERMES_API_HOST_PORT}/health; then
+    echo 'Reconcile verification failed: Hermes API health endpoint is not ready.' >&2
+    return 1
+  fi
+  if [[ "$(opt_bool dashboard)" == true ]] && ! http_status_ok http://127.0.0.1:${DASHBOARD_HOST_PORT}/; then
+    echo 'Reconcile verification failed: Dashboard endpoint is not ready.' >&2
+    return 1
+  fi
+  if managed_ollama_enabled; then
+    local ollama_health
+    ollama_health="$(docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null || true)"
+    if [[ "$ollama_health" != healthy ]]; then
+      echo "Reconcile verification failed: managed Ollama is not healthy (state: ${ollama_health:-unknown})." >&2
+      return 1
+    fi
+  fi
   if windows_native_ollama_enabled; then
     local native_base
-    native_base="$(ollama_api_base_url)" || return 1
-    timeout --foreground --kill-after=5s 15s python3 - "$native_base" <<'PY_NATIVE_RECONCILE' >/dev/null 2>&1 || return 1
+    native_base="$(ollama_api_base_url)" || {
+      echo 'Reconcile verification failed: native Windows Ollama API base URL is unavailable.' >&2
+      return 1
+    }
+    if ! timeout --foreground --kill-after=5s 15s python3 - "$native_base" <<'PY_NATIVE_RECONCILE' >/dev/null 2>&1
 import sys,urllib.request
 urllib.request.urlopen(sys.argv[1].rstrip('/')+'/api/tags',timeout=5).read()
 PY_NATIVE_RECONCILE
+    then
+      echo 'Reconcile verification failed: native Windows Ollama /api/tags is unreachable.' >&2
+      return 1
+    fi
   fi
   if [[ "$(opt_bool hermesLocalAI)" == true ]]; then
     local hermes_ollama_url
     hermes_ollama_url="$(ollama_openai_base_url)"
-    docker exec hermes-agent python - "$hermes_ollama_url" <<'PY_HERMES_OLLAMA_RECONCILE' >/dev/null 2>&1 || return 1
+    if ! docker exec hermes-agent python - "$hermes_ollama_url" <<'PY_HERMES_OLLAMA_RECONCILE' >/dev/null 2>&1
 import sys,urllib.request
 base=sys.argv[1].rstrip('/')
 urllib.request.urlopen(base[:-3]+'/api/tags' if base.endswith('/v1') else base+'/api/tags', timeout=5).read()
 PY_HERMES_OLLAMA_RECONCILE
+    then
+      echo 'Reconcile verification failed: Hermes cannot reach its configured Ollama backend.' >&2
+      return 1
+    fi
   fi
-  if [[ "$(opt_bool matrix)" == true ]]; then wait_http Matrix http://127.0.0.1:${MATRIX_HOST_PORT}/health 1 || return 1; fi
-  if [[ "$(opt_bool searxng)" == true ]]; then wait_http SearXNG http://127.0.0.1:${SEARXNG_HOST_PORT}/ 1 || return 1; fi
-  if [[ "$(opt_bool qmd)" == true ]]; then qmd_health_ok || return 1; fi
-  if [[ "$(opt_bool honcho)" == true ]]; then wait_http Honcho http://127.0.0.1:${HONCHO_HOST_PORT}/health 1 || return 1; fi
+  if [[ "$(opt_bool matrix)" == true ]]; then
+    if ! matrix_client_api_ready; then
+      echo 'Reconcile verification failed: Matrix Client-Server API is not ready on the WSL host.' >&2
+      return 1
+    fi
+    if ! matrix_backend_ready_from_hermes; then
+      echo 'Reconcile verification failed: Synapse is not reachable as synapse:8008 from inside hermes-agent.' >&2
+      return 1
+    fi
+  fi
+  if [[ "$(opt_bool searxng)" == true ]] && ! http_status_ok http://127.0.0.1:${SEARXNG_HOST_PORT}/; then
+    echo 'Reconcile verification failed: SearXNG endpoint is not ready.' >&2
+    return 1
+  fi
+  if [[ "$(opt_bool qmd)" == true ]] && ! qmd_health_ok; then
+    echo 'Reconcile verification failed: QMD is not healthy.' >&2
+    return 1
+  fi
+  if [[ "$(opt_bool honcho)" == true ]] && ! http_status_ok http://127.0.0.1:${HONCHO_HOST_PORT}/health; then
+    echo 'Reconcile verification failed: Honcho API is not ready.' >&2
+    return 1
+  fi
   return 0
 }
 
 verify_kanban_gateway() {
   docker compose ps --status running hermes 2>/dev/null | grep -q hermes || return 1
+  docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 || return 1
+  http_status_ok "http://127.0.0.1:${HERMES_API_HOST_PORT}/health" || return 1
+  if [[ "$(opt_bool dashboard)" == true ]]; then
+    http_status_ok "http://127.0.0.1:${DASHBOARD_HOST_PORT}/" || return 1
+  fi
+  if [[ "$(opt_bool matrix)" == true ]]; then
+    matrix_client_api_ready || return 1
+    matrix_backend_ready_from_hermes || return 1
+  fi
   if [[ "$(opt_bool kanban)" == true ]]; then
     docker exec -u hermes hermes-agent hermes kanban list >/dev/null 2>&1 || return 1
   fi
@@ -4633,14 +4777,22 @@ if [[ "$(opt_bool matrix)" == true ]]; then
   ensure_matrix_online 60
 fi
 timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --no-build --remove-orphans
+# Compose considers a container 'Running' before its healthcheck becomes healthy. Hotfix 1
+# could therefore finish Matrix reconciliation quickly and immediately fail verify_reconcile
+# while managed Ollama was still in its normal startup period. Wait for the selected managed
+# Ollama healthcheck here so repair/fresh install only verify after the backend has settled.
+wait_managed_ollama_healthy 60
 for _ in $(seq 1 60); do timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 && break; sleep 2; done
 timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null
 wait_http Hermes-API http://127.0.0.1:${HERMES_API_HOST_PORT}/health 60
+if [[ "$(opt_bool dashboard)" == true ]]; then
+  wait_http Dashboard http://127.0.0.1:${DASHBOARD_HOST_PORT}/ 60
+fi
 
 # Recheck selected service health after final reconciliation.
 if [[ "$(opt_bool matrix)" == true ]]; then
   wait_matrix_backend_from_hermes 60
-  if ! timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway restart >/dev/null 2>&1; then
+  if ! start_or_restart_default_gateway_exact; then
     echo 'Default Hermes gateway restart failed after Matrix became reachable from the Hermes container.' >&2
     return 1
   fi
@@ -4654,7 +4806,7 @@ if [[ "$(opt_bool matrix)" == true ]]; then
       if [[ "$join_rc" -eq 2 ]]; then
         echo 'Matrix/Synapse became unavailable during the default-bot join check. LatticeVale will restart its managed Synapse services and retry once automatically.' >&2
         if ensure_matrix_online 60 && \
-           timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway restart >/dev/null 2>&1 && \
+           start_or_restart_default_gateway_exact && \
            wait_matrix_room_join "$matrix_token" "$matrix_room" 'Default Hermes Matrix bot' 45; then
           echo 'Default Hermes Matrix join recovered after restarting Synapse.'
         else
@@ -4684,6 +4836,13 @@ fi
 [[ "$(opt_bool searxng)" == true ]] && wait_http SearXNG http://127.0.0.1:${SEARXNG_HOST_PORT}/ 60
 [[ "$(opt_bool qmd)" == true ]] && wait_qmd_health 90
 [[ "$(opt_bool honcho)" == true ]] && wait_http Honcho http://127.0.0.1:${HONCHO_HOST_PORT}/health 90
+# The default gateway restart above also restarts the gateway-owned API/Dashboard server.
+# Hotfix 2 waited for these surfaces before that restart, then verified them immediately
+# afterward. Put the readiness barrier after the final lifecycle mutation instead.
+wait_hermes_gateway_surfaces 'reconcile gateway restart' 60
+if [[ "$(opt_bool matrix)" == true ]]; then
+  wait_matrix_backend_from_hermes 60
+fi
 return 0
 }
 
@@ -4703,7 +4862,10 @@ if [[ "$(opt_bool matrix)" == true ]]; then
   ensure_matrix_online 60
   wait_matrix_backend_from_hermes 60
 fi
-timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway restart >/dev/null 2>&1 || true
+if ! start_or_restart_default_gateway_exact; then
+  echo 'Default Hermes gateway could not be reconciled after Kanban/config initialization.' >&2
+  return 1
+fi
 while IFS= read -r matrix_profile; do
   [[ -n "$matrix_profile" ]] || continue
   matrix_profile_secret="secrets/matrix-profiles/$matrix_profile.env"
@@ -4724,6 +4886,12 @@ while IFS= read -r matrix_profile; do
     continue
   fi
 done < <(jq -r '.workers[]? | select(.matrix.enabled == true) | .name' install-options.json)
+# This stage performs the last gateway restart in the installer. Do not mark it done
+# until the gateway-owned API/Dashboard surfaces have actually returned.
+wait_hermes_gateway_surfaces 'Kanban/final gateway reload' 60
+if [[ "$(opt_bool matrix)" == true ]]; then
+  wait_matrix_backend_from_hermes 60
+fi
 return 0
 }
 

@@ -739,6 +739,34 @@ wait_hermes_cli_manage() {
   return 1
 }
 
+
+http_status_ok_manage() {
+  local url="$1" code
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "$url" 2>/dev/null || true)"
+  [[ "$code" =~ ^(2|3|401|403) ]]
+}
+
+wait_hermes_gateway_surfaces_manage() {
+  local context="${1:-gateway lifecycle}" i api_ok dashboard_ok
+  for i in $(seq 1 60); do
+    api_ok=false
+    dashboard_ok=true
+    if timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 && \
+       http_status_ok_manage "http://127.0.0.1:${HERMES_API_HOST_PORT}/health"; then
+      api_ok=true
+    fi
+    if [[ "$(opt_bool dashboard)" == true ]] && ! http_status_ok_manage "http://127.0.0.1:${DASHBOARD_HOST_PORT}/"; then
+      dashboard_ok=false
+    fi
+    [[ "$api_ok" == true && "$dashboard_ok" == true ]] && return 0
+    sleep 2
+  done
+  echo "Hermes API/Dashboard did not recover after ${context}." >&2
+  timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1 >&2 || true
+  timeout --foreground --kill-after=5s 15s docker logs --tail 120 hermes-agent 2>&1 | tail -n 120 >&2 || true
+  return 1
+}
+
 matrix_backend_ready_from_hermes_manage() {
   timeout --foreground --kill-after=5s 15s docker exec hermes-agent python3 -c '
 import http.client, socket
@@ -977,6 +1005,7 @@ case "$cmd" in
     if [[ "$(opt_bool matrix)" == true ]]; then ensure_matrix_server_online_manage; fi
     docker compose up -d --pull never --no-build
     start_selected_matrix_profile_gateways
+    wait_hermes_gateway_surfaces_manage 'stack start/gateway reconciliation'
     control_windows_bridge start
     status
     ;;
@@ -991,7 +1020,10 @@ case "$cmd" in
       docker compose up -d --pull never --no-build
     fi
     if [[ -n "${2:-}" ]]; then docker compose restart "$2"; else docker compose restart; fi
-    if [[ -z "${2:-}" || "${2:-}" == hermes || "${2:-}" == synapse || "${2:-}" == synapse-db ]]; then start_selected_matrix_profile_gateways; fi
+    if [[ -z "${2:-}" || "${2:-}" == hermes || "${2:-}" == synapse || "${2:-}" == synapse-db ]]; then
+      start_selected_matrix_profile_gateways
+      wait_hermes_gateway_surfaces_manage 'stack restart/gateway reconciliation'
+    fi
     control_windows_bridge start ;;
   chat)
     profile="${2:-default}"
@@ -1026,6 +1058,7 @@ case "$cmd" in
     if [[ "$(opt_bool matrix)" == true ]]; then ensure_matrix_server_online_manage; fi
     timeout --foreground --kill-after=10s 300s docker compose up -d --pull never --no-build --remove-orphans
     start_selected_matrix_profile_gateways
+    wait_hermes_gateway_surfaces_manage 'stack update/gateway reconciliation'
     if local_ai_enabled; then
       if managed_ollama_enabled; then
         for _ in $(seq 1 60); do timeout --foreground --kill-after=5s 15s docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null | grep -qx healthy && break; sleep 2; done
