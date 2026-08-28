@@ -47,6 +47,14 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
           exit 0
         fi
         if [[ "$1" == "exec" ]]; then
+          # The production installer requires exact s6 supervisor state before
+          # mutating a gateway. This simulation models a healthy default gateway,
+          # so its fake docker CLI must return realistic s6-svstat output instead
+          # of a successful command with an empty/ambiguous response.
+          if [[ "$*" == *"/command/s6-svstat"* && "$*" == *"/run/service/gateway-default"* ]]; then
+            echo 'up (pid 4242) 1 seconds'
+            exit 0
+          fi
           if [[ "$*" == *"config get model.default"* ]]; then echo test/model; fi
           if [[ "$*" == *"--version"* ]]; then echo 'Hermes test'; fi
           exit 0
