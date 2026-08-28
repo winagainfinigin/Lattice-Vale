@@ -1,12 +1,12 @@
-# LatticeVale v14.4.83 — Complete Features and Install Options Reference
+# LatticeVale v14.4.84 — Complete Features and Install Options Reference
 
-> **v14.4.83:** retains the v14.4.82 WSL recovery behavior, advances adaptive resource policy to v4, persistently supplies the Redis/Valkey overcommit prerequisite when selected, and removes the LatticeVale-owned Ubuntu Pro option without modifying external Ubuntu Pro state.
+> **v14.4.84:** removes targeted WSL termination from the Windows shutdown shortcut and repairs legacy shortcut-induced WSL session transport during existing-install repair. It retains v14.4.83 resource policy v4, Redis/Valkey overcommit, Ubuntu Pro removal, and v14.4.82 bounded launch recovery.
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.4.83 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.4.84 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.83 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.84 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -580,7 +580,8 @@ The small Windows relay used for selected integrations is separate and is design
 ### Shut Down LatticeVale
 
 - stops the selected LatticeVale services and managed relay
-- terminates **only the selected distro**
+- intentionally leaves the selected WSL distro running
+- never uses targeted `wsl --terminate`
 - does not use global `wsl --shutdown`
 
 Non-LatticeVale same-name shortcuts are not overwritten/removed without ownership proof.
@@ -627,7 +628,7 @@ These prompts are intended to prevent LatticeVale from silently taking ownership
 
 # 5. Existing-install menu — all six modes
 
-Before using **Resume / repair installation** or **Update / repair installer-managed software**, fully stop the selected LatticeVale WSL distro before launching the Windows installer. When available, **Shut Down LatticeVale** is the recommended method: it stops the managed stack and terminates only the selected distro. It does not require global `wsl --shutdown`.
+Lifecycle shortcuts in v14.4.84 invoke `./manage.sh start|stop` directly with WSL `--cd`; repair treats older/broken shortcut runtime contracts as drift and rewrites them. Before using **Resume / repair installation** or **Update / repair installer-managed software**, use **Shut Down LatticeVale** to stop the managed stack if the shortcut is available. Do not use targeted `wsl --terminate`. If v14.4.84 detects the installer-owned legacy targeted-termination helper, the repair run performs its own bounded global WSL shutdown + `WslService` transport reset before replacing the helper.
 
 When a recognized installer-managed stack exists, LatticeVale offers six top-level modes.
 
@@ -787,7 +788,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.4.83
+# 8. Current managed software/source pins documented by v14.4.84
 
 The release's declared managed references include:
 
@@ -853,7 +854,7 @@ Current normal configuration flows **do not set or switch `[wsl2] networkingMode
 
 # 11. WSL networking behavior
 
-Current v14.4.83 policy:
+Current v14.4.84 policy:
 
 - discover active topology
 - preserve working NAT/default/VirtioProxy-capable paths
@@ -1029,7 +1030,7 @@ Current primary documentation and current source take precedence over archived v
 
 # 18. Documentation files reviewed for this consolidation
 
-## Current documentation set after v14.4.8 consolidation (retained by v14.4.83)
+## Current documentation set after v14.4.8 consolidation (retained by v14.4.84)
 
 The v14.4.0 audit originally reviewed a larger set of one-off patch-note files. Those v14.x detailed notes are now preserved in `docs/PATCH-NOTES.md`; `docs/CHANGELOG.md` remains canonical for version history. Current user/maintainer documentation is intentionally split by purpose rather than by individual patch.
 

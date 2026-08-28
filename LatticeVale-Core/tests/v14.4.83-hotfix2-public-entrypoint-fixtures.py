@@ -5,7 +5,7 @@ CORE=Path(__file__).resolve().parents[1]
 ROOT=CORE.parent
 INSTALLER=ROOT/'installer'
 
-assert (CORE/'VERSION.txt').read_text(encoding='ascii').strip() == '14.4.83'
+assert (CORE/'VERSION.txt').read_text(encoding='ascii').strip() == '14.4.84'
 
 primary_install=INSTALLER/'Install-LatticeVale.ps1'
 primary_uninstall=INSTALLER/'Uninstall-LatticeVale.ps1'

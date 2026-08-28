@@ -119,8 +119,27 @@ function Invoke-WslShutdownRecovery {
         Write-Warning "The clean WSL shutdown recovery could not complete: $detail"
         return $false
     }
-    # Microsoft documents wsl --shutdown as the fast path for fully restarting WSL.
-    # Give the host VM/networking state time to settle before probing the same distro.
+
+    # v14.4.84 also resets WslService when elevation is available. LatticeVale's
+    # pre-v14.4.84 Shutdown shortcut used targeted `wsl --terminate`, and current
+    # WSL 2.7.x builds can retain a broken hvsocket/session transport afterward even
+    # while the distro still reports Running. Restarting WslService after the global
+    # shutdown discards that stale Windows-side transport state without touching
+    # distro registration, VHDX contents, or .wslconfig.
+    if (Test-IsAdministrator) {
+        $wslService = Get-Service -Name 'WslService' -ErrorAction SilentlyContinue
+        if ($wslService) {
+            try {
+                Restart-Service -Name 'WslService' -Force -ErrorAction Stop
+                Write-Host 'Restarted WslService after the clean WSL shutdown.'
+            } catch {
+                Write-Warning "WSL was shut down, but WslService could not be restarted: $($_.Exception.Message)"
+                return $false
+            }
+        }
+    }
+
+    # Give host VM/network/session state time to settle before probing the same distro.
     Start-Sleep -Seconds 8
     return $true
 }

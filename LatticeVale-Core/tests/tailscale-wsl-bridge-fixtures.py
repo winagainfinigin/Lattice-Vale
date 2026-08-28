@@ -6,7 +6,7 @@ compose=(root/'stack/compose.yaml').read_text(encoding='utf-8')
 cfg=(root/'stack/configure-stack.sh').read_text(encoding='utf-8')
 helper=(root/'windows/LatticeVale-WslNativeRelay.ps1').read_text(encoding='utf-8')
 
-assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'}
+assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}
 assert 'tailscale/tailscale' not in compose
 assert '${DASHBOARD_HOST_BIND:-127.0.0.1}:${DASHBOARD_HOST_PORT:-9119}:9119' in compose
 assert '${MATRIX_HOST_BIND:-127.0.0.1}:${MATRIX_HOST_PORT:-8008}:8008' in compose
@@ -29,7 +29,7 @@ for text in (
 ):
     assert text in ps, text
 version=(root/'VERSION.txt').read_text().strip()
-assert ('shared-native-ollama-tailscale' in ps and 'user-existing-mirrored' in ps and 'Use mirrored WSL networking as the shared mode' not in ps) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'} else (('shared-native-ollama-tailscale' in ps and 'mirrored-localhost' in ps) if version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40'} else ('networkingMode=nat' in ps))
+assert ('shared-native-ollama-tailscale' in ps and 'user-existing-mirrored' in ps and 'Use mirrored WSL networking as the shared mode' not in ps) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'} else (('shared-native-ollama-tailscale' in ps and 'mirrored-localhost' in ps) if version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40'} else ('networkingMode=nat' in ps))
 for text in (
     'new TcpListener(IPAddress.Loopback, listenPort)',
     'TargetAddress',

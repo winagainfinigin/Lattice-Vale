@@ -1663,7 +1663,7 @@ function Install-LatticeValeDesktopShortcuts(
         }
 
         $config = [ordered]@{
-            schema = 2
+            schema = 4
             installerVersion = $InstallerVersion
             distroName = $Name
             linuxUser = $User
@@ -1674,11 +1674,13 @@ function Install-LatticeValeDesktopShortcuts(
         $config | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $paths.Config -Encoding UTF8
 
         $startOk = New-LatticeValeDesktopShortcut $paths.StartShortcut 'Start' $paths "Start the selected LatticeVale services in $Name as $User"
-        $shutdownOk = New-LatticeValeDesktopShortcut $paths.ShutdownShortcut 'Shutdown' $paths "Stop the selected LatticeVale services and terminate only $Name"
-        if ($startOk -and $shutdownOk) {
-            return [pscustomobject]@{ Status='CONFIGURED'; Detail="Desktop Start/Shutdown shortcuts are configured for $Name / $User."; Paths=$paths }
+        $shutdownOk = New-LatticeValeDesktopShortcut $paths.ShutdownShortcut 'Shutdown' $paths "Stop the selected LatticeVale services without terminating the WSL distro"
+        $runtime = Test-LatticeValeShortcutRuntimeContract $paths
+        if ($startOk -and $shutdownOk -and $runtime.Valid) {
+            return [pscustomobject]@{ Status='CONFIGURED'; Detail="Desktop Start/Shutdown shortcuts are configured for $Name / $User; $($runtime.Detail)."; Paths=$paths }
         }
-        return [pscustomobject]@{ Status='PARTIAL'; Detail='One or more requested desktop shortcuts could not be created safely because an unowned conflicting shortcut exists or validation failed.'; Paths=$paths }
+        $runtimeDetail = if (-not $runtime.Valid) { " Runtime validation: $($runtime.Detail)." } else { '' }
+        return [pscustomobject]@{ Status='PARTIAL'; Detail=('One or more requested desktop shortcuts could not be created safely because an unowned conflicting shortcut exists or validation failed.' + $runtimeDetail); Paths=$paths }
     } catch {
         return [pscustomobject]@{ Status='PARTIAL'; Detail="Desktop shortcut setup failed: $($_.Exception.Message)"; Paths=$paths }
     }
@@ -1708,22 +1710,150 @@ function Remove-LatticeValeDesktopShortcuts([string]$Name, [string]$User, [strin
     return [pscustomobject]@{ Status='DISABLED'; Detail='Desktop Start/Shutdown shortcuts are not selected.'; Paths=$paths }
 }
 
+function Test-LatticeValeShortcutRuntimeContract([object]$Paths) {
+    $result = [ordered]@{ Valid = $false; Detail = '' }
+    if (-not (Test-Path -LiteralPath $Paths.Config -PathType Leaf)) {
+        $result.Detail = 'shortcut configuration is missing'
+        return [pscustomobject]$result
+    }
+    if (-not (Test-Path -LiteralPath $Paths.Helper -PathType Leaf)) {
+        $result.Detail = 'shortcut helper is missing'
+        return [pscustomobject]$result
+    }
+    try {
+        $config = Get-Content -LiteralPath $Paths.Config -Raw | ConvertFrom-Json
+        $schema = 0
+        if ($config.PSObject.Properties['schema']) { [void][int]::TryParse([string]$config.schema, [ref]$schema) }
+        if ($schema -lt 4) {
+            $result.Detail = "shortcut schema $schema predates the direct WSL --cd launcher contract"
+            return [pscustomobject]$result
+        }
+
+        $raw = [IO.File]::ReadAllText($Paths.Helper)
+        if ($raw -match '(?im)^\s*&\s*\$wslExe\s+--terminate\s+\$distro\s*$') {
+            $result.Detail = 'shortcut helper still contains targeted wsl --terminate'
+            return [pscustomobject]$result
+        }
+        if ($raw -match '(?m)^\s*\$manageCommand\s*=|bash\s+-lc\s+\$manageCommand') {
+            $result.Detail = 'shortcut helper still contains the broken nested bash -lc manage.sh launcher'
+            return [pscustomobject]$result
+        }
+        if ($raw -notmatch '(?m)^\s*&\s*\$wslExe\s+-d\s+\$distro\s+-u\s+\$user\s+--cd\s+\$stack\s+--\s+\./manage\.sh\s+start\s*$') {
+            $result.Detail = 'shortcut helper is missing the direct manage.sh start launcher'
+            return [pscustomobject]$result
+        }
+        if ($raw -notmatch '(?m)^\s*&\s*\$wslExe\s+-d\s+\$distro\s+-u\s+\$user\s+--cd\s+\$stack\s+--\s+\./manage\.sh\s+stop\s*$') {
+            $result.Detail = 'shortcut helper is missing the direct manage.sh stop launcher'
+            return [pscustomobject]$result
+        }
+        $result.Valid = $true
+        $result.Detail = 'schema 4 direct WSL --cd launcher verified'
+        return [pscustomobject]$result
+    } catch {
+        $result.Detail = "shortcut runtime contract could not be verified: $($_.Exception.Message)"
+        return [pscustomobject]$result
+    }
+}
+
 function Get-LatticeValeDesktopShortcutState([string]$Name, [string]$User, [string]$StackLinuxPath, [bool]$Expected) {
     $paths = Get-LatticeValeShortcutPaths $Name $User $StackLinuxPath
     $startOwned = Test-LatticeValeShortcutOwned $paths.StartShortcut $paths
     $shutdownOwned = Test-LatticeValeShortcutOwned $paths.ShutdownShortcut $paths
     $configPresent = Test-Path -LiteralPath $paths.Config -PathType Leaf
     $helperPresent = Test-Path -LiteralPath $paths.Helper -PathType Leaf
+    $runtime = Test-LatticeValeShortcutRuntimeContract $paths
     if ($Expected) {
-        if ($startOwned -and $shutdownOwned -and $configPresent -and $helperPresent) {
-            return [pscustomobject]@{ Status='CONFIGURED'; Detail="Desktop Start/Shutdown shortcuts are configured for $Name / $User."; Paths=$paths }
+        if ($startOwned -and $shutdownOwned -and $configPresent -and $helperPresent -and $runtime.Valid) {
+            return [pscustomobject]@{ Status='CONFIGURED'; Detail="Desktop Start/Shutdown shortcuts are configured for $Name / $User; $($runtime.Detail)."; Paths=$paths }
         }
-        return [pscustomobject]@{ Status='PARTIAL'; Detail='Desktop shortcuts were selected but one or more installer-owned shortcut files/configuration are missing or not verifiable.'; Paths=$paths }
+        $detail = if (-not $runtime.Valid) { " Shortcut runtime repair required: $($runtime.Detail)." } else { '' }
+        return [pscustomobject]@{ Status='PARTIAL'; Detail=('Desktop shortcuts were selected but one or more installer-owned shortcut files/configuration are missing or not verifiable.' + $detail); Paths=$paths }
     }
     if ($startOwned -or $shutdownOwned -or $configPresent) {
         return [pscustomobject]@{ Status='PARTIAL'; Detail='Desktop shortcuts are disabled but installer-owned shortcut state remains for reconciliation.'; Paths=$paths }
     }
     return [pscustomobject]@{ Status='DISABLED'; Detail='Desktop Start/Shutdown shortcuts are not selected.'; Paths=$paths }
+}
+
+function Test-LatticeValeBrokenShortcutLauncher(
+    [string]$Name,
+    [string]$User,
+    [string]$StackLinuxPath
+) {
+    $paths = Get-LatticeValeShortcutPaths $Name $User $StackLinuxPath
+    if (-not ((Test-LatticeValeShortcutOwned $paths.StartShortcut $paths) -or (Test-LatticeValeShortcutOwned $paths.ShutdownShortcut $paths))) { return $false }
+    $runtime = Test-LatticeValeShortcutRuntimeContract $paths
+    return (-not $runtime.Valid)
+}
+
+function Test-LatticeValeLegacyUnsafeShutdownShortcut(
+    [string]$Name,
+    [string]$User,
+    [string]$StackLinuxPath
+) {
+    $paths = Get-LatticeValeShortcutPaths $Name $User $StackLinuxPath
+    if (-not (Test-LatticeValeShortcutOwned $paths.ShutdownShortcut $paths)) { return $false }
+    if (-not (Test-Path -LiteralPath $paths.Helper -PathType Leaf)) { return $false }
+    try {
+        $raw = [IO.File]::ReadAllText($paths.Helper)
+        return ($raw -match '(?im)^\s*&\s*\$wslExe\s+--terminate\s+\$distro\s*$')
+    } catch {
+        return $false
+    }
+}
+
+function Invoke-LatticeValeLegacyShortcutWslTransportRepair(
+    [string]$Name,
+    [string]$User,
+    [string]$StackLinuxPath
+) {
+    Write-Step 'Repairing WSL transport after the legacy LatticeVale shutdown shortcut'
+    Write-Warning 'This installation still has a pre-v14.4.84 LatticeVale shutdown helper that uses targeted `wsl --terminate`. Current WSL 2.7.x builds can leave new-session hvsocket transport unusable after that operation. LatticeVale will perform one bounded host-transport reset before replacing the shortcut helper.'
+
+    $running = @(Get-LatticeValeRunningWslDistros)
+    $others = @($running | Where-Object { -not $_.Equals($Name, [System.StringComparison]::OrdinalIgnoreCase) })
+    if ($others.Count -gt 0) {
+        Write-Warning ("The transport repair requires `wsl --shutdown`, which stops all running WSL2 distros. Other running distros: {0}" -f ($others -join ', '))
+        if (-not (Read-ChoiceExplicit 'Temporarily stop all running WSL distros so LatticeVale can repair the host transport it previously exposed to targeted termination?' 'The repair first stops this managed stack, performs a global WSL shutdown, restarts WslService, and re-probes the same registered distro. No distro registration, VHDX, or .wslconfig setting is changed.' 'Skip the host transport reset. The shortcut helper will still be replaced later in this repair run, but any already-wedged WSL transport may require a manual `wsl --shutdown` before it is healthy.' $false $false)) {
+            Write-Warning 'Legacy shortcut host-transport reset was skipped by explicit choice. Shortcut reconciliation will still remove the targeted-termination behavior.'
+            return $false
+        }
+    }
+
+    if ($running -contains $Name) {
+        Write-Info 'Stopping the managed stack cleanly before resetting WSL host transport.'
+        $stop = Invoke-NativeProcessCapture 'wsl.exe' @('-d',$Name,'-u',$User,'--cd',$StackLinuxPath,'--','./manage.sh','stop') 240
+        if (-not $stop.Success) {
+            $detail = Get-SafeDiagnosticExcerpt $stop.Text 420
+            if (-not $detail) { $detail = 'manage.sh stop failed without diagnostic output' }
+            throw "Could not stop the managed stack cleanly before the v14.4.84 WSL transport repair: $detail"
+        }
+    }
+
+    $shutdown = Invoke-NativeProcessCapture 'wsl.exe' @('--shutdown') 45
+    if (-not $shutdown.Success) {
+        $detail = Get-SafeDiagnosticExcerpt $shutdown.Text 320
+        if ($shutdown.TimedOut) { $detail = 'wsl --shutdown exceeded the 45-second safety timeout' }
+        if (-not $detail) { $detail = "wsl.exe exit code $($shutdown.ExitCode)" }
+        throw "The v14.4.84 WSL transport repair could not complete its clean shutdown: $detail"
+    }
+
+    $wslService = Get-Service -Name 'WslService' -ErrorAction SilentlyContinue
+    if ($wslService) {
+        Write-Info 'Restarting WslService to discard stale hvsocket/session transport state.'
+        Restart-Service -Name 'WslService' -Force -ErrorAction Stop
+    } else {
+        Write-Warning 'WslService was not discoverable after shutdown. Continuing with the clean WSL reset; the launch probe remains authoritative.'
+    }
+
+    Start-Sleep -Seconds 5
+    $ready = Wait-LatticeValeWslResponsive $Name 120
+    if (-not $ready.Success) {
+        throw "The v14.4.84 WSL transport repair reset WSL/WslService, but '$Name' did not become responsive within 120 seconds. Last response: $($ready.Detail)`nRestart Windows once, then rerun v14.4.84 and choose Resume / repair. Do not unregister or recreate the distro."
+    }
+
+    Write-Host "WSL host/session transport recovered for '$Name'. The repair will now replace the legacy targeted-termination shortcut helper." -ForegroundColor Green
+    return $true
 }
 
 function Get-LatticeValeBridgePaths([string]$Name) {
@@ -3236,7 +3366,7 @@ function Get-UbuntuDistroInfo([string]$Name) {
         $result.LaunchStatus = 'FAILED'
         $launchDetail = if ($osRelease.Detail) { $osRelease.Detail } else { 'distro could not be launched/read' }
         if ($launchDetail -match '(?i)(Wsl/Service(?:/CreateInstance(?:/CreateVm)?)?/E_UNEXPECTED|Wsl/Service/E_UNEXPECTED|Catastrophic failure)') {
-            Add-DistroBlocker $result 'WSL_HOST_E_UNEXPECTED' "WSL itself failed while launching the registered distro: $launchDetail. If no eligible distro remains, v14.4.82 can offer a bounded in-run recovery: clean WSL shutdown/restart first, then an explicit backed-up NAT fallback only when persistent E_UNEXPECTED coincides with user-configured mirrored networking. Distro registration and the VHDX are preserved."
+            Add-DistroBlocker $result 'WSL_HOST_E_UNEXPECTED' "WSL itself failed while launching the registered distro: $launchDetail. If no eligible distro remains, v14.4.84 can offer a bounded in-run recovery: clean WSL shutdown/restart first, then an explicit backed-up NAT fallback only when persistent E_UNEXPECTED coincides with user-configured mirrored networking. Distro registration and the VHDX are preserved."
         } else {
             Add-DistroBlocker $result 'UNLAUNCHABLE' $launchDetail
         }
@@ -5330,6 +5460,13 @@ if ($stackState -eq 'managed') {
 # pass. It never deletes persistent application data and is intentionally not enabled for
 # a clean install or an unrecognized directory merely being adopted.
 $repairMaintenance = ($stackState -eq 'managed' -and $installMode -in @('resume','change','reconfigure','advanced','update'))
+if ($repairMaintenance -and (Test-LatticeValeLegacyUnsafeShutdownShortcut $DistroName $linuxUser $stackLinuxPath)) {
+    [void](Invoke-LatticeValeLegacyShortcutWslTransportRepair $DistroName $linuxUser $stackLinuxPath)
+}
+if ($repairMaintenance -and (Test-LatticeValeBrokenShortcutLauncher $DistroName $linuxUser $stackLinuxPath)) {
+    Write-Warning 'The installed LatticeVale desktop shortcut helper does not satisfy the v14.4.84 schema-4 direct WSL --cd launcher contract. Resume / repair will replace the helper/configuration during Windows shortcut reconciliation; no distro recreation or VHDX change is required.'
+}
+
 if ($repairMaintenance) {
     if ($forceManagedUpdate) {
         Write-Info 'Managed update enabled: this run forces the installer-managed package/image/source layer to the versions and channels declared by this LatticeVale bundle, then runs normal live repair verification. Persistent application data and explicit user-owned overrides are preserved.'
@@ -6062,7 +6199,7 @@ if ($reusePriorChoices) {
             $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Uses WSL''s supported global [general] instanceIdleTimeout=-1 policy. This is not a keepalive process, polling loop, or Windows auto-start; your normal launcher still owns startup.' 'Leaves WSL''s instance-idle policy unchanged; on affected WSL builds the distro may terminate even while server services are intended to stay available.' ([bool](Get-OptionValue $old 'keepWslServicesRunning' $tailscaleMatrix))
         }
         $autoStart = Read-Choice 'Start the stack automatically at Windows logon?' 'Creates a scheduled task that starts Docker/Hermes after sign-in. The small Windows Tailscale relay is separate and never wakes WSL unless this option is enabled.' 'Start LatticeVale with your normal launcher/./manage.sh start. The Windows relay may start at logon, but stays passive and does not start or keep WSL running.' ([bool](Get-OptionValue $old 'autoStart' $false))
-        $windowsShortcuts = Read-Choice 'Create Windows desktop shortcuts to start and shut down this LatticeVale install?' 'Creates current-user Start and Shut Down shortcuts bound to this exact WSL distro, Linux user, and LatticeVale stack. Start follows install-options through manage.sh; Shut Down stops selected services/relay and terminates only this distro.' 'No desktop shortcuts are created. Existing non-LatticeVale shortcuts are never overwritten or removed.' ([bool](Get-OptionValue $old 'windowsShortcuts' $false))
+        $windowsShortcuts = Read-Choice 'Create Windows desktop shortcuts to start and shut down this LatticeVale install?' 'Creates current-user Start and Shut Down shortcuts bound to this exact WSL distro, Linux user, and LatticeVale stack. Start follows install-options through manage.sh; Shut Down stops selected services/relay but intentionally does not terminate the distro, avoiding a known WSL 2.7.x hvsocket/session regression.' 'No desktop shortcuts are created. Existing non-LatticeVale shortcuts are never overwritten or removed.' ([bool](Get-OptionValue $old 'windowsShortcuts' $false))
 
         $savedTimezone = ''
         if ($null -ne $old -and $null -ne $old.PSObject.Properties['timezone']) {
@@ -6200,7 +6337,7 @@ $sharedNativeTailscale = (($tailscaleDashboard -or $tailscaleMatrix) -and ($honc
 # only when it was configured outside this installer. LatticeVale does not write or switch
 # networkingMode in either clean-install or repair/update flows.
 if ($activeWslNetworkingMode -eq 'mirrored') {
-    Write-Warning 'Existing global WSL mirrored networking is active. LatticeVale will use this already-working user/host configuration when capability checks pass; ordinary configuration/runtime paths will not create, reapply, or require mirrored mode. If a later install/repair preflight fails with E_UNEXPECTED, v14.4.82 can offer bounded shutdown/retry recovery and, only after persistent failure plus explicit approval, a backed-up NAT compatibility fallback.'
+    Write-Warning 'Existing global WSL mirrored networking is active. LatticeVale will use this already-working user/host configuration when capability checks pass; ordinary configuration/runtime paths will not create, reapply, or require mirrored mode. If a later install/repair preflight fails with E_UNEXPECTED, v14.4.84 can offer bounded shutdown/retry recovery and, only after persistent failure plus explicit approval, a backed-up NAT compatibility fallback.'
 }
 
 # Native Windows Ollama and Windows-host Tailscale share the observed WSL topology,

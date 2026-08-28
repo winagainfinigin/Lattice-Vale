@@ -2,7 +2,7 @@
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'}, version
+assert version in {'14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}, version
 un=(ROOT/'Uninstall-LatticeVale.ps1').read_text(encoding='ascii')
 
 # Discovery must match the installer's resumable-stack policy, not only final markers.
@@ -19,7 +19,7 @@ assert 'Detected candidate paths:' in un
 # Account discovery remains bounded to interactive, non-nobody users; v14.3.29
 # performs the checks in PowerShell from direct `getent passwd` output rather than a
 # serialized multiline bash probe.
-if version in {'14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'}:
+if version in {'14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}:
     assert 'function Get-WslPasswdEntries' in un
     assert "Invoke-Wsl $Name 'root' 'getent' @('passwd')" in un
     assert "$user -eq 'nobody'" in un

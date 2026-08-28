@@ -80,7 +80,11 @@ For browser-specific problems, check the managed Hermes profile's `browser` conf
 
 ## Repair-install preparation
 
-Before reproducing or repairing an existing-install problem with **Resume / repair** or **Update / repair**, fully stop the selected LatticeVale WSL distro before launching the Windows installer. If installed, use **Shut Down LatticeVale**; it stops the managed stack and terminates only the selected distro. Global `wsl --shutdown` is not required.
+v14.4.84 lifecycle shortcuts use direct WSL `--cd` execution for `manage.sh start|stop`; schema-3/broken helpers are repair drift and are rewritten by Resume / repair. Before reproducing or repairing an existing-install problem with **Resume / repair** or **Update / repair**, stop the managed stack with **Shut Down LatticeVale** if available, but do not target-terminate the distro. v14.4.84 repair automatically detects the older installer-owned targeted-termination helper and performs a bounded `wsl --shutdown` + `WslService` transport reset before replacing it.
+
+## v14.4.84 WSL lifecycle support note
+
+If an installation previously used the pre-v14.4.84 **Shut Down LatticeVale** shortcut and later shows `Wsl/Service/E_UNEXPECTED` while the distro still reports `Running`, use the full v14.4.84 release and choose **Resume / repair installation**. The repair recognizes only the exact installer-owned legacy helper containing targeted termination, performs bounded `wsl --shutdown` + `WslService` reset/re-probe, then replaces the shortcut. Do not unregister/recreate the distro or delete its VHDX as a first response.
 
 ## v14.4.6 adaptive resource fingerprint support note
 
@@ -90,7 +94,7 @@ If `./manage.sh audit` reports `runtimePolicy PARTIAL` even though `.latticevale
 
 If `./manage.sh audit` reports `runtimePolicy PARTIAL` after an older repair, rerun Resume / repair with v14.4.5 or newer. The installer now treats adaptive policy convergence as an explicit repair step and will not report final success until the selected policy-v3 fingerprint and RAM controls verify. When that overlay changes, affected containers are reconciled through Compose so the settings become live.
 
-v14.4.6 refines the managed-update trigger introduced in v14.4.5: a bundle-version change alone no longer forces package/image/source refresh. Resume / repair refreshes that layer when the 30-day gate is due, the managed-refresh policy revision changes, or valid legacy refresh state is missing. Use explicit **Update / repair installer-managed software** when you intentionally want to force the current bundle's managed refresh immediately. Public 14.4.2→14.4.83 still refreshes because the managed-refresh revision advances from 1 to 2. The v14.4.7 extraction migration and v14.4.8 browser/timeout integration migration do not by themselves force that package/image/source refresh.
+v14.4.6 refines the managed-update trigger introduced in v14.4.5: a bundle-version change alone no longer forces package/image/source refresh. Resume / repair refreshes that layer when the 30-day gate is due, the managed-refresh policy revision changes, or valid legacy refresh state is missing. Use explicit **Update / repair installer-managed software** when you intentionally want to force the current bundle's managed refresh immediately. Public 14.4.2→14.4.84 still refreshes because the managed-refresh revision advances from 1 to 2. The v14.4.7 extraction migration and v14.4.8 browser/timeout integration migration do not by themselves force that package/image/source refresh.
 
 ## v14.4.4 repair metadata-race support note
 
@@ -98,11 +102,11 @@ Implementation details: `PATCH-NOTES.md`.
 
 Resume / repair no longer fails merely because a live SQLite `*-shm`/`*-wal` sidecar or rotated log disappears during root-assisted ownership reconciliation. Rerun Resume / repair with v14.4.4; the bootstrap tolerates only paths that actually vanished and will still stop on a genuine ownership/permission error for an entry that remains present.
 
-The v14.4.3 RAM-efficiency and uninstaller behavior remains inherited, while v14.4.83 advances the active adaptive policy to v4; user `compose.override.yaml` remains authoritative, global WSL RAM/reclaim settings remain user-owned, and Docker-unavailable uninstall still fails closed when runtime may remain.
+The v14.4.3 RAM-efficiency and uninstaller behavior remains inherited, while v14.4.84 retains the v14.4.83 active adaptive policy v4; user `compose.override.yaml` remains authoritative, global WSL RAM/reclaim settings remain user-owned, and Docker-unavailable uninstall still fails closed when runtime may remain.
 
 ## v14.4.1 layout note
 
-v14.4.1 introduced the `installer/` public-launcher layout with lowercase `install.ps1` / `uninstall.ps1`. v14.4.83 Hotfix 2 makes `installer\Install-LatticeVale.ps1` and `installer\Uninstall-LatticeVale.ps1` the canonical documented commands while retaining the lowercase launchers for backward compatibility; `installer\verify-release.ps1` is unchanged. This naming correction does not change runtime stack or repair semantics.
+v14.4.1 introduced the `installer/` public-launcher layout with lowercase `install.ps1` / `uninstall.ps1`. v14.4.83 Hotfix 2 made `installer\Install-LatticeVale.ps1` and `installer\Uninstall-LatticeVale.ps1` the canonical documented commands while retaining the lowercase launchers for backward compatibility; `installer\verify-release.ps1` is unchanged. This naming correction does not change runtime stack or repair semantics.
 
 ## v14.4.0 stable support note
 

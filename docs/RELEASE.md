@@ -1,5 +1,9 @@
 # Release checklist
 
+## v14.4.84 WSL lifecycle release checks
+
+Run `LatticeVale-Core/tests/v14.4.84-wsl-shortcut-transport-fixtures.py` plus the full deterministic suite. The v14.4.84 fixture also verifies fresh-install shortcut creation uses schema 4 and the direct WSL `--cd` helper on first install, without depending on repair-only legacy-helper detection. Confirm the shipped shutdown launcher contains no targeted `wsl --terminate`; legacy owned-helper detection is exact/ownership-gated; mutating existing-stack repair performs bounded `wsl --shutdown` + `WslService` reset/re-probe before shortcut rewrite; the launch-recovery helper resets WslService after clean shutdown when elevated; no automatic HNS/vmcompute restart or distro/VHDX mutation is introduced; and the root README explicitly says the full v14.4.84 release is the version to install first.
+
 ## v14.4.83 Hotfix 2 public entry points
 
 The canonical public Windows launchers in the release root are `installer/Install-LatticeVale.ps1` and `installer/Uninstall-LatticeVale.ps1`; `installer/verify-release.ps1` remains the release verifier. Lowercase `installer/install.ps1` and `installer/uninstall.ps1` remain packaged only for backward compatibility. All five launcher/verifier files are covered by `installer/SOURCE-SHA256SUMS.txt`.
@@ -21,7 +25,7 @@ Confirm the core installer itself contains no direct `.wslconfig` networking wri
 
 Before packaging, confirm the final release ZIP contains exactly one top-level folder named `Lattice-Vale`, then run `LatticeVale-Core/tests/v14.4.7-web-extraction-fixtures.py` as the inherited web/extraction regression in addition to the full deterministic regression suite. Confirm the local extractor is generated only for managed profiles whose effective `web.extract_backend` is `latticevale-local`; missing browser selection becomes Hermes Local Browser / Chromium only when no explicit browser/backend/gateway/environment selection owns the choice; missing `auxiliary.web_extract.timeout` becomes `360`; explicit provider/browser/timeout choices remain preserved; and the integrations checkpoint is revision 4. Confirm the complete source manifest is regenerated after all files are final. Confirm current-release identity is v14.4.82 in `VERSION.txt`, root/user docs, GitHub issue metadata, and validation workflow; confirm the current documentation set uses `PATCH-NOTES.md` rather than the removed one-off v14.x patch-note files. See [`PATCH-NOTES.md`](PATCH-NOTES.md).
 
-For live existing-install repair/update testing, begin with the selected LatticeVale WSL distro fully stopped. When the lifecycle shortcut is installed, **Shut Down LatticeVale** is the preferred preparation path because it stops the stack and terminates only that distro; do not use global `wsl --shutdown` unless all running WSL distros are intentionally being stopped.
+For live v14.4.84 shortcut testing, verify both actions use direct WSL `--cd` lifecycle execution, return exit 0, and actually transition the stack. For existing-install repair testing, use **Shut Down LatticeVale** to stop the managed stack but leave the distro running. Confirm repair detects a legacy installer-owned targeted-termination helper, performs its bounded global WSL shutdown + `WslService` reset/re-probe, and rewrites the helper. Do not manually use `wsl --terminate <distro>` in this test path.
 
 
 ## v14.4.6 resource fingerprint checks

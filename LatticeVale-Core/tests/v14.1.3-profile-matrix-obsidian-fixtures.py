@@ -9,7 +9,7 @@ manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
 
-assert version in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'}
+assert version in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}
 assert 'schema = 19' in ps1
 
 # Profile/Matrix intent is one data structure: arbitrary installer profile name -> same Matrix localpart.
@@ -62,7 +62,7 @@ assert 'LATTICEVALE_PROVISIONING_STATE pending' in cfg
 assert 'LATTICEVALE_PROVISIONING_STATE complete' in cfg
 assert 'Resuming interrupted Matrix provisioning for Hermes profile' in cfg
 assert cfg.index('LATTICEVALE_PROVISIONING_STATE pending') < cfg.index('/_synapse/admin/v2/users/$encoded_user', cfg.index('stage_matrix_profiles()'))
-if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'}:
+if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}:
     assert 'LATTICEVALE_PROVISIONING_STATE pending-manual' in cfg
     assert 'MATRIX_SETUP_STATUS=$provisioning_state' in cfg
 else:
@@ -95,7 +95,7 @@ assert 'profileMatrix' in audit
 assert 'matrixEnabled' in audit
 
 # Obsidian vault is requested during the initial component questionnaire and persisted through the hardened path converter.
-vault_prompt = ('Windows Obsidian vault folder (explicit Windows-local path required)' if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'} else ('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else 'Windows Obsidian vault folder [$defaultObsidianVault]'))
+vault_prompt = ('Windows Obsidian vault folder (explicit Windows-local path required)' if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'} else ('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else 'Windows Obsidian vault folder [$defaultObsidianVault]'))
 assert vault_prompt in ps1
 assert ps1.index(vault_prompt) < ps1.index("Read-Choice 'Install fully self-hosted Honcho memory?'")
 assert 'obsidianVaultWindowsPath = $obsidianVaultWindowsPath' in ps1

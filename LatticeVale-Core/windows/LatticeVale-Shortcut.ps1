@@ -146,8 +146,6 @@ $stack = [string]$script:Config.stackLinuxPath
 if (-not $stack.StartsWith('/')) { throw 'stackLinuxPath must be an absolute Linux path.' }
 $wslExe = Join-Path $env:SystemRoot 'System32\wsl.exe'
 if (-not (Test-Path -LiteralPath $wslExe -PathType Leaf)) { throw "wsl.exe not found at $wslExe" }
-$manageCommand = 'cd -- "$1" && ./manage.sh "$2"'
-
 try {
     if ($Action -eq 'Start') {
         Write-ShortcutLog "Starting distro '$distro' and its selected LatticeVale services."
@@ -156,7 +154,7 @@ try {
         Start-NativeOllamaForShortcut $nativeConfig
         & $wslExe -d $distro -u root -- /usr/local/sbin/hermes-stack-start
         if ($LASTEXITCODE -ne 0) { throw "WSL root startup helper exited with code $LASTEXITCODE." }
-        & $wslExe -d $distro -u $user -- bash -lc $manageCommand bash $stack start
+        & $wslExe -d $distro -u $user --cd $stack -- ./manage.sh start
         if ($LASTEXITCODE -ne 0) { throw "manage.sh start exited with code $LASTEXITCODE." }
         Write-ShortcutLog 'Start completed successfully.'
         exit 0
@@ -169,14 +167,20 @@ try {
     }
 
     Write-ShortcutLog "Stopping selected LatticeVale services in '$distro'."
-    & $wslExe -d $distro -u $user -- bash -lc $manageCommand bash $stack stop
+    & $wslExe -d $distro -u $user --cd $stack -- ./manage.sh stop
     $stopExit = $LASTEXITCODE
     if ($stopExit -ne 0) {
-        Write-ShortcutLog "manage.sh stop returned code $stopExit; continuing with distro termination."
+        Write-ShortcutLog "manage.sh stop returned code $stopExit; leaving the distro running and reporting failure."
+        throw "manage.sh stop exited with code $stopExit."
     }
-    & $wslExe --terminate $distro
-    if ($LASTEXITCODE -ne 0) { throw "wsl.exe --terminate exited with code $LASTEXITCODE." }
-    Write-ShortcutLog "Distro '$distro' terminated successfully."
+
+    # v14.4.84: Do not call wsl.exe --terminate here. Current WSL 2.7.x builds can
+    # wedge the hvsocket/vsock new-session transport after a targeted distro
+    # termination, leaving the distro Running while every new wsl.exe session fails
+    # with Wsl/Service/E_UNEXPECTED. Shut Down LatticeVale therefore means stop the
+    # managed stack only. Users who intentionally want to stop every WSL2 distro can
+    # use the Microsoft-supported `wsl --shutdown` command from Windows separately.
+    Write-ShortcutLog "LatticeVale services stopped successfully; distro '$distro' intentionally left running to preserve WSL session transport."
     exit 0
 } catch {
     Write-ShortcutLog ("FAILED: " + $_.Exception.Message)

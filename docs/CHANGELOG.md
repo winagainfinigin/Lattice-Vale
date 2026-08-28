@@ -1,5 +1,16 @@
 # Changelog
 
+## 14.4.84 - 2026-08-28
+
+- Fixes both Windows lifecycle shortcuts to run `./manage.sh start|stop` directly with WSL `--cd`, removing the nested `bash -lc` positional-argument wrapper that could fail with exit 127 / `./manage.sh: No such file or directory`.
+- Fixes the Windows **Shut Down LatticeVale** shortcut so it no longer performs targeted `wsl.exe --terminate <distro>` after stopping the managed stack. This removes a LatticeVale-created trigger for the WSL 2.7.x hvsocket/session failure that can leave the distro `Running` while new sessions fail with `Wsl/Service/E_UNEXPECTED` / `UtilAcceptVsock ... accept4 failed 110`.
+- Adds a preservation-first existing-install migration: when Resume / repair detects the exact installer-owned legacy targeted-termination helper, it stops the managed stack, runs a bounded global WSL shutdown with other-distro awareness, restarts `WslService`, re-probes the same registered distro, then rewrites shortcut helper/config state.
+- Extends the bounded WSL host launch-recovery helper to restart `WslService` after clean shutdown when elevated. No distro/VHDX mutation, automatic HNS/vmcompute restart, or implicit `.wslconfig` networking change is introduced.
+- Advances shortcut config schema to 4, verifies the direct WSL `--cd` start/stop contract, and updates current docs/tests to define shutdown as stack stop only.
+- Verifies the corrected shortcut path for both fresh installs and existing-install repair: fresh installs copy the schema-4 helper directly during normal Windows shortcut reconciliation, while repair rewrites older/broken helpers.
+- Declares the full v14.4.84 release as the direct first-install release. Existing installations should use the full release with **Resume / repair** first rather than layering the patch ZIP over the live stack.
+- Inherits v14.4.83 resource policy v4, Redis/Valkey `vm.overcommit_memory=1`, Ubuntu Pro integration removal, and canonical public launcher names unchanged.
+
 ## 14.4.83 - 2026-08-27
 
 - **Hotfix 2:** adds `installer/Install-LatticeVale.ps1` and `installer/Uninstall-LatticeVale.ps1` as the canonical public install/uninstall entry points and updates current documentation/helper guidance to use those exact filenames.

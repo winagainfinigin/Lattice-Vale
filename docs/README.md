@@ -1,6 +1,6 @@
-# LatticeVale v14.4.83 — Stable (Hotfix 2)
+# LatticeVale v14.4.84 — Stable
 
-> **v14.4.83 Hotfix 2:** keeps the v14.4.83 runtime reliability changes unchanged and corrects the canonical public Windows launchers to `installer\Install-LatticeVale.ps1` and `installer\Uninstall-LatticeVale.ps1`, while retaining lowercase launchers for backward compatibility. The underlying v14.4.83 patch advances adaptive resource policy to v4, manages `vm.overcommit_memory=1` for selected Redis/Valkey workloads, and removes the LatticeVale-owned Ubuntu Pro option without altering external Ubuntu Pro state. See [`PATCH-NOTES.md`](PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
+> **v14.4.84:** current direct-install release. It removes targeted `wsl --terminate` from the Windows Shut Down shortcut and adds a Resume / repair migration that detects the exact legacy installer-owned helper, performs bounded `wsl --shutdown` + `WslService` transport recovery, verifies the same distro, and rewrites the shortcut. It retains v14.4.83 resource policy v4, Redis/Valkey overcommit, Ubuntu Pro removal, and canonical public launchers. New installs should install the full v14.4.84 release directly; existing installs should run the full release and choose Resume / repair first. See [`PATCH-NOTES.md`](PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
 
 **Unofficial, inspectable Windows + WSL2 installer and lifecycle manager for a self-hosted Hermes Agent stack.**
 
@@ -8,7 +8,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.83 retains those mechanics and migrates enabled policy-v3 state to policy v4, v14.4.8's Hermes/web maintenance, and v14.4.6's replacement of the version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.84 retains those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4, v14.4.8's Hermes/web maintenance, and v14.4.6's replacement of the version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
 
 For detailed history, use `CHANGELOG.md`. Detailed implementation/audit notes for the v14.x patch line are consolidated in `PATCH-NOTES.md`; the v13 archive remains under `legacy-patch-notes/`.
 
@@ -195,7 +195,7 @@ If a profile is named `coder`, `researcher`, or anything else valid, Matrix prov
 
 **Fresh install** creates a new LatticeVale-managed stack in the chosen user's Linux home.
 
-Before starting a Windows **Resume / repair** or **Update / repair** install, fully stop the selected LatticeVale WSL distro. If the Windows lifecycle shortcuts are installed, use **Shut Down LatticeVale**: it stops the managed stack and then terminates only the selected distro. Global `wsl --shutdown` is not required.
+Before starting a Windows **Resume / repair** or **Update / repair** install, use the v14.4.84 **Shut Down LatticeVale** shortcut to stop the managed stack when available. Do not target-terminate the distro. If the installer detects an older installer-owned shutdown helper that still contains `wsl --terminate`, it performs a bounded `wsl --shutdown` + `WslService` recovery/re-probe and then replaces that helper during the repair run.
 
 **Resume / repair** is preservation-first, but it is not guaranteed to be update-free. It reconciles generated configuration, ownership, Compose state, selected services, Matrix/Tailscale integration, bounded maintenance, and health checks while preserving persistent application state. Between managed refresh windows it remains local-first and prefers already-installed images/builds. Every 30 days—and once when an older managed stack first adopts the managed-refresh policy, or when that policy revision changes—it performs a targeted refresh of LatticeVale-owned prerequisite/Docker packages and selected installer-owned image/build/source state. Explicit user-owned overrides and unrelated Ubuntu packages remain untouched.
 
@@ -230,7 +230,8 @@ Do not point native Windows Obsidian at `\\wsl.localhost\...` for this LatticeVa
 If the optional Windows shortcuts are selected, LatticeVale creates two current-user desktop shortcuts named for the chosen distro/Linux user:
 
 - **Start LatticeVale** — starts that distro, ensures Docker is available, then runs `./manage.sh start`, so only the services selected for that exact LatticeVale install are started.
-- **Shut Down LatticeVale** — if that distro is running, runs `./manage.sh stop` (including its managed Windows relay) and then terminates **only that distro**. It never uses global `wsl --shutdown`.
+- **Start LatticeVale / Shut Down LatticeVale** — invoke the stack lifecycle directly with WSL `--cd <stack> -- ./manage.sh start|stop`, avoiding the older nested `bash -lc` positional-argument wrapper that could fail with exit 127.
+- **Shut Down LatticeVale** — if that distro is running, runs `./manage.sh stop` (including its managed Windows relay) and intentionally leaves the WSL distro running. It never uses targeted `wsl --terminate` or global `wsl --shutdown`.
 
 The shortcut launcher is plain-text source at `LatticeVale-Core\windows\LatticeVale-Shortcut.ps1`; the installer copies it to the current user's `%LOCALAPPDATA%\LatticeVale` when the feature is enabled. Same-name shortcuts that are not provably LatticeVale-owned are left untouched.
 

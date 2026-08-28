@@ -1,7 +1,9 @@
-# LatticeVale v14.4.83
+# LatticeVale v14.4.84
 
-> **Patch Release — v14.4.83 Hotfix 2**  
-> Current recommended release and cumulative upgrade target from the public **v14.4.2 Main Release**.
+> **Current install release — v14.4.84**  
+> **Install the full v14.4.84 release first. Do not install v14.4.83 first and then apply v14.4.84 as an update layer.**
+>
+> For an existing LatticeVale installation, launch the **full v14.4.84 release** and choose **Resume / repair installation** first so the WSL lifecycle/shortcut migration runs before any optional managed-software update. The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
 
 LatticeVale is a source-visible **Windows + WSL2 installer, integration layer, and lifecycle manager for a self-hosted Hermes Agent stack**.
 
@@ -51,6 +53,25 @@ Depending on the selected installation options, LatticeVale can provide:
 - verification, audit, repair, update, backup, and controlled uninstall
 
 Persistent Hermes profiles, sessions, memory, Matrix state, Honcho data, Ollama models, QMD data, credentials, backups, Obsidian data, and explicit Compose overrides are preserved during normal repair and update operations.
+
+---
+
+## v14.4.84 — WSL shutdown lifecycle and host-transport repair
+
+v14.4.84 fixes a LatticeVale-created Windows shortcut behavior that could trigger a current WSL 2.7.x hvsocket/session failure. The pre-v14.4.84 **Shut Down LatticeVale** shortcut stopped the managed stack and then ran targeted `wsl.exe --terminate <distro>`. On affected Windows/WSL builds, targeted termination can leave the distro reported as **Running** while every new WSL session fails with `Wsl/Service/E_UNEXPECTED` and the Linux journal records `UtilAcceptVsock ... accept4 failed 110`.
+
+v14.4.84 changes the lifecycle contract:
+
+- **Start/Shut Down now invoke `manage.sh` directly through WSL `--cd` instead of the older nested `bash -lc` positional-argument wrapper that could return exit 127 (`./manage.sh: No such file or directory`).**
+- **Shut Down LatticeVale stops the managed LatticeVale stack only. It no longer terminates the WSL distro.**
+- The shortcut never substitutes global `wsl --shutdown`; users who intentionally want to stop all WSL2 distros may run that Microsoft command separately with awareness of its global impact.
+- Existing-install **Resume / repair** detects the exact installer-owned legacy shortcut helper containing targeted `wsl --terminate` behavior. When found, it cleanly stops the managed stack, performs a bounded global WSL shutdown (with confirmation if other distros are running), restarts `WslService`, verifies the same registered distro can create a new session, and then replaces the legacy shortcut helper/configuration.
+- The bounded WSL launch-recovery helper also restarts `WslService` after its clean WSL shutdown when elevation is available, so stale Windows-side session transport is discarded before the same distro is re-probed.
+- This repair does **not** unregister/import/move/convert/recreate the distro, edit/delete its VHDX, automatically restart HNS/vmcompute, or change `.wslconfig` networking settings as part of the legacy-shortcut migration.
+- Shortcut configuration schema advances to 4 so repair can distinguish and replace older/broken lifecycle helpers and verify the direct WSL `--cd` launcher contract.
+- **Fresh installs use the same corrected schema-4 helper immediately:** when Windows shortcuts are selected, the installer copies the fixed launcher and creates Start/Shut Down shortcuts during the normal final Windows reconciliation; no legacy-helper detection or repair-only migration is required.
+
+This release retains the v14.4.83 resource-policy v4, Redis/Valkey overcommit, Ubuntu-Pro-removal, and canonical launcher fixes.
 
 ---
 
@@ -397,7 +418,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.4.7** | Patch | Keyless web extraction and conservative Hermes web/browser defaults |
 | **v14.4.81** | Hotfix | Bounded same-run recovery for WSL `E_UNEXPECTED` launch failures |
 | **v14.4.82** | Hotfix | Correct successful WSL-recovery exit-code handling |
-| **v14.4.83** | **Patch / Hotfix 2** | Ollama policy v4, Redis/Valkey overcommit prerequisite, Ubuntu Pro integration removal, canonical public launcher correction; current recommended release |
+| **v14.4.83** | Patch / Hotfix 2 | Ollama policy v4, Redis/Valkey overcommit prerequisite, Ubuntu Pro integration removal, canonical public launcher correction |
+| **v14.4.84** | **Current install release** | Removes targeted WSL termination from lifecycle shortcuts and repairs legacy shortcut-induced WSL session transport during Resume / repair |
 
 ### v14.4.1
 
@@ -448,6 +470,10 @@ Corrects the helper return-channel handling so a successful v14.4.81 WSL recover
 
 Advances adaptive runtime policy to v4 with protected managed-Ollama headroom, persistently manages the Redis/Valkey `vm.overcommit_memory=1` prerequisite, removes the LatticeVale-owned Ubuntu Pro option/integration without uninstalling external state, and makes the documented/final `manage.sh` commands explicitly target the selected Linux user.
 
+### v14.4.84
+
+Removes targeted `wsl --terminate` from the Windows shutdown shortcut. Existing installations should use the full v14.4.84 release and choose **Resume / repair installation** so LatticeVale resets WSL/WslService transport when it detects its exact legacy unsafe shortcut helper, then rewrites the shortcut to stack-stop-only behavior.
+
 ```text
 v14.4.1   release-layout patch
     ↓
@@ -467,7 +493,9 @@ v14.4.81  WSL E_UNEXPECTED recovery
     ↓
 v14.4.82  WSL recovery return-channel hotfix
     ↓
-v14.4.83  resource/runtime repair patch + Hotfix 2 launcher correction / current recommended release
+v14.4.83  resource/runtime repair patch + Hotfix 2 launcher correction
+    ↓
+v14.4.84  WSL lifecycle transport repair / CURRENT INSTALL RELEASE
 ```
 
 ---

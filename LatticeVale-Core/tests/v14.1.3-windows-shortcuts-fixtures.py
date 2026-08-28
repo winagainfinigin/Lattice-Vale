@@ -24,15 +24,18 @@ assert 'stackLinuxPath = $StackLinuxPath' in ps1
 
 # Start follows installer-selected service intent through manage.sh, after using the root helper to ensure Docker is available.
 assert '/usr/local/sbin/hermes-stack-start' in launcher
-assert '$manageCommand = \'cd -- "$1" && ./manage.sh "$2"\'' in launcher
-assert 'bash -lc $manageCommand bash $stack start' in launcher
-assert 'bash -lc $manageCommand bash $stack stop' in launcher
+assert '$manageCommand' not in launcher
+assert 'bash -lc $manageCommand' not in launcher
+assert '& $wslExe -d $distro -u $user --cd $stack -- ./manage.sh start' in launcher
+assert '& $wslExe -d $distro -u $user --cd $stack -- ./manage.sh stop' in launcher
 
 # Shutdown is per-distro and idempotent: do not globally terminate every WSL distro and do not wake an already-stopped distro.
 assert '--list --running --quiet' in launcher
 assert "if (-not ($running -contains $distro))" in launcher
-assert '& $wslExe --terminate $distro' in launcher
-assert '--shutdown' not in launcher
+assert '& $wslExe --terminate $distro' not in launcher
+assert 'manage.sh stop exited with code $stopExit' in launcher
+assert 'intentionally left running to preserve WSL session transport' in launcher
+assert '& $wslExe --shutdown' not in launcher
 
 # Desktop .lnk launch uses process-only Bypass, hidden UI, and the source-visible helper.
 assert "'-ExecutionPolicy', 'Bypass'" in ps1

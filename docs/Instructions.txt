@@ -1,6 +1,8 @@
-LATTICEVALE v14.4.83 — INSTRUCTIONS HOTFIX 2
+LATTICEVALE v14.4.84 — INSTRUCTIONS
 
-CURRENT RELEASE: v14.4.83 Hotfix 2 is the current recommended LatticeVale release. It retains the v14.4.82 bounded WSL recovery fix and adds adaptive resource policy v4, the Redis/Valkey overcommit prerequisite, and removal of the LatticeVale-owned Ubuntu Pro option while preserving external Ubuntu Pro state.
+CURRENT RELEASE: v14.4.84 is the version to install first. New installs should use the full v14.4.84 release directly, not install v14.4.83 and then layer an update. Existing installs should launch the full v14.4.84 release and choose Resume / repair first so the legacy shutdown-shortcut WSL transport migration can run.
+
+V14.4.84 WSL LIFECYCLE REPAIR: The old lifecycle helper also used a nested `bash -lc` positional-argument wrapper that could return exit 127 instead of reaching `manage.sh`; v14.4.84 uses direct WSL `--cd` + `./manage.sh start|stop`. The old Shut Down shortcut used targeted `wsl --terminate`, which can wedge new-session hvsocket transport on affected WSL 2.7.x systems. v14.4.84 stops the managed stack only. Resume / repair detects the exact old owned helper, performs bounded `wsl --shutdown` + WslService reset/re-probe, and rewrites the helper.
 
 V14.4.82 WSL RECOVERY HOTFIX: If v14.4.81 printed that WSL recovered after `wsl --shutdown` but then warned that the helper exited with a long block of text followed by `0`, use v14.4.82. It isolates the helper's console output from its scalar exit code so successful recovery continues directly into the normal distro re-probe and Resume / repair eligibility checks.
 
@@ -104,7 +106,7 @@ During Resume / repair, LatticeVale may reconcile ownership on live installer-ow
 5. EXISTING INSTALL — CHOOSE THE CORRECT MODE
 ================================================================================
 
-Before launching the Windows installer for a repair or controlled update/repair run, fully stop the selected LatticeVale WSL distro. If the LatticeVale Windows shortcuts are installed, use **Shut Down LatticeVale** first. That shortcut stops the managed stack and then terminates only the selected distro; global `wsl --shutdown` is not required.
+Before launching the Windows installer for a repair or controlled update/repair run, use **Shut Down LatticeVale** first when available. v14.4.84 stops the managed stack but intentionally leaves the WSL distro running. Do not use targeted `wsl --terminate`; if an older LatticeVale-owned shutdown helper is detected, Resume / repair performs the required bounded `wsl --shutdown` + `WslService` transport reset itself.
 
 When a managed stack is detected the installer offers:
 
@@ -203,7 +205,7 @@ Advanced upstream refresh:
 
 The advanced command is not equivalent to the bundle-pinned installer updater and may follow configured upstream references differently.
 
-If Windows Start/Shut Down shortcuts were enabled, test each once after install. The managed shutdown shortcut stops this stack and terminates only its selected WSL distro; it does not intentionally issue global wsl --shutdown.
+If Windows Start/Shut Down shortcuts were enabled, test each once after install. The v14.4.84 managed shutdown shortcut stops this stack and leaves its selected WSL distro running; it issues neither targeted `wsl --terminate` nor global `wsl --shutdown`.
 
 ================================================================================
 8. PROVIDERS, MODELS, AND PROFILES
@@ -325,7 +327,7 @@ Do not rely on the distro default user if it differs from the Linux user selecte
 
 If installation or repair is interrupted:
 1. do not delete the WSL distro, Docker volumes, Matrix crypto state, profiles, or databases;
-2. fully stop the selected LatticeVale WSL distro before rerunning the Windows repair installer; when available, **Shut Down LatticeVale** is the recommended method because it stops the managed stack and terminates only that distro;
+2. use **Shut Down LatticeVale** to stop the managed stack before rerunning the Windows repair installer; do not target-terminate the distro; v14.4.84 will repair legacy shortcut transport state when detected;
 3. rerun `installer\Install-LatticeVale.ps1`;
 4. choose Resume / repair;
 5. follow the first concrete error reported;

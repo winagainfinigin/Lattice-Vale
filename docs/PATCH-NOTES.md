@@ -1,5 +1,18 @@
 # Current v14.x patch notes
 
+## v14.4.84 — WSL targeted-termination lifecycle repair
+
+- Fixes both installer-created lifecycle shortcuts to launch `./manage.sh start|stop` directly with WSL `--cd <stack>`; the previous nested `bash -lc` positional-argument wrapper could return exit 127 and never reach the managed stack.
+- Fixes the installer-created **Shut Down LatticeVale** shortcut so it no longer runs `wsl.exe --terminate <distro>` after `manage.sh stop`. On affected WSL 2.7.x/Windows 26200 systems, targeted termination can reproduce `Wsl/Service/E_UNEXPECTED` while the distro remains `Running`, with `UtilAcceptVsock ... accept4 failed 110` in the prior WSL boot journal.
+- The shutdown shortcut now means **stop the managed LatticeVale stack**. It intentionally leaves the distro running and issues neither targeted `wsl --terminate` nor global `wsl --shutdown`.
+- Mutating existing-stack repair detects the exact installer-owned legacy shortcut helper containing targeted termination. It cleanly stops the managed stack, obtains global-shutdown consent when unrelated WSL distros are running, executes `wsl --shutdown`, restarts `WslService`, waits for the same registered distro to accept a fresh session, and then continues normal repair so shortcut reconciliation installs the corrected helper/config.
+- The WSL host launch-recovery helper now also restarts `WslService` after its clean global shutdown when elevation is available.
+- The migration does not unregister/import/move/convert/recreate a distro, touch its VHDX, automatically restart HNS/vmcompute, or change `.wslconfig` networking. Existing explicit mirrored→NAT fallback remains a separate persistent-E_UNEXPECTED compatibility action.
+- Shortcut config schema advances 2→4; repair treats any older/broken helper contract as drift and rewrites it.
+- Fresh installs that select Windows shortcuts receive the same schema-4 direct WSL `--cd` helper immediately during normal final shortcut reconciliation; the fix is not repair-only.
+- New installs must install the full v14.4.84 release directly; do not install v14.4.83 first and layer this patch over the live stack. Existing installs should run the full v14.4.84 release and choose **Resume / repair installation** first.
+
+
 ## v14.4.83 Hotfix 2 — canonical public launcher names
 
 Hotfix 2 corrects the public release interface so the documented install/uninstall commands point to real, manifest-covered files named `installer/Install-LatticeVale.ps1` and `installer/Uninstall-LatticeVale.ps1`. Those launchers retain the same source-manifest verification and core invocation behavior as the already-tested v14.4.83 wrappers. The previous lowercase `installer/install.ps1` and `installer/uninstall.ps1` files remain included as backward-compatible entry points so scripts or automation written against v14.4.1-v14.4.83 are not broken.
@@ -100,7 +113,7 @@ The plugin is generated inside each applicable LatticeVale-managed Hermes home a
 
 The patch deliberately does **not** add self-hosted Firecrawl or another extraction service. No Compose service, image, database, queue, browser process, port, systemd unit, Windows task, WSL networking setting, CPU/RAM limit, model, package installation, or API credential is added. Existing SearXNG, QMD, Honcho, Matrix, Ollama, Kanban, Tailscale, Obsidian and resource-policy behavior is inherited.
 
-The integrations checkpoint revision advances from 2 to 3. Resume / repair therefore reconciles the new managed-profile integration, but this does not advance `MANAGED_REPAIR_REFRESH_REVISION` and does not by itself force package/image/source refresh. Before that repair run, fully stop the selected LatticeVale WSL distro; if installed, **Shut Down LatticeVale** is the recommended method because it stops the managed stack and terminates only that distro.
+The integrations checkpoint revision advances from 2 to 3. Resume / repair therefore reconciles the new managed-profile integration, but this does not advance `MANAGED_REPAIR_REFRESH_REVISION` and does not by itself force package/image/source refresh. For v14.4.84 and newer, stop the managed stack with **Shut Down LatticeVale** but do not target-terminate the distro; the repair path handles any legacy shortcut transport migration itself.
 
 #### Network and content safety
 

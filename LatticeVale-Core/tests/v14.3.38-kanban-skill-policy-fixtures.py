@@ -8,12 +8,12 @@ import yaml
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'}, version
+assert version in {'14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}, version
 configure=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 
 # Repair/update adoption: the integrations revision advances whenever an installer-owned
 # integration needs migration without touching unrelated checkpoints.
-assert ("integrations) printf '4'" in configure) if version in {'14.4.7','14.4.8','14.4.81','14.4.82','14.4.83'} else ("integrations) printf '2'" in configure)
+assert ("integrations) printf '4'" in configure) if version in {'14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'} else ("integrations) printf '2'" in configure)
 
 # Routing is discovered, not machine/profile-name hard-coded. Valid user-created
 # profiles remain valid routing targets, while fallback automatic assignment only

@@ -1,6 +1,8 @@
-LATTICEVALE v14.4.83 — INSTALLER DESCRIPTION HOTFIX 2
+LATTICEVALE v14.4.84 — INSTALLER DESCRIPTION
 
-CURRENT RELEASE: v14.4.83 Hotfix 2 is the current recommended LatticeVale release. It retains v14.4.82 WSL recovery behavior while advancing adaptive resource policy to v4, persistently managing the Redis/Valkey overcommit prerequisite when those services are selected, and removing the LatticeVale-owned Ubuntu Pro option without altering external Ubuntu Pro state.
+CURRENT RELEASE: v14.4.84 is the direct first-install release. It removes targeted `wsl --terminate` from the Windows shutdown shortcut and adds a Resume / repair migration that resets WSL/WslService transport when the exact legacy installer-owned helper is found, then rewrites the shortcut. It retains the v14.4.83 resource/runtime and public-launcher fixes.
+
+V14.4.84 WSL LIFECYCLE REPAIR: Shut Down now stops the managed stack but leaves the distro running. Existing-install repair detects the legacy targeted-termination helper, performs bounded global WSL shutdown + WslService reset/re-probe, and replaces the helper without changing distro registration/VHDX or automatically restarting HNS/vmcompute.
 
 V14.4.82 WSL RECOVERY HOTFIX: The v14.4.81 recovery helper behavior is unchanged, but its console diagnostics are now sent directly to the host while only the native integer exit code is returned to the installer. A successful bounded recovery therefore triggers the intended same-run distro eligibility re-probe instead of being misread as a failed helper exit.
 
@@ -244,7 +246,7 @@ Depending on choices, LatticeVale can configure desktop Start/Shut Down shortcut
 
 These are not mandatory for Hermes itself. Users can leave them disabled when they do not want LatticeVale to affect those Windows-side behaviors.
 
-For existing-install repair/update runs, the selected LatticeVale WSL distro should be fully stopped before launching the Windows installer. If the Windows lifecycle shortcuts are installed, **Shut Down LatticeVale** is the recommended way to prepare: it stops the managed stack and then terminates only the selected distro. Global `wsl --shutdown` is not required.
+v14.4.84 lifecycle shortcuts use WSL `--cd` to invoke `./manage.sh start|stop` directly; schema-3/broken helpers are rewritten by repair. For existing-install repair/update runs, use **Shut Down LatticeVale** to stop the managed stack when available, but do not target-terminate the distro. v14.4.84 detects an installer-owned legacy shutdown helper containing `wsl --terminate`, performs a bounded global WSL shutdown + `WslService` transport reset/re-probe, and replaces the helper during repair.
 
 N. UPDATE POLICY — CHOOSE CONTROLLED VS ADVANCED
 
