@@ -1,5 +1,15 @@
 # Current v14.x patch notes
 
+## v14.4.84 Hotfix 1 — Matrix gateway startup/readiness repair
+
+- Keeps the public version at **14.4.84**; this is a same-version hotfix for users who already released/installed the initial v14.4.84 bundle.
+- Fixes a stack Start/Restart/Update race where Hermes gateways could launch before Synapse and Docker DNS were reachable from inside `hermes-agent`. The gateway process could remain alive while Matrix initialization failed, causing Element communication loss even though `matrix-profile:<name>` appeared running.
+- Matrix-enabled `manage.sh start` now brings Synapse to host readiness before the full stack, verifies the Matrix Client-Server API from inside `hermes-agent`, and then reconciles the default plus selected named-profile gateways. Already-running gateway services are restarted against the proven backend instead of being accepted solely because s6 reports them up.
+- Fresh install and Resume / repair final reconciliation apply the same host-readiness -> in-container-readiness -> gateway-recycle ordering.
+- Hotfix 1 advances only the internal `reconcile` and `kanban_gateway` checkpoint revisions so a same-version Resume / repair cannot skip the new reconnect logic on an existing initial-v14.4.84 installation.
+- `state-audit.py` now probes `synapse:8008` from inside `hermes-agent`; a running gateway process is no longer sufficient for a RUNNING Matrix profile when the container cannot resolve/reach Synapse.
+- Existing v14.4.84 installs should run the **Hotfix 1 full release** and choose **Resume / repair installation**. The installer always refreshes installer-owned `manage.sh`, `configure-stack.sh`, and `state-audit.py` on a mutating repair run, so no version-number bump is required for this source hotfix.
+
 ## v14.4.84 — WSL targeted-termination lifecycle repair
 
 - Fixes both installer-created lifecycle shortcuts to launch `./manage.sh start|stop` directly with WSL `--cd <stack>`; the previous nested `bash -lc` positional-argument wrapper could return exit 127 and never reach the managed stack.

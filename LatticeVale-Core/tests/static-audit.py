@@ -175,6 +175,8 @@ r=subprocess.run([sys.executable,str(ROOT/'tests/v14.3.41-wsl-host-safety-fixtur
 check(r.returncode==0, 'v14.3.41 WSL host-safety audit failed: ' + (r.stdout+r.stderr).strip())
 r=subprocess.run([sys.executable,str(ROOT/'tests/v14.4.81-wsl-launch-recovery-fixtures.py')],capture_output=True,text=True)
 check(r.returncode==0, 'v14.4.81 WSL launch-recovery audit failed: ' + (r.stdout+r.stderr).strip())
+r=subprocess.run([sys.executable,str(ROOT/'tests/v14.4.84-hotfix1-matrix-gateway-readiness-fixtures.py')],capture_output=True,text=True)
+check(r.returncode==0, 'v14.4.84 Hotfix 1 Matrix gateway readiness audit failed: ' + (r.stdout+r.stderr).strip())
 r=subprocess.run([sys.executable,str(ROOT/'tests/v14.3.42-clean-host-reset-fixtures.py')],capture_output=True,text=True)
 check(r.returncode==0, 'v14.3.42 clean-host reset audit failed: ' + (r.stdout+r.stderr).strip())
 r=subprocess.run([sys.executable,str(ROOT/'tests/v14.3.43-scheduled-task-action-compat-fixtures.py')],capture_output=True,text=True)

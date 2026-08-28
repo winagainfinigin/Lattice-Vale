@@ -610,6 +610,74 @@ start_profile_gateway_exact_manage() {
   return 0
 }
 
+reconcile_default_gateway_manage() {
+  local state action service
+  service="/run/service/gateway-default"
+  state="$(profile_gateway_s6_state_exact default 2>/dev/null || true)"
+  case "$state" in
+    up) action=restart ;;
+    down) action=start ;;
+    absent)
+      echo 'Default gateway has no exact s6 service slot; Matrix runtime cannot be reconciled safely.' >&2
+      profile_gateway_log_tail_exact_manage default
+      return 1
+      ;;
+    *)
+      echo 'Could not determine the exact default gateway s6 state.' >&2
+      return 1
+      ;;
+  esac
+
+  if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway "$action" >/dev/null 2>&1; then
+    wait_profile_gateway_up_exact default && return 0
+  fi
+
+  echo "WARNING: Hermes default gateway $action failed; retrying only its exact s6 service slot." >&2
+  if [[ "$action" == start ]]; then
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
+  else
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
+  fi
+  wait_profile_gateway_up_exact default || {
+    profile_gateway_log_tail_exact_manage default
+    return 1
+  }
+}
+
+reconcile_profile_gateway_exact_manage() {
+  local name="$1" state action service
+  service="/run/service/gateway-$name"
+  state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
+  case "$state" in
+    up) action=restart ;;
+    down) action=start ;;
+    absent)
+      echo "Profile '$name' has no exact s6 gateway service slot; preserving its Matrix state." >&2
+      profile_gateway_log_tail_exact_manage "$name"
+      return 1
+      ;;
+    *)
+      echo "Could not determine the exact s6 gateway state for profile '$name'." >&2
+      return 1
+      ;;
+  esac
+
+  if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes -p "$name" gateway "$action" >/dev/null 2>&1; then
+    wait_profile_gateway_up_exact "$name" && return 0
+  fi
+
+  echo "WARNING: Hermes profile '$name' gateway $action failed; retrying only its exact s6 service slot." >&2
+  if [[ "$action" == start ]]; then
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
+  else
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
+  fi
+  wait_profile_gateway_up_exact "$name" || {
+    profile_gateway_log_tail_exact_manage "$name"
+    return 1
+  }
+}
+
 stop_profile_gateway_exact_manage() {
   local name="$1" state
   timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes -p "$name" gateway stop >/dev/null 2>&1 || true
@@ -659,15 +727,55 @@ matrix_client_api_ready_manage() {
   curl -fsS --connect-timeout 3 --max-time 5 "http://127.0.0.1:${MATRIX_HOST_PORT}/_matrix/client/versions" >/dev/null 2>&1
 }
 
-ensure_matrix_online_manage() {
+wait_hermes_cli_manage() {
   local i
-  docker compose up -d --pull never --no-build synapse-db synapse hermes >/dev/null
+  for i in $(seq 1 60); do
+    if timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  echo 'Hermes container did not become CLI-ready.' >&2
+  return 1
+}
+
+matrix_backend_ready_from_hermes_manage() {
+  timeout --foreground --kill-after=5s 15s docker exec hermes-agent python3 -c '
+import http.client, socket
+socket.getaddrinfo("synapse", 8008)
+c=http.client.HTTPConnection("synapse", 8008, timeout=5)
+c.request("GET", "/_matrix/client/versions")
+r=c.getresponse()
+raise SystemExit(0 if 200 <= int(r.status) < 400 else 1)
+' >/dev/null 2>&1
+}
+
+wait_matrix_backend_from_hermes_manage() {
+  local i
+  for i in $(seq 1 60); do
+    matrix_backend_ready_from_hermes_manage && return 0
+    sleep 2
+  done
+  echo 'Matrix is healthy on the WSL host but is not reachable as synapse:8008 from inside hermes-agent; refusing to leave Matrix gateways in a false-running state.' >&2
+  return 1
+}
+
+ensure_matrix_server_online_manage() {
+  local i
+  docker compose up -d --pull never --no-build synapse-db synapse >/dev/null
   for i in $(seq 1 60); do
     matrix_client_api_ready_manage && return 0
     sleep 2
   done
   echo 'Matrix Client-Server API did not become ready.' >&2
   return 1
+}
+
+ensure_matrix_runtime_online_manage() {
+  ensure_matrix_server_online_manage
+  docker compose up -d --pull never --no-build --no-deps hermes >/dev/null
+  wait_hermes_cli_manage
+  wait_matrix_backend_from_hermes_manage
 }
 
 finish_matrix_profile() {
@@ -687,7 +795,7 @@ finish_matrix_profile() {
   user_id="$(sed -n 's/^MATRIX_USER_ID=//p' "$secret" | head -n1)"
   room_id="$(sed -n 's/^MATRIX_ALLOWED_ROOMS=//p' "$secret" | head -n1)"
   [[ -n "$token" && "$user_id" == @*:* && "$room_id" == !*:* ]] || { echo "Profile '$name' protected Matrix record is incomplete. Run Resume / repair." >&2; return 2; }
-  ensure_matrix_online_manage
+  ensure_matrix_runtime_online_manage
   live_user="$(curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0.1:${MATRIX_HOST_PORT}/_matrix/client/v3/account/whoami" | jq -r '.user_id // empty')" || true
   [[ "$live_user" == "$user_id" ]] || { echo "Matrix token for profile '$name' no longer authenticates as '$user_id'. No credentials were replaced." >&2; return 1; }
   start_profile_gateway_exact_manage "$name" || { echo "Profile '$name' exact gateway service could not be activated; protected Matrix state remains pending-manual." >&2; return 1; }
@@ -747,6 +855,14 @@ start_selected_matrix_profile_gateways() {
   [[ "$(opt_bool matrix)" == true ]] || return 0
   local name info secret state
   local -a names=()
+
+  # A running s6 gateway process is not sufficient evidence of Matrix connectivity.
+  # After stack start/restart the gateway can race Docker DNS/Synapse, remain alive,
+  # and never reconnect. Require host + in-container Matrix reachability first, then
+  # recycle the default and selected profile gateways against the proven backend.
+  ensure_matrix_runtime_online_manage
+  reconcile_default_gateway_manage
+
   mapfile -t names < <(selected_matrix_profile_names)
   ((${#names[@]})) || return 0
 
@@ -776,11 +892,11 @@ start_selected_matrix_profile_gateways() {
       echo "Matrix-enabled profile '$name' has incomplete provisioning state '$state'. Rerun Resume / repair." >&2
       return 1
     fi
-    if ! start_profile_gateway_exact_manage "$name"; then
+    if ! reconcile_profile_gateway_exact_manage "$name"; then
       echo "WARNING: Matrix-enabled profile '$name' gateway remains unavailable; preserving that profile and continuing core stack startup. Resume / repair will retry it." >&2
       continue
     fi
-    echo "Profile gateway running: $name"
+    echo "Profile gateway running with Matrix backend verified: $name"
   done
   return 0
 }
@@ -854,7 +970,16 @@ case "$cmd" in
     echo 'Resume / repair preserves completed work and reruns failed/incomplete/stale stages; it refreshes installer-owned components when the periodic gate is due or the managed-refresh policy revision changes. A bundle-version change alone stays local-first.'
     echo "Choose Update / repair installer-managed software when you want to force the current bundle's declared component versions/channels immediately, including after a version-only bundle change that does not advance the managed-refresh policy revision."
     echo './manage.sh update is a separate advanced upstream-refresh command: it pulls the currently configured image refs and may advance Honcho to repository HEAD, so it is not equivalent to the tested bundle updater.' ;;
-  start) ensure_docker_for_user; refresh_adaptive_resource_policy; control_windows_native_services start; docker compose up -d --pull never --no-build; start_selected_matrix_profile_gateways; control_windows_bridge start; status ;;
+  start)
+    ensure_docker_for_user
+    refresh_adaptive_resource_policy
+    control_windows_native_services start
+    if [[ "$(opt_bool matrix)" == true ]]; then ensure_matrix_server_online_manage; fi
+    docker compose up -d --pull never --no-build
+    start_selected_matrix_profile_gateways
+    control_windows_bridge start
+    status
+    ;;
   stop) docker compose stop; control_windows_bridge stop; control_windows_native_services stop ;;
   logs)
     if [[ -n "${2:-}" ]]; then docker compose logs --tail=200 -f "$2"; else docker compose logs --tail=100 -f; fi ;;
@@ -866,7 +991,7 @@ case "$cmd" in
       docker compose up -d --pull never --no-build
     fi
     if [[ -n "${2:-}" ]]; then docker compose restart "$2"; else docker compose restart; fi
-    if [[ -z "${2:-}" || "${2:-}" == hermes ]]; then start_selected_matrix_profile_gateways; fi
+    if [[ -z "${2:-}" || "${2:-}" == hermes || "${2:-}" == synapse || "${2:-}" == synapse-db ]]; then start_selected_matrix_profile_gateways; fi
     control_windows_bridge start ;;
   chat)
     profile="${2:-default}"
@@ -898,6 +1023,7 @@ case "$cmd" in
     fi
     refresh_adaptive_resource_policy
     control_windows_native_services start
+    if [[ "$(opt_bool matrix)" == true ]]; then ensure_matrix_server_online_manage; fi
     timeout --foreground --kill-after=10s 300s docker compose up -d --pull never --no-build --remove-orphans
     start_selected_matrix_profile_gateways
     if local_ai_enabled; then

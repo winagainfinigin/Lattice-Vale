@@ -44,7 +44,12 @@ assert "'windows\\LatticeVale-Shortcut.ps1'" in ps1
 assert 'LatticeVale-Shortcut.ps1' in ps1
 
 assert 'start_selected_matrix_profile_gateways' in manage, 'manage.sh must reconcile selected Matrix profile gateways on Start'
-assert 'docker compose up -d --pull never --no-build; start_selected_matrix_profile_gateways' in manage, 'Start shortcut lifecycle must restore selected Matrix profile gateways'
+case_root=manage.index('case "$cmd" in')
+case_start=manage.index('  start)', case_root)
+case_end=manage.index('  stop)', case_start)
+start_case=manage[case_start:case_end]
+assert 'ensure_matrix_server_online_manage' in start_case, 'Matrix-enabled Start must bring Synapse ready before full stack startup'
+assert start_case.index('ensure_matrix_server_online_manage') < start_case.index('docker compose up -d --pull never --no-build') < start_case.index('start_selected_matrix_profile_gateways'), 'Start must order Synapse readiness before full Compose and gateway reconciliation'
 assert 'select(.matrix.enabled == true)' in manage, 'gateway reconciliation must be driven by the installer-selected profile objects'
 
 assert "Join-Path $env:LOCALAPPDATA 'LatticeVale'" in ps1

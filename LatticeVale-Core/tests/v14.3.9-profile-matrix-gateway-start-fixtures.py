@@ -50,7 +50,7 @@ assert '[[ "$gateway_state" == up ]] || return 1' not in verify
 for token in (
     'matrix-profile-finish PROFILE',
     'finish_matrix_profile()',
-    'ensure_matrix_online_manage',
+    'ensure_matrix_runtime_online_manage',
     'wait_profile_gateway_up_exact',
     'LATTICEVALE_PROVISIONING_STATE complete',
     'refresh_matrix_profile_handoff',

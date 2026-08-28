@@ -5,6 +5,10 @@
 >
 > For an existing LatticeVale installation, launch the **full v14.4.84 release** and choose **Resume / repair installation** first so the WSL lifecycle/shortcut migration runs before any optional managed-software update. The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
 
+### v14.4.84 Hotfix 1 — Matrix gateway startup readiness
+
+If you already downloaded the initial public v14.4.84 release, use the **Hotfix 1 full release** and choose **Resume / repair installation**. The version remains 14.4.84. Hotfix 1 fixes a restart/startup race where Hermes gateways could start while Synapse/Docker DNS was not yet reachable from inside `hermes-agent`; the gateway process could remain running while Element messages stopped reaching the default or named Matrix profile. The hotfix waits for Synapse, verifies `synapse:8008` from inside the Hermes container, then reconciles the default and selected profile gateways. It also makes the state audit treat an internally unreachable Matrix backend as broken instead of reporting a false healthy gateway. Fresh installs use the same ordering automatically. Internal reconciliation checkpoint revisions are advanced so Resume / repair on an already-installed initial 14.4.84 copy cannot skip the hotfix.
+
 LatticeVale is a source-visible **Windows + WSL2 installer, integration layer, and lifecycle manager for a self-hosted Hermes Agent stack**.
 
 It installs into an **existing supported Ubuntu WSL2 distribution**, provisions Docker and Hermes, and can integrate Matrix, multi-profile Kanban orchestration, Honcho memory infrastructure, SearXNG, QMD indexing, Ollama/local AI, Obsidian, Windows lifecycle shortcuts, and Tailscale remote access.

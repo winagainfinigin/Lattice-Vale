@@ -1,5 +1,7 @@
 # LatticeVale v14.4.84 — Stable
 
+> **v14.4.84 Hotfix 1:** same-version public hotfix. Existing v14.4.84 installs should run the Hotfix 1 full release and choose Resume / repair. It waits for Synapse/Docker DNS from inside `hermes-agent` before Matrix gateway reconciliation and makes audit detect false-running disconnected gateways. Fresh installs use the same ordering.
+
 > **v14.4.84:** current direct-install release. It removes targeted `wsl --terminate` from the Windows Shut Down shortcut and adds a Resume / repair migration that detects the exact legacy installer-owned helper, performs bounded `wsl --shutdown` + `WslService` transport recovery, verifies the same distro, and rewrites the shortcut. It retains v14.4.83 resource policy v4, Redis/Valkey overcommit, Ubuntu Pro removal, and canonical public launchers. New installs should install the full v14.4.84 release directly; existing installs should run the full release and choose Resume / repair first. See [`PATCH-NOTES.md`](PATCH-NOTES.md) and [`SUPPORT.md`](SUPPORT.md).
 
 **Unofficial, inspectable Windows + WSL2 installer and lifecycle manager for a self-hosted Hermes Agent stack.**

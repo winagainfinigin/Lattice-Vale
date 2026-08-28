@@ -82,9 +82,13 @@ assert 'if [[ "$obsidian_selected" != true ]]; then\n  repair_user_tree vault' i
 assert 'searxng/searxng:2026.8.17-374939b88' in (ROOT/'stack/compose.yaml').read_text(encoding='utf-8')
 assert 'ollama/ollama:0.32.14' in (ROOT/'stack/compose.yaml').read_text(encoding='utf-8')
 assert 'docker compose up -d --pull never --no-build' in BOOT
-assert ('start) ensure_docker_for_user; docker compose up -d --pull never --no-build' in MANAGE or
-        'start) ensure_docker_for_user; control_windows_native_services start; docker compose up -d --pull never --no-build' in MANAGE or
-        'start) ensure_docker_for_user; refresh_adaptive_resource_policy; control_windows_native_services start; docker compose up -d --pull never --no-build; start_selected_matrix_profile_gateways; control_windows_bridge start; status' in MANAGE)
+case_root=MANAGE.index('case "$cmd" in')
+start_pos=MANAGE.index('  start)', case_root)
+stop_pos=MANAGE.index('  stop)', start_pos)
+start_case=MANAGE[start_pos:stop_pos]
+assert 'ensure_docker_for_user' in start_case
+assert 'docker compose up -d --pull never --no-build' in start_case
+assert 'start_selected_matrix_profile_gateways' in start_case
 assert 'docker compose up -d --pull never --no-build --remove-orphans' in CFG
 
 # Local-first recovery is bounded by one wall-clock deadline and uses cheap Docker

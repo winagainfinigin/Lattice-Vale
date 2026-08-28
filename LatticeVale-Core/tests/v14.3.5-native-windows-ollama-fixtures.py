@@ -71,7 +71,11 @@ assert '"$ollama_backend" == managed' in boot
 assert "backend not in ('managed','windows-native')" in boot
 
 # Start/restart paths refresh the relay before consumers so WSL address changes are reconciled.
-assert 'control_windows_native_services start; docker compose up -d --pull never --no-build' in manage
+case_root=manage.index('case "$cmd" in')
+start_pos=manage.index('  start)', case_root)
+stop_pos=manage.index('  stop)', start_pos)
+start_case=manage[start_pos:stop_pos]
+assert start_case.index('control_windows_native_services start') < start_case.index('docker compose up -d --pull never --no-build')
 assert '.windows-native-info' in manage and '.windows-native-info' in boot
 assert 'native_ollama' in audit and 'windows.host' in audit
 

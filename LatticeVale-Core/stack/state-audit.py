@@ -150,6 +150,20 @@ def http_ok(url: str, headers: dict[str, str] | None = None, timeout: float = 3.
         return False
 
 
+def matrix_backend_reachable_from_hermes() -> bool:
+    """Verify Docker DNS + Synapse API from the actual Hermes container network."""
+    script = (
+        "import http.client,socket; "
+        "socket.getaddrinfo('synapse',8008); "
+        "c=http.client.HTTPConnection('synapse',8008,timeout=5); "
+        "c.request('GET','/_matrix/client/versions'); "
+        "r=c.getresponse(); "
+        "raise SystemExit(0 if 200 <= int(r.status) < 400 else 1)"
+    )
+    rc, _ = run(["docker", "exec", "hermes-agent", "python3", "-c", script], timeout=10)
+    return rc == 0
+
+
 def http_json(url: str, headers: dict[str, str] | None = None, timeout: float = 3.0) -> Any:
     """Return parsed JSON for a successful HTTP response, otherwise None."""
     try:
@@ -552,17 +566,31 @@ def main() -> int:
             matrix_token_valid = isinstance(whoami, dict) and bool(expected_default_user) and whoami.get("user_id") == expected_default_user
     matrix_state = runtime("hermes-synapse")
     matrix_db_state = runtime("hermes-synapse-db")
-    matrix_settling = is_settling(matrix_state) or is_settling(matrix_db_state)
+    matrix_internal_ready = False
+    if selected("matrix") and docker_available and not args.offline and not runtime_stopped(hermes_state):
+        matrix_internal_ready = matrix_backend_reachable_from_hermes()
+    matrix_settling = is_settling(matrix_state) or is_settling(matrix_db_state) or is_settling(hermes_state)
     matrix_runtime_failed = runtime_probe_failed(matrix_state) or runtime_probe_failed(matrix_db_state)
-    matrix_broken = selected("matrix") and docker_available and matrix_cfg and not args.offline and (not matrix_run or not matrix_token_valid) and matrix_runtime_failed
+    matrix_broken = selected("matrix") and docker_available and matrix_cfg and not args.offline and (
+        ((not matrix_run or not matrix_token_valid) and matrix_runtime_failed) or
+        (matrix_run and matrix_token_valid and not runtime_stopped(hermes_state) and not is_settling(hermes_state) and not matrix_internal_ready)
+    )
     matrix_stopped = selected("matrix") and matrix_cfg and runtime_stopped(matrix_state) and runtime_stopped(matrix_db_state)
     if selected("matrix") and matrix_cfg and not (matrix_run and matrix_token_valid) and matrix_settling:
         matrix_status = "STARTING"
     elif matrix_stopped and not matrix_broken:
         matrix_status = "STOPPED"
     else:
-        matrix_status = classify_service(selected("matrix"), matrix_cfg, matrix_run and matrix_token_valid, matrix_broken)
-    c["matrix"] = {"status": matrix_status, "detail": ("homeserver + bot identity present; containers are still starting" if matrix_status == "STARTING" else ("homeserver + bot identity present; containers are stopped" if matrix_status == "STOPPED" else "homeserver + bot identity present")) if matrix_cfg else "Matrix bootstrap incomplete"}
+        matrix_live_ok = matrix_run and matrix_token_valid and (runtime_stopped(hermes_state) or matrix_internal_ready)
+        matrix_status = classify_service(selected("matrix"), matrix_cfg, matrix_live_ok, matrix_broken)
+    matrix_detail = "homeserver + bot identity present"
+    if matrix_status == "STARTING":
+        matrix_detail += "; containers are still starting"
+    elif matrix_status == "STOPPED":
+        matrix_detail += "; containers are stopped"
+    elif selected("matrix") and not args.offline and not runtime_stopped(hermes_state) and not matrix_internal_ready:
+        matrix_detail += "; Synapse is not reachable from inside hermes-agent"
+    c["matrix"] = {"status": matrix_status, "detail": matrix_detail if matrix_cfg else "Matrix bootstrap incomplete"}
 
     # Matrix-enabled secondary profiles are intentionally distinct from ordinary workers:
     # Kanban-only profiles are healthy while stopped, but a profile explicitly selected for
@@ -632,18 +660,24 @@ def main() -> int:
         elif args.offline or not docker_available:
             status = "CONFIGURED"
             detail = f"{expected_user} -> {room_id}; model={model}; runtime not tested"
-        elif live_identity and gateway_running and cross_signing_state == "pending":
+        elif live_identity and gateway_running and matrix_internal_ready and cross_signing_state == "pending":
             status = "CONFIGURED"
             detail = f"{expected_user} -> {room_id}; model={model}; independent gateway running; E2EE cross-signing persistence pending; Resume / repair will retry"
-        elif live_identity and gateway_running:
+        elif live_identity and gateway_running and matrix_internal_ready:
             status = "RUNNING"
             detail = f"{expected_user} -> {room_id}; model={model}; independent gateway running; cross-signing persisted"
+        elif matrix_status == "STARTING" or is_settling(hermes_state):
+            status = "STARTING"
+            detail = f"{expected_user} -> {room_id}; model={model}; Matrix/Hermes runtime is still starting"
         elif matrix_status == "STOPPED" or runtime_stopped(hermes_state):
             status = "STOPPED"
             detail = f"{expected_user} -> {room_id}; model={model}; stack/profile gateway stopped"
         else:
             status = "BROKEN"
-            detail = f"{expected_user} -> {room_id}; model={model}; identity or independent gateway failed live verification"
+            if gateway_running and not matrix_internal_ready:
+                detail = f"{expected_user} -> {room_id}; model={model}; gateway process is running but Synapse is unreachable from inside hermes-agent"
+            else:
+                detail = f"{expected_user} -> {room_id}; model={model}; identity or independent gateway failed live verification"
         profile_matrix_rows.append({"name": name, "status": status, "detail": detail, "userId": expected_user, "roomId": room_id, "model": model, "crossSigningState": cross_signing_state})
     report["profileMatrix"] = profile_matrix_rows
     if not selected("matrix") or not profile_matrix_rows:
@@ -652,6 +686,8 @@ def main() -> int:
         c["profileMatrix"] = {"status": "BROKEN", "detail": "one or more Matrix-enabled profile gateways/identities failed live verification"}
     elif any(x["status"] == "PARTIAL" for x in profile_matrix_rows):
         c["profileMatrix"] = {"status": "PARTIAL", "detail": "one or more Matrix-enabled profiles are not fully provisioned"}
+    elif any(x["status"] == "STARTING" for x in profile_matrix_rows):
+        c["profileMatrix"] = {"status": "STARTING", "detail": "one or more Matrix-enabled profile gateways are still starting"}
     elif any(x["status"] == "STOPPED" for x in profile_matrix_rows):
         c["profileMatrix"] = {"status": "STOPPED", "detail": "Matrix-enabled profile configuration is preserved but its gateway is stopped"}
     elif all(x["status"] in {"RUNNING", "CONFIGURED"} for x in profile_matrix_rows):

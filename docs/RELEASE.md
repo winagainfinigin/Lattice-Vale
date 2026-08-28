@@ -1,3 +1,5 @@
+> **v14.4.84 Hotfix 1:** keep `VERSION.txt` at 14.4.84. Run `LatticeVale-Core/tests/v14.4.84-hotfix1-matrix-gateway-readiness-fixtures.py` in addition to the existing v14.4.84 WSL shortcut fixture. Verify fresh install and Resume / repair both order Synapse readiness before Matrix gateway reconciliation, prove `synapse:8008` from inside `hermes-agent`, and advance the reconcile/gateway checkpoint revisions so initial-v14.4.84 installs execute the hotfix on same-version repair.
+
 # Release checklist
 
 ## v14.4.84 WSL lifecycle release checks

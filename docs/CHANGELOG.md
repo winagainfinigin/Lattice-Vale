@@ -1,5 +1,11 @@
 # Changelog
 
+## v14.4.84 Hotfix 1
+
+- Repairs Matrix gateway startup ordering after real Element communication loss following a LatticeVale stop/start cycle. Synapse is now brought ready first, Docker DNS/API reachability is verified from inside `hermes-agent`, and default/named Matrix gateways are recycled only after that probe succeeds.
+- Audit now detects the false-running case where a gateway process exists but `synapse:8008` is unavailable inside the Hermes container.
+- Applies to fresh installs and mutating existing-install repair/update runs without changing `VERSION.txt` from 14.4.84.
+
 ## 14.4.84 - 2026-08-28
 
 - Fixes both Windows lifecycle shortcuts to run `./manage.sh start|stop` directly with WSL `--cd`, removing the nested `bash -lc` positional-argument wrapper that could fail with exit 127 / `./manage.sh: No such file or directory`.

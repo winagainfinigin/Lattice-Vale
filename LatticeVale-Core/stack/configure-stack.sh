@@ -208,6 +208,27 @@ wait_matrix_client_api() {
   return 1
 }
 
+matrix_backend_ready_from_hermes() {
+  timeout --foreground --kill-after=5s 15s docker exec hermes-agent python3 -c '
+import http.client, socket
+socket.getaddrinfo("synapse", 8008)
+c=http.client.HTTPConnection("synapse", 8008, timeout=5)
+c.request("GET", "/_matrix/client/versions")
+r=c.getresponse()
+raise SystemExit(0 if 200 <= int(r.status) < 400 else 1)
+' >/dev/null 2>&1
+}
+
+wait_matrix_backend_from_hermes() {
+  local tries="${1:-60}" i
+  for i in $(seq 1 "$tries"); do
+    matrix_backend_ready_from_hermes && return 0
+    sleep 2
+  done
+  echo 'Matrix is healthy on the WSL host but is not reachable as synapse:8008 from inside hermes-agent. Gateway reconciliation is blocked to avoid a false-running Matrix gateway.' >&2
+  return 1
+}
+
 ensure_matrix_online() {
   # A repair must not assume Synapse remained running from an earlier stage or prior
   # installer attempt. Start only the installer-managed Matrix services, then require
@@ -1334,9 +1355,11 @@ CURRENT_STAGE="startup"
 checkpoint_revision() {
   case "$1" in
     matrix_profiles|matrix_profile_cross_signing) printf '3' ;;
-    kanban_gateway|finalize) printf '2' ;;
+    kanban_gateway) printf '3' ;;
+    finalize) printf '2' ;;
+    reconcile) printf '2' ;;
     integrations) printf '4' ;;
-    prepare_config|infrastructure|matrix_bootstrap|provider_setup|profiles|matrix_cross_signing|reconcile) printf '1' ;;
+    prepare_config|infrastructure|matrix_bootstrap|provider_setup|profiles|matrix_cross_signing) printf '1' ;;
     *) printf '1' ;;
   esac
 }
@@ -4602,6 +4625,13 @@ return 0
 
 stage_reconcile() {
 # Start/reconcile the complete selected stack after all Hermes profile and integration config is written.
+# Matrix-backed Hermes gateways are sensitive to a Docker DNS/Synapse startup race.
+# Bring Synapse to host-level readiness first; after Hermes starts, prove the same
+# synapse:8008 endpoint is reachable from inside hermes-agent before recycling the
+# default gateway. This applies equally to fresh install and repair/update runs.
+if [[ "$(opt_bool matrix)" == true ]]; then
+  ensure_matrix_online 60
+fi
 timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --no-build --remove-orphans
 for _ in $(seq 1 60); do timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 && break; sleep 2; done
 timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null
@@ -4609,7 +4639,11 @@ wait_http Hermes-API http://127.0.0.1:${HERMES_API_HOST_PORT}/health 60
 
 # Recheck selected service health after final reconciliation.
 if [[ "$(opt_bool matrix)" == true ]]; then
-  ensure_matrix_online 60
+  wait_matrix_backend_from_hermes 60
+  if ! timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway restart >/dev/null 2>&1; then
+    echo 'Default Hermes gateway restart failed after Matrix became reachable from the Hermes container.' >&2
+    return 1
+  fi
   matrix_room="$(sed -n 's/^MATRIX_ROOM=//p' .matrix-info | head -n1)"
   matrix_token="$(sed -n 's/^MATRIX_ACCESS_TOKEN=//p' secrets/matrix-bot.env | head -n1)"
   if [[ -n "$matrix_room" && -n "$matrix_token" ]]; then
@@ -4662,7 +4696,13 @@ fi
 
 # Reload the default gateway after all config/env integration changes. Named profiles
 # remain stopped unless their installer options explicitly enable an independent Matrix
-# room; those profiles need a resident gateway to receive Matrix traffic.
+# room; those profiles need a resident gateway to receive Matrix traffic. If Matrix is
+# selected, require Synapse to be reachable from inside hermes-agent before any gateway
+# reload so a live process is not mistaken for a connected Matrix adapter.
+if [[ "$(opt_bool matrix)" == true ]]; then
+  ensure_matrix_online 60
+  wait_matrix_backend_from_hermes 60
+fi
 timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway restart >/dev/null 2>&1 || true
 while IFS= read -r matrix_profile; do
   [[ -n "$matrix_profile" ]] || continue
