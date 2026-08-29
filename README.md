@@ -1,8 +1,5 @@
 # LatticeVale v14.4.85
 
-> **Current install release — v14.4.85**  
-> **Install the full v14.4.85 release first. Do not install v14.4.84 first and then layer source patch files over the live stack.**
->
 > For an existing LatticeVale installation, launch the **full v14.4.85 release** and choose **Resume / repair installation** first. Use **Update / repair installer-managed software** only when you intentionally want to force this bundle's managed package/image/source refresh after the required safety backup. The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
 
 ### v14.4.85 — reconcile/readiness and maintenance reliability
