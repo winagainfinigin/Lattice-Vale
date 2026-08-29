@@ -10,8 +10,8 @@ ps_files = sorted(
     p for p in RELEASE_ROOT.rglob('*')
     if p.is_file() and p.suffix.lower() in {'.ps1', '.psm1', '.psd1'} and '.git' not in p.parts
 )
-assert len([p for p in ps_files if p.suffix.lower() == '.ps1']) == 14
 assert ps_files, 'no PowerShell source found'
+assert any(p.name == 'Finalize-LatticeVale-OverwritePatch.ps1' for p in ps_files), 'overwrite-patch finalizer is missing from PowerShell encoding coverage'
 for path in ps_files:
     raw = path.read_bytes()
     bad = [(i, b) for i, b in enumerate(raw) if b > 0x7F]

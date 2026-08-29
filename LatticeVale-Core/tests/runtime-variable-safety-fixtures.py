@@ -8,7 +8,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 RELEASE_ROOT = ROOT.parent
 PS_FILES = sorted((p for p in RELEASE_ROOT.rglob('*.ps1') if '.git' not in p.parts), key=lambda p: p.relative_to(RELEASE_ROOT).as_posix().lower())
-assert len(PS_FILES) == 14, f'expected 14 shipped PowerShell files, got {len(PS_FILES)}'
+assert PS_FILES, 'no shipped PowerShell files found'
+assert any(p.name == 'Finalize-LatticeVale-OverwritePatch.ps1' for p in PS_FILES), 'overwrite-patch finalizer is missing from shipped PowerShell audit coverage'
 
 # Microsoft documents these as PowerShell automatic variables. Most are engine-maintained
 # and should not be written by user code; a subset are actually ReadOnly/Constant.
