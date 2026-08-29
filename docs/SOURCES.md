@@ -1,5 +1,9 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.4.85 source-policy note
+
+v14.4.85 adds no new third-party dependency or bundled binary. It promotes the accumulated reconcile/readiness and maintenance fixes into a normal versioned release: exact gateway lifecycle checks, bounded post-gateway Hermes/Matrix readiness, and a bundle-owned pre-update backup helper. Existing upstream application/image/model pins and ownership boundaries remain unchanged from the validated v14.4.84 line.
+
 ## v14.4.84 source-policy note
 
 v14.4.84 adds no dependency or download source. It changes only local Windows lifecycle/repair behavior: the managed shutdown shortcut no longer target-terminates WSL, existing-install repair can reset WSL/WslService transport when the exact legacy owned helper is detected, and the bounded WSL launch-recovery helper also resets WslService after clean shutdown when elevated. v14.4.83 resource policy v4, Redis/Valkey sysctl ownership, Ubuntu Pro removal, and all existing upstream application pins remain unchanged.
@@ -54,7 +58,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.84 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.4.85 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 

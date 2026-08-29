@@ -80,11 +80,11 @@ For browser-specific problems, check the managed Hermes profile's `browser` conf
 
 ## Repair-install preparation
 
-v14.4.84 lifecycle shortcuts use direct WSL `--cd` execution for `manage.sh start|stop`; schema-3/broken helpers are repair drift and are rewritten by Resume / repair. Before reproducing or repairing an existing-install problem with **Resume / repair** or **Update / repair**, stop the managed stack with **Shut Down LatticeVale** if available, but do not target-terminate the distro. v14.4.84 repair automatically detects the older installer-owned targeted-termination helper and performs a bounded `wsl --shutdown` + `WslService` transport reset before replacing it.
+v14.4.85 retains the direct WSL `--cd` lifecycle shortcut execution introduced in v14.4.84 for `manage.sh start|stop`; schema-3/broken helpers are repair drift and are rewritten by Resume / repair. Before reproducing or repairing an existing-install problem with **Resume / repair** or **Update / repair**, stop the managed stack with **Shut Down LatticeVale** if available, but do not target-terminate the distro. v14.4.85 repair automatically detects the older installer-owned targeted-termination helper and performs a bounded `wsl --shutdown` + `WslService` transport reset before replacing it.
 
 ## v14.4.84 WSL lifecycle support note
 
-If an installation previously used the pre-v14.4.84 **Shut Down LatticeVale** shortcut and later shows `Wsl/Service/E_UNEXPECTED` while the distro still reports `Running`, use the full v14.4.84 release and choose **Resume / repair installation**. The repair recognizes only the exact installer-owned legacy helper containing targeted termination, performs bounded `wsl --shutdown` + `WslService` reset/re-probe, then replaces the shortcut. Do not unregister/recreate the distro or delete its VHDX as a first response.
+If an installation previously used the pre-v14.4.84 **Shut Down LatticeVale** shortcut and later shows `Wsl/Service/E_UNEXPECTED` while the distro still reports `Running`, use the full v14.4.85 release and choose **Resume / repair installation**. The repair recognizes only the exact installer-owned legacy helper containing targeted termination, performs bounded `wsl --shutdown` + `WslService` reset/re-probe, then replaces the shortcut. Do not unregister/recreate the distro or delete its VHDX as a first response.
 
 ## v14.4.6 adaptive resource fingerprint support note
 
@@ -151,7 +151,7 @@ For native Windows Ollama/relay reports, include sanitized `native-ollama-relay.
 For an existing installer-managed stack, include which existing-stack action you selected:
 
 - **Resume / repair installation** is preservation-first. It repairs incomplete/stale stages and stale adaptive runtime policy. It performs the bounded installer-owned package/image/source refresh when the periodic refresh window is due, the refresh-policy revision changed, or valid legacy refresh state is missing. A bundle-version change alone remains local-first. It converges only through explicit managed-refresh triggers; it is **not** a blanket move to arbitrary newer upstream releases.
-- **Update / repair installer-managed software** is the controlled on-demand force-refresh mode. It requires a successful managed backup first, forces the current LatticeVale bundle's declared installer-owned package/image/source refresh immediately, and then runs the normal repair/verifier stages. Use it whenever you want a version-only bundle change to force managed component refresh before the age/revision gate is due.
+- **Update / repair installer-managed software** is the controlled on-demand force-refresh mode. It requires a successful verified bundle-owned pre-update safety backup first (independent of the installed `manage.sh`), forces the current LatticeVale bundle's declared installer-owned package/image/source refresh immediately, and then runs the normal repair/verifier stages. Use it whenever you want a version-only bundle change to force managed component refresh before the age/revision gate is due.
 - **Change installed components** changes feature selections; it is not the dedicated updater.
 - `./manage.sh update` is an advanced upstream-refresh workflow and is not equivalent to the bundle-pinned Windows installer updater.
 

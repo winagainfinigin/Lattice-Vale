@@ -74,8 +74,10 @@ assert 'Set-InstallerWindowsState' in ps
 for key in ('windowsApps','tailscale','autoStart'):
     assert f'{key} = @{{ status =' in ps
 
-# Explicit Matrix identity rebuild creates a new admin name as well as a new bot, preserving old users.
-assert 'matrix_admin_default="${recovery_owner}_recovery_$recovery_suffix"' in cfg
+# Explicit Matrix bot/room rebuild preserves the existing human admin identity so secondary rooms/allowlists remain valid.
+assert 'matrix_admin_default="$(read_env_file_value_optional .matrix-info MATRIX_ADMIN)"' in cfg
+assert 'matrix_admin_locked=true' in cfg
+assert "Only the installer-owned default bot/device/room will be replaced." in cfg
 
 # No distro creation/conversion is reintroduced.
 low=ps.lower()

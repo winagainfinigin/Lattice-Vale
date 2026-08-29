@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
 RELEASE=ROOT.parent
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}
+assert version in {'14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'}
 entry=(RELEASE/'installer/uninstall.ps1').read_text(encoding='ascii')
 un=(ROOT/'Uninstall-LatticeVale.ps1').read_text(encoding='ascii')
 install=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='ascii')
@@ -32,7 +32,7 @@ assert 'PRESERVE ~/hermes-stack data for reinstall/recovery' in un
 assert "'FULL PURGE: remove LatticeVale runtime/integrations AND permanently delete ~/hermes-stack data'" in un
 assert 'Type PURGE to permanently delete the LatticeVale stack data' in un
 assert "if ($confirm -cne 'PURGE')" in un
-assert ('expected="${HOME%/}/hermes-stack"' in un) if version in {'14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'} else ('case "$stack" in /home/*/hermes-stack)' in un)
+assert ('expected="${HOME%/}/hermes-stack"' in un) if version in {'14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'} else ('case "$stack" in /home/*/hermes-stack)' in un)
 assert 'Refusing to purge symlink stack' in un
 assert 'Refusing to purge mountpoint stack' in un
 assert 'rm -rf --one-file-system -- "$stack"' in un
@@ -69,7 +69,7 @@ assert 'external Windows-backed Obsidian vaults' in un
 
 # The uninstaller remains additive. v14.3.41 intentionally removes the installer-side
 # mirrored-network mutation while preserving every install/uninstall entry point.
-if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}:
+if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'}:
     assert 'Resolve-LatticeValeNativeOllamaMirroredFallback' not in install
     assert 'Set-WslGlobalNetworkingModeValue' not in install
 else:

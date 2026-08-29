@@ -4,7 +4,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert VERSION in {'14.4.82','14.4.83','14.4.84'}, VERSION
+assert VERSION in {'14.4.82','14.4.83','14.4.84','14.4.85'}, VERSION
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 
 start = ps.index('function Invoke-LatticeValeWslHostLaunchRecoveryHelper')

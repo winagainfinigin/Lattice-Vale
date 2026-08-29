@@ -1,11 +1,17 @@
 # Changelog
 
-## v14.4.84 Hotfix 2
+## 14.4.85 - 2026-08-28
 
-- Fixes both reconcile validation races found during Hotfix 2 pre-release testing: selected managed services such as Ollama can still be settling after Compose reports them running, and Hermes API/Dashboard readiness can be invalidated by the final default-gateway restart.
+- Fixed Option 6 pre-update backups for container-owned persistent files (for example Ollama `id_ed25519`) by running only the bundle-owned backup transaction as WSL root and returning backup ownership to the selected Linux user; successful Compose lifecycle noise is no longer dumped into backup errors.
+- Fixes both reconcile validation races found during pre-release validation: selected managed services such as Ollama can still be settling after Compose reports them running, and Hermes API/Dashboard readiness can be invalidated by the final default-gateway restart.
 - Adds bounded managed-Ollama startup health handling, internal Matrix/Synapse reachability checks, component-specific reconcile diagnostics, and API/Dashboard readiness verification after the final gateway mutation.
 - Applies the same final readiness ordering to `reconcile`, `kanban_gateway`, and normal Start/Restart/Update lifecycle commands; uses exact s6-scoped default-gateway fallback when needed.
-- Advances only internal `reconcile` and `kanban_gateway` checkpoints to revision 4 so Hotfix 1 installations replay the final Hotfix 2 lifecycle during Resume / repair. Public version remains 14.4.84.
+- Keeps internal `reconcile` and `kanban_gateway` checkpoints at revision 4 so existing v14.4.84 installations replay the corrected v14.4.85 lifecycle during Resume / repair.
+- Makes existing-stack **Update / repair** self-repairing: the mandatory rollback backup now uses a bundle-owned helper instead of the currently installed `manage.sh`, validates running PostgreSQL dumps, snapshots persistent/configuration data while writers are stopped, restores the previously-running containers, and reports the exact failed backup step/exit/stdout/stderr before any software refresh begins.
+- Makes **Verify installation only** useful after selection by rerunning and printing a fresh Linux/Docker/Hermes audit plus the Windows-side live expected-state audit and an explicit overall/no-changes summary.
+- Audits and hardens existing-stack Options 2, 4, and 5: disabling shared Matrix now removes default/profile runtime Matrix credentials and stops profile gateways without deleting protected identities/rooms; leaving installer-owned default Ollama forces the provider/model wizard; stale dependent Tailscale exposure is normalized only when the selected component change makes it impossible.
+- Clarifies provider/profile reconfiguration under the saved Local AI policy and rejects Advanced Matrix identity rebuild while shared Matrix is disabled.
+- Makes Advanced Matrix identity rebuild transactional/resumable: preserves/reuses the existing human admin and all secondary-profile identities/rooms, backs up the existing default-bot credentials and crypto store, persists a unique replacement default bot/device bootstrap, then retires only the old installer-owned default runtime identity/store; normal repair remains identity-preserving.
 
 ## v14.4.84 Hotfix 1
 

@@ -1,8 +1,14 @@
+
+### v14.4.85 existing-stack menu audit
+
+Options 2, 4, and 5 were audited after Options 1, 3, and 6 were validated on a real existing installation. Change-components now deactivates Matrix runtime credentials/gateways without erasing protected profile Matrix intent, forces provider selection when leaving installer-owned Ollama, and disables only dependent LatticeVale Tailscale exposure made impossible by a selected component change. Provider/profile reconfiguration explicitly retains the saved Local AI policy. Advanced Matrix identity rebuild is rejected while Matrix is disabled, preserves/reuses the existing human admin and all secondary-profile identities/rooms, and uses a resumable backup/bootstrap/retire transaction with a fresh replacement default-bot device/crypto store.
+
 # Current v14.x patch notes
 
-## v14.4.84 Hotfix 2 — startup-aware reconcile and post-gateway readiness
+## v14.4.85 — startup-aware reconcile, post-gateway readiness, and maintenance reliability
 
-- Fixes the repair/fresh-install reconcile validation races found while validating Hotfix 2 before release.
+- Fixes Option 6 safety backup on real container-owned data: the bundle-owned helper now runs as WSL root only for the backup transaction, so restricted files such as `data/ollama/id_ed25519` can be archived, then returns the completed backup ownership to the selected Linux user. Normal Compose stop/start progress is suppressed unless a lifecycle command actually fails.
+- Promotes the accumulated pre-release reliability candidate into the versioned v14.4.85 release and fixes the repair/fresh-install reconcile validation races found during validation.
 - Waits boundedly for managed Ollama health instead of treating Docker's normal `starting` health state as terminal failure.
 - Rechecks Matrix from both the WSL host and inside `hermes-agent`, including `synapse:8008` Docker DNS/API reachability.
 - Reports the exact failed reconcile component instead of only a generic live-verification failure.
@@ -10,7 +16,7 @@
 - Applies the post-gateway API/Dashboard readiness barrier in both `reconcile` and the later `kanban_gateway` stage so the second gateway reload cannot recreate the race.
 - Uses exact s6-scoped default-gateway fallback instead of silently ignoring a failed gateway restart.
 - Applies the same post-gateway readiness barrier to normal Start/Restart/Update commands.
-- Keeps public `VERSION.txt` at `14.4.84`; internal `reconcile` and `kanban_gateway` checkpoint revisions are both 4 so existing Hotfix 1 installs replay the complete corrected lifecycle during Resume / repair. Fresh installs record revision 4 immediately.
+- Sets public `VERSION.txt` to `14.4.85`; internal `reconcile` and `kanban_gateway` checkpoint revisions remain 4 so existing v14.4.84 installs replay the complete corrected lifecycle during Resume / repair. Fresh installs record revision 4 immediately.
 
 ## v14.4.84 Hotfix 1 — Matrix gateway startup/readiness repair
 

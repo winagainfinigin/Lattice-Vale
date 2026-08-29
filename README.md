@@ -1,13 +1,15 @@
-# LatticeVale v14.4.84
+# LatticeVale v14.4.85
 
-> **Current install release — v14.4.84**  
-> **Install the full v14.4.84 release first. Do not install v14.4.83 first and then apply v14.4.84 as an update layer.**
+> **Current install release — v14.4.85**  
+> **Install the full v14.4.85 release first. Do not install v14.4.84 first and then layer source patch files over the live stack.**
 >
-> For an existing LatticeVale installation, launch the **full v14.4.84 release** and choose **Resume / repair installation** first so the WSL lifecycle/shortcut migration runs before any optional managed-software update. The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
+> For an existing LatticeVale installation, launch the **full v14.4.85 release** and choose **Resume / repair installation** first. Use **Update / repair installer-managed software** only when you intentionally want to force this bundle's managed package/image/source refresh after the required safety backup. The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
 
-### v14.4.84 Hotfix 2 — startup-aware reconcile and post-gateway readiness
+### v14.4.85 — reconcile/readiness and maintenance reliability
 
-If you installed v14.4.84 Hotfix 1, use the **Hotfix 2 full release** and choose **Resume / repair installation**. The public version remains 14.4.84. Hotfix 2 fixes the repair/fresh-install reconcile races found during validation: selected managed services such as Docker Ollama can still be in their normal healthcheck startup period after Compose reports them running, and Hermes API/Dashboard readiness can be invalidated by the final default-gateway restart because that gateway owns those HTTP surfaces. Hotfix 2 therefore waits boundedly for managed Ollama, Matrix/Synapse reachability, Hermes API, and Dashboard readiness; performs the final default/named gateway lifecycle work; then places the API/Dashboard readiness barrier **after** the final gateway mutation in both `reconcile` and `kanban_gateway`. It uses exact s6-scoped fallback instead of silently ignoring a failed gateway restart, applies the same post-gateway barrier to normal Start/Restart/Update commands, and reports the exact component that failed. Internal `reconcile` and `kanban_gateway` checkpoints are revision 4 so existing Hotfix 1 installs replay the complete corrected lifecycle during Resume / repair. Fresh installs use this same final Hotfix 2 ordering directly.
+v14.4.85 promotes the accumulated pre-release reliability candidate into a normal versioned release. It fixes startup-aware reconcile and post-gateway readiness ordering; verifies Synapse/Docker DNS from inside `hermes-agent`; waits boundedly for managed Ollama, Hermes API, Dashboard, and Matrix readiness after the final gateway lifecycle mutation; and reports the exact component that fails. Internal `reconcile` and `kanban_gateway` checkpoints remain revision 4 so existing v14.4.84 installs replay the corrected lifecycle during Resume / repair. It also makes Option 6 self-repairing with a bundle-owned pre-update safety-backup helper that does not depend on the installed `manage.sh`, preserves exact backup diagnostics, and makes Option 3 print a fresh Linux/Docker/Hermes plus Windows-side read-only verification report. The v14.4.84 WSL lifecycle/shortcut transport protections remain inherited unchanged.
+
+The existing-stack menu was additionally audited end-to-end for Options 2, 4, and 5. Change-components now preserves secondary Matrix identity intent while removing disabled Matrix runtime credentials/stopping profile gateways, forces a real provider selection when leaving installer-owned Ollama, and normalizes only impossible dependent Tailscale exposures. Provider/profile reconfiguration now states its saved local-AI boundary explicitly. Advanced Matrix identity rebuild is gated on shared Matrix, preserves/reuses the existing human admin and secondary-profile identities/rooms, and uses a resumable transaction that backs up default-bot credentials/crypto state before persisting a unique replacement default device/bootstrap and retiring the old installer-owned default runtime identity.
 
 ### v14.4.84 Hotfix 1 — Matrix gateway startup readiness
 
@@ -293,7 +295,7 @@ The lower repair threshold is used only after LatticeVale has confirmed an exist
 
 ## Forced managed update
 
-**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer.
+**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer. Before refresh it creates a verified **bundle-owned** safety backup, so a stale or broken installed `manage.sh` cannot prevent the updater from repairing that same managed layer. The backup includes persistent configuration/data and running PostgreSQL dumps, briefly stops only the currently-running LatticeVale containers for a consistent filesystem snapshot, then restores them before refresh.
 
 Depending on the enabled components, this can include:
 
@@ -427,7 +429,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.4.81** | Hotfix | Bounded same-run recovery for WSL `E_UNEXPECTED` launch failures |
 | **v14.4.82** | Hotfix | Correct successful WSL-recovery exit-code handling |
 | **v14.4.83** | Patch / Hotfix 2 | Ollama policy v4, Redis/Valkey overcommit prerequisite, Ubuntu Pro integration removal, canonical public launcher correction |
-| **v14.4.84** | **Current install release** | Removes targeted WSL termination from lifecycle shortcuts and repairs legacy shortcut-induced WSL session transport during Resume / repair |
+| **v14.4.84** | Release / Hotfix 1 | WSL lifecycle transport repair plus Matrix gateway startup-readiness hotfix |
+| **v14.4.85** | **Current install release** | Startup-aware reconcile/post-gateway readiness, self-repairing pre-update backup, and explicit read-only verification output |
 
 ### v14.4.1
 
@@ -482,6 +485,10 @@ Advances adaptive runtime policy to v4 with protected managed-Ollama headroom, p
 
 Removes targeted `wsl --terminate` from the Windows shutdown shortcut. Existing installations should use the full v14.4.84 release and choose **Resume / repair installation** so LatticeVale resets WSL/WslService transport when it detects its exact legacy unsafe shortcut helper, then rewrites the shortcut to stack-stop-only behavior.
 
+### v14.4.85
+
+Promotes the accumulated startup/reconcile and maintenance reliability fixes into a normal versioned release. Existing v14.4.84 installations should use the full v14.4.85 release and choose **Resume / repair installation** so internal lifecycle checkpoints replay the corrected gateway/readiness ordering without recreating persistent identities or data.
+
 ```text
 v14.4.1   release-layout patch
     ↓
@@ -503,7 +510,9 @@ v14.4.82  WSL recovery return-channel hotfix
     ↓
 v14.4.83  resource/runtime repair patch + Hotfix 2 launcher correction
     ↓
-v14.4.84  WSL lifecycle transport repair / CURRENT INSTALL RELEASE
+v14.4.84  WSL lifecycle transport repair + Matrix readiness Hotfix 1
+    ↓
+v14.4.85  reconcile/maintenance reliability / CURRENT INSTALL RELEASE
 ```
 
 ---

@@ -7,7 +7,7 @@ manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version == '14.4.84', 'Hotfix 1 intentionally keeps the public 14.4.84 version number'
+assert version in {'14.4.84','14.4.85'}, 'Hotfix 1 behavior must remain inherited by v14.4.85'
 
 # The observed regression was: Synapse unavailable/Docker DNS not ready, gateway process
 # stays alive, audit reports RUNNING, Element loses communication. Probe from the actual
@@ -57,7 +57,7 @@ assert 'ensure_matrix_online 60' in kanban
 assert 'wait_matrix_backend_from_hermes 60' in kanban
 checkpoint=cfg[cfg.index('checkpoint_revision()'):cfg.index('matrix_profile_activation_pending()')]
 assert "kanban_gateway) printf '4'" in checkpoint
-assert "reconcile) printf '4'" in checkpoint  # Hotfix 2 advances both lifecycle stages; Hotfix 1 ordering remains covered.
+assert "reconcile) printf '4'" in checkpoint  # v14.4.85 retains revision 4 for both lifecycle stages; Hotfix 1 ordering remains covered.
 
 # Audit must stop claiming RUNNING when only the gateway process is alive.
 assert 'matrix_backend_reachable_from_hermes' in audit

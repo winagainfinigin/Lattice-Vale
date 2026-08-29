@@ -1826,7 +1826,7 @@ function Invoke-LatticeValeLegacyShortcutWslTransportRepair(
         if (-not $stop.Success) {
             $detail = Get-SafeDiagnosticExcerpt $stop.Text 420
             if (-not $detail) { $detail = 'manage.sh stop failed without diagnostic output' }
-            throw "Could not stop the managed stack cleanly before the v14.4.84 WSL transport repair: $detail"
+            throw "Could not stop the managed stack cleanly before the LatticeVale WSL transport repair: $detail"
         }
     }
 
@@ -1835,7 +1835,7 @@ function Invoke-LatticeValeLegacyShortcutWslTransportRepair(
         $detail = Get-SafeDiagnosticExcerpt $shutdown.Text 320
         if ($shutdown.TimedOut) { $detail = 'wsl --shutdown exceeded the 45-second safety timeout' }
         if (-not $detail) { $detail = "wsl.exe exit code $($shutdown.ExitCode)" }
-        throw "The v14.4.84 WSL transport repair could not complete its clean shutdown: $detail"
+        throw "The LatticeVale WSL transport repair could not complete its clean shutdown: $detail"
     }
 
     $wslService = Get-Service -Name 'WslService' -ErrorAction SilentlyContinue
@@ -1849,7 +1849,7 @@ function Invoke-LatticeValeLegacyShortcutWslTransportRepair(
     Start-Sleep -Seconds 5
     $ready = Wait-LatticeValeWslResponsive $Name 120
     if (-not $ready.Success) {
-        throw "The v14.4.84 WSL transport repair reset WSL/WslService, but '$Name' did not become responsive within 120 seconds. Last response: $($ready.Detail)`nRestart Windows once, then rerun v14.4.84 and choose Resume / repair. Do not unregister or recreate the distro."
+        throw "The LatticeVale WSL transport repair reset WSL/WslService, but '$Name' did not become responsive within 120 seconds. Last response: $($ready.Detail)`nRestart Windows once, then rerun the current LatticeVale release and choose Resume / repair. Do not unregister or recreate the distro."
     }
 
     Write-Host "WSL host/session transport recovered for '$Name'. The repair will now replace the legacy targeted-termination shortcut helper." -ForegroundColor Green
@@ -2306,13 +2306,13 @@ function Complete-WorkerMatrixOptions([object[]]$Workers, [bool]$GlobalMatrixEna
         $hasMatrixSetting = ($null -ne $worker.PSObject.Properties['matrix'])
         if ($hasMatrixSetting) { $matrixExisting = $worker.matrix }
 
-        $matrixEnabled = $false
-        if ($GlobalMatrixEnabled) {
-            if ($hasMatrixSetting) {
-                $matrixEnabled = [bool](Get-OptionValue $matrixExisting 'enabled' $false)
-            } elseif ($PromptOnMissing) {
-                $matrixEnabled = Read-Choice "Give profile '$name' its own Matrix/Element bot and room?" "Creates a separate Matrix identity and profile-local gateway for '$name'. Messages in that room use the model configured for profile '$name'." "Keeps '$name' as a local/Kanban-only profile with no independent Matrix gateway." $EnableMissingByDefault
-            }
+        # Preserve an explicit per-profile Matrix intent even while the shared Matrix
+        # service is temporarily disabled. Global Matrix gates provisioning/runtime;
+        # it must not erase the saved intent needed to restore the same profile rooms
+        # if Matrix is enabled again later through Change installed components.
+        $matrixEnabled = if ($hasMatrixSetting) { [bool](Get-OptionValue $matrixExisting 'enabled' $false) } else { $false }
+        if ($GlobalMatrixEnabled -and -not $hasMatrixSetting -and $PromptOnMissing) {
+            $matrixEnabled = Read-Choice "Give profile '$name' its own Matrix/Element bot and room?" "Creates a separate Matrix identity and profile-local gateway for '$name'. Messages in that room use the model configured for profile '$name'." "Keeps '$name' as a local/Kanban-only profile with no independent Matrix gateway." $EnableMissingByDefault
         }
 
         # The Matrix localpart deliberately follows the installer-selected profile name.
@@ -3366,7 +3366,7 @@ function Get-UbuntuDistroInfo([string]$Name) {
         $result.LaunchStatus = 'FAILED'
         $launchDetail = if ($osRelease.Detail) { $osRelease.Detail } else { 'distro could not be launched/read' }
         if ($launchDetail -match '(?i)(Wsl/Service(?:/CreateInstance(?:/CreateVm)?)?/E_UNEXPECTED|Wsl/Service/E_UNEXPECTED|Catastrophic failure)') {
-            Add-DistroBlocker $result 'WSL_HOST_E_UNEXPECTED' "WSL itself failed while launching the registered distro: $launchDetail. If no eligible distro remains, v14.4.84 can offer a bounded in-run recovery: clean WSL shutdown/restart first, then an explicit backed-up NAT fallback only when persistent E_UNEXPECTED coincides with user-configured mirrored networking. Distro registration and the VHDX are preserved."
+            Add-DistroBlocker $result 'WSL_HOST_E_UNEXPECTED' "WSL itself failed while launching the registered distro: $launchDetail. If no eligible distro remains, the current LatticeVale release can offer a bounded in-run recovery: clean WSL shutdown/restart first, then an explicit backed-up NAT fallback only when persistent E_UNEXPECTED coincides with user-configured mirrored networking. Distro registration and the VHDX are preserved."
         } else {
             Add-DistroBlocker $result 'UNLAUNCHABLE' $launchDetail
         }
@@ -5224,6 +5224,42 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
     }
 }
 
+function Show-LatticeValeReadOnlyVerification([string]$Name, [string]$User, [string]$LinuxHome, [object]$Options) {
+    Write-Host "`n============================================================" -ForegroundColor Cyan
+    Write-Host 'LatticeVale read-only verification results' -ForegroundColor Cyan
+    Write-Host '============================================================' -ForegroundColor Cyan
+    Write-Info 'Running a fresh bundled Linux stack audit now. This mode does not repair, restart, update, or rewrite the installation.'
+
+    $freshAudit = Invoke-BundledStackAudit $Name $User $LinuxHome
+    if (-not [string]::IsNullOrWhiteSpace([string]$freshAudit)) {
+        Write-Host "`n== Linux / Docker / Hermes state ==" -ForegroundColor Cyan
+        Write-Host ([string]$freshAudit).TrimEnd()
+    } else {
+        Write-Warning 'Linux stack audit could not be produced. This is a verification failure/limitation, not a successful empty audit.'
+    }
+
+    if ($null -ne $Options) {
+        Show-WindowsRecoveryAudit $Name $User $Options
+    } else {
+        Write-Warning 'Saved install-options are unavailable, so Windows-side expected-state verification cannot be compared with installer intent.'
+    }
+
+    Write-Host "`n== Verification result ==" -ForegroundColor Cyan
+    if (-not [string]::IsNullOrWhiteSpace([string]$freshAudit)) {
+        $overall = [regex]::Match([string]$freshAudit, '(?im)^Overall:\s*([^\r\n]+)')
+        if ($overall.Success) {
+            Write-Host ("Linux overall state: {0}" -f $overall.Groups[1].Value.Trim())
+        } else {
+            Write-Host 'Linux overall state: audit completed; no Overall line was reported.'
+        }
+    } else {
+        Write-Host 'Linux overall state: UNKNOWN (audit unavailable)' -ForegroundColor Yellow
+    }
+    Write-Host 'No changes were made.' -ForegroundColor Green
+    Write-Host '============================================================' -ForegroundColor Cyan
+    return $freshAudit
+}
+
 function Ensure-WindowsTailscaleConnected([string]$TailscaleExe) {
     $status = Get-WindowsTailscaleStatus $TailscaleExe
     if ($status.BackendState -eq 'Running') { return $status }
@@ -5402,12 +5438,17 @@ switch ($stackState) {
             }
             3 {
                 $installMode = 'verify'
-                if (-not $auditText) { $auditText = Invoke-BundledStackAudit $DistroName $linuxUser $linuxHome }
-                if ($auditText) { Write-Host "`nRead-only audit complete. No changes were made." -ForegroundColor Green } else { Write-Warning 'Read-only audit was unavailable.' }
-                # Windows state was live-audited immediately above together with the Linux report.
+                $auditText = Show-LatticeValeReadOnlyVerification $DistroName $linuxUser $linuxHome $existingOptions
                 exit 0
             }
-            4 { $installMode = 'reconfigure'; $forceProviderSetup = $true; $forceProfileSetup = $true }
+            4 {
+                $installMode = 'reconfigure'
+                $forceProviderSetup = $true
+                $forceProfileSetup = $true
+                if ([bool](Get-OptionValue $existingOptions 'hermesLocalAI' $false)) {
+                    Write-Info 'The saved default-profile policy uses LatticeVale local Ollama. Reconfigure will reapply that selected local-AI policy and rerun secondary profile model setup; use Change installed components -> Local AI / Honcho / Ollama if you want to switch the default profile away from local Ollama.'
+                }
+            }
             5 {
                 $installMode = 'advanced'
                 $recoveryChoice = Read-MenuExplicit 'Advanced recovery action:' @(
@@ -5418,11 +5459,23 @@ switch ($stackState) {
                 )
                 switch ($recoveryChoice) {
                     1 { $resetCheckpoints = $true }
-                    2 { $rebuildMatrixIdentity = $true; $resetCheckpoints = $true }
-                    3 { $forceProviderSetup = $true; $forceProfileSetup = $true; $resetCheckpoints = $true }
+                    2 {
+                        if (-not [bool](Get-OptionValue $existingOptions 'matrix' $false)) {
+                            throw 'Advanced Matrix identity rebuild requires the shared Matrix service to be enabled in the saved installation. Use Change installed components to enable Matrix first, complete that run, then return to Advanced recovery if identity replacement is still needed.'
+                        }
+                        $rebuildMatrixIdentity = $true
+                        $resetCheckpoints = $true
+                    }
+                    3 {
+                        $forceProviderSetup = $true
+                        $forceProfileSetup = $true
+                        $resetCheckpoints = $true
+                        if ([bool](Get-OptionValue $existingOptions 'hermesLocalAI' $false)) {
+                            Write-Info 'The saved default-profile policy uses LatticeVale local Ollama. This recovery action will reapply that local-AI default while rerunning secondary profile model setup. Use Change installed components -> Local AI / Honcho / Ollama to switch the default profile away from local Ollama.'
+                        }
+                    }
                     4 {
-                        if (-not $auditText) { $auditText = Invoke-BundledStackAudit $DistroName $linuxUser $linuxHome }
-                        Write-Host "`nRead-only audit complete. No changes were made." -ForegroundColor Green
+                        $auditText = Show-LatticeValeReadOnlyVerification $DistroName $linuxUser $linuxHome $existingOptions
                         exit 0
                     }
                 }
@@ -5464,7 +5517,7 @@ if ($repairMaintenance -and (Test-LatticeValeLegacyUnsafeShutdownShortcut $Distr
     [void](Invoke-LatticeValeLegacyShortcutWslTransportRepair $DistroName $linuxUser $stackLinuxPath)
 }
 if ($repairMaintenance -and (Test-LatticeValeBrokenShortcutLauncher $DistroName $linuxUser $stackLinuxPath)) {
-    Write-Warning 'The installed LatticeVale desktop shortcut helper does not satisfy the v14.4.84 schema-4 direct WSL --cd launcher contract. Resume / repair will replace the helper/configuration during Windows shortcut reconciliation; no distro recreation or VHDX change is required.'
+    Write-Warning 'The installed LatticeVale desktop shortcut helper does not satisfy the current schema-4 direct WSL --cd launcher contract. Resume / repair will replace the helper/configuration during Windows shortcut reconciliation; no distro recreation or VHDX change is required.'
 }
 
 if ($repairMaintenance) {
@@ -5795,7 +5848,15 @@ if ($reusePriorChoices) {
         if ($changeScopes -contains 'local-ai') {
             Write-Host "`n-- Local AI / Honcho / Ollama --" -ForegroundColor White
             $honcho = Read-Choice 'Install fully self-hosted Honcho memory?' 'Changes the Honcho component selection.' 'Honcho is disabled; existing persistent Honcho data is not deliberately deleted.' $honcho
+            $wasHermesLocalAI = $hermesLocalAI
             $hermesLocalAI = Read-Choice 'Use Ollama as the default Hermes AI provider?' 'Changes the installer-owned default-profile local-AI selection.' 'The existing non-LatticeVale provider/model configuration is preserved unless provider setup is explicitly requested elsewhere.' $hermesLocalAI
+            if ($wasHermesLocalAI -and -not $hermesLocalAI) {
+                # The previous default model block was installer-owned Ollama configuration.
+                # A merely "valid" model config is not proof that the user has selected a
+                # replacement provider, so force the upstream model wizard in this run.
+                $forceProviderSetup = $true
+                Write-Info 'Local Ollama is being removed as the default Hermes provider. LatticeVale will open the default-profile provider/model wizard later in this run so the old installer-owned Ollama model block is not silently retained.'
+            }
             if ($honcho -or $hermesLocalAI) {
                 $windowsOllamaState = Get-WindowsNativeOllamaState
                 Write-Info $windowsOllamaState.Detail
@@ -5882,7 +5943,24 @@ if ($reusePriorChoices) {
             }
         }
 
-        Write-Info 'Scoped change questionnaire complete. Existing profiles, provider credentials, secondary Matrix identities/rooms, service data, and unselected settings were not replaced by questionnaire defaults.'
+        # Normalize only dependencies made impossible by an explicitly selected
+        # change. This is not a second questionnaire: it prevents stale Windows
+        # exposure policy from pointing at a service the user just disabled.
+        if (-not $dashboard -and $tailscaleDashboard) {
+            $tailscaleDashboard = $false
+            Write-Info 'Dashboard was disabled, so its LatticeVale-owned Tailscale exposure will also be disabled. Other Tailscale configuration is preserved.'
+        }
+        if (-not $matrix -and $tailscaleMatrix) {
+            $tailscaleMatrix = $false
+            Write-Info 'Matrix was disabled, so its LatticeVale-owned Tailscale exposure will also be disabled. Matrix persistent data/identities remain preserved.'
+        }
+        if ($tailscale -and -not ($tailscaleDashboard -or $tailscaleMatrix)) {
+            $tailscale = $false
+            $installWindowsTailscale = $false
+            Write-Info 'No LatticeVale service remains selected for Tailscale exposure, so LatticeVale-owned Tailscale integration will be disabled; unrelated Windows Tailscale configuration is not removed.'
+        }
+
+        Write-Info 'Scoped change questionnaire complete. Existing profiles, provider credentials, secondary Matrix identities/rooms, service data, and unselected settings were not replaced by questionnaire defaults except where a selected change made a dependent integration impossible.'
     }
 
 } else {
@@ -6337,7 +6415,7 @@ $sharedNativeTailscale = (($tailscaleDashboard -or $tailscaleMatrix) -and ($honc
 # only when it was configured outside this installer. LatticeVale does not write or switch
 # networkingMode in either clean-install or repair/update flows.
 if ($activeWslNetworkingMode -eq 'mirrored') {
-    Write-Warning 'Existing global WSL mirrored networking is active. LatticeVale will use this already-working user/host configuration when capability checks pass; ordinary configuration/runtime paths will not create, reapply, or require mirrored mode. If a later install/repair preflight fails with E_UNEXPECTED, v14.4.84 can offer bounded shutdown/retry recovery and, only after persistent failure plus explicit approval, a backed-up NAT compatibility fallback.'
+    Write-Warning 'Existing global WSL mirrored networking is active. LatticeVale will use this already-working user/host configuration when capability checks pass; ordinary configuration/runtime paths will not create, reapply, or require mirrored mode. If a later install/repair preflight fails with E_UNEXPECTED, the current LatticeVale release can offer bounded shutdown/retry recovery and, only after persistent failure plus explicit approval, a backed-up NAT compatibility fallback.'
 }
 
 # Native Windows Ollama and Windows-host Tailscale share the observed WSL topology,
@@ -6498,14 +6576,40 @@ if (-not $homeWritableProbe.Success) {
 }
 
 if ($forceManagedUpdate) {
-    Write-Step 'Creating pre-update managed-stack backup'
-    Write-Info 'Update / repair requires a successful managed-stack backup before component versions are refreshed. Matrix and Honcho PostgreSQL databases are dumped when running; persistent configuration/data is included according to the installed manage.sh backup policy.'
-    $preUpdateBackup = Invoke-WslDirectCapture $DistroName $linuxUser 'bash' @('-lc', 'cd "$1" && test -x ./manage.sh && ./manage.sh backup', 'bash', $stackLinuxPath) 1800
-    if (-not $preUpdateBackup.Success) {
-        $backupDetail = if ($preUpdateBackup.Detail) { $preUpdateBackup.Detail } elseif ($preUpdateBackup.Text) { $preUpdateBackup.Text.Trim() } else { 'unknown backup failure' }
-        throw "Update / repair stopped before software refresh because the pre-update managed-stack backup failed: $backupDetail. Run Resume / repair first if manage.sh or the managed database state needs repair, then retry Update / repair."
+    Write-Step 'Creating pre-update managed-stack safety backup'
+    Write-Info 'Update / repair requires a verified rollback backup before installer-managed software is refreshed. This bundle supplies its own backup helper so a broken/outdated installed manage.sh cannot block the repair that would replace it.'
+    Write-Info 'The helper runs as WSL root only for this backup operation so container-owned persistent files can be read safely, dumps running Synapse/Honcho PostgreSQL databases, briefly stops only currently-running LatticeVale containers for a consistent filesystem snapshot, archives persistent configuration/data (including local Ollama data when present), restores the previously-running containers, and returns backup ownership to the selected Linux user.'
+
+    $backupSource = Join-Path $PSScriptRoot 'linux\pre-update-safety-backup.sh'
+    if (-not (Test-Path -LiteralPath $backupSource -PathType Leaf)) {
+        throw "Update / repair cannot start because the bundled pre-update safety-backup helper is missing: $backupSource"
     }
-    if ($preUpdateBackup.Text) { Write-Host $preUpdateBackup.Text.Trim() }
+    $backupStage = "/tmp/latticevale-preupdate-$([guid]::NewGuid().ToString('N'))"
+    $backupStageCreate = Invoke-WslDirectCapture $DistroName 'root' 'install' @('-d','-m','0755',$backupStage) 30
+    if (-not $backupStageCreate.Success) {
+        $detail = Get-SafeDiagnosticExcerpt $backupStageCreate.Text 700
+        if (-not $detail) { $detail = "wsl.exe/Linux install exited with code $($backupStageCreate.ExitCode)" }
+        throw "Update / repair could not create its root-owned WSL backup staging directory '$backupStage': $detail"
+    }
+    try {
+        $backupHelperLinux = "$backupStage/pre-update-safety-backup.sh"
+        Copy-LocalFileToWslRoot $DistroName $backupSource $backupHelperLinux '0755'
+        $preUpdateBackup = Invoke-WslDirectCapture $DistroName 'root' $backupHelperLinux @($stackLinuxPath,[string]$selectedUid,[string]$selectedGid) 3600
+        if (-not $preUpdateBackup.Success) {
+            $parts = @()
+            if ($preUpdateBackup.TimedOut) { $parts += 'backup exceeded the 3600-second safety timeout' }
+            if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdErr)) { $parts += (Get-SafeDiagnosticExcerpt $preUpdateBackup.StdErr 1000) }
+            if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdOut)) { $parts += (Get-SafeDiagnosticExcerpt $preUpdateBackup.StdOut 1000) }
+            if ($preUpdateBackup.ExitCode -ne $null) { $parts += "exit code $($preUpdateBackup.ExitCode)" }
+            $backupDetail = (($parts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique) -join ' | ')
+            if (-not $backupDetail) { $backupDetail = 'backup helper failed without stdout/stderr diagnostics' }
+            throw "Update / repair stopped before software refresh because the bundle-owned pre-update safety backup failed. Detail: $backupDetail`nNo installer-managed software refresh was started. The existing stack/data was left in place; correct the reported backup problem and retry option 6."
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdOut)) { Write-Host $preUpdateBackup.StdOut.Trim() }
+        if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdErr)) { Write-Warning $preUpdateBackup.StdErr.Trim() }
+    } finally {
+        [void](Invoke-WslDirectCapture $DistroName 'root' 'rm' @('-rf',$backupStage) 30)
+    }
 }
 
 if ($repairMaintenance) {

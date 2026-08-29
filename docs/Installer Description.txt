@@ -1,6 +1,8 @@
-LATTICEVALE v14.4.84 — INSTALLER DESCRIPTION
+LATTICEVALE v14.4.85 — INSTALLER DESCRIPTION
 
-CURRENT RELEASE: v14.4.84 is the direct first-install release. It removes targeted `wsl --terminate` from the Windows shutdown shortcut and adds a Resume / repair migration that resets WSL/WslService transport when the exact legacy installer-owned helper is found, then rewrites the shortcut. It retains the v14.4.83 resource/runtime and public-launcher fixes.
+CURRENT RELEASE: v14.4.85 is the direct first-install release. It retains the v14.4.84 WSL shortcut/transport repair and adds startup-aware reconcile/post-gateway readiness plus safer existing-install maintenance: Option 6 uses a bundle-owned verified pre-update backup, and Option 3 prints a fresh read-only Linux/Windows verification report.
+
+V14.4.85 STARTUP / REPAIR RELIABILITY: Reconcile waits for selected managed-service, Matrix/Synapse, Hermes API, and Dashboard readiness after the final gateway lifecycle mutation. Default gateway fallback is exact and checked rather than silently ignored. Existing v14.4.84 installs replay the required internal lifecycle checkpoints during Resume / repair without recreating persistent identities or data.
 
 V14.4.84 WSL LIFECYCLE REPAIR: Shut Down now stops the managed stack but leaves the distro running. Existing-install repair detects the legacy targeted-termination helper, performs bounded global WSL shutdown + WslService reset/re-probe, and replaces the helper without changing distro registration/VHDX or automatically restarting HNS/vmcompute.
 
@@ -256,7 +258,7 @@ Resume / repair treats stale adaptive runtime/RAM policy as an explicit repair o
 
 The inherited v14.4.4 root-assisted ownership reconciliation remains safe against transient live-file disappearance: the installer snapshots the managed tree without following symlinks or crossing nested mounts, ignores a failed metadata operation only when that exact path has vanished, and preserves fail-closed behavior for genuine still-existing filesystem failures.
 
-`Update / repair installer-managed software` (Option 6) forces the current LatticeVale bundle's tested/declared managed software refresh after a required managed backup. This is the preferred controlled updater when the goal is specifically to pull/rebuild/refresh the installer-managed software layer now.
+`Update / repair installer-managed software` (Option 6) forces the current LatticeVale bundle's tested/declared managed software refresh after a required verified bundle-owned pre-update safety backup. That helper is independent of the installed `manage.sh`, runs only the backup transaction as WSL root when container-owned persistent files require it, validates database/archive output, and restores the previously-running containers before refresh. This is the preferred controlled updater when the goal is specifically to pull/rebuild/refresh the installer-managed software layer now.
 
 Resume / repair (Option 1) can still recreate/reconcile affected containers and can perform the bounded managed refresh when its age/revision/legacy-state trigger requires it; it simply does not force that refresh solely because the bundle version changed.
 

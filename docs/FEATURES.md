@@ -1,12 +1,12 @@
-# LatticeVale v14.4.84 — Complete Features and Install Options Reference
+# LatticeVale v14.4.85 — Complete Features and Install Options Reference
 
-> **v14.4.84:** removes targeted WSL termination from the Windows shutdown shortcut and repairs legacy shortcut-induced WSL session transport during existing-install repair. It retains v14.4.83 resource policy v4, Redis/Valkey overcommit, Ubuntu Pro removal, and v14.4.82 bounded launch recovery.
+> **v14.4.85:** retains the v14.4.84 WSL lifecycle repair and adds startup-aware reconcile/post-gateway readiness, a bundle-owned Option 6 pre-update safety backup with root-scoped archive access for container-owned state, and an explicit Option 3 read-only verification report.
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.4.84 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.4.85 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.84 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.85 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -684,11 +684,11 @@ Read-only persistent-install audit.
 
 ## 5.4 Reconfigure providers/profiles
 
-Reruns the relevant Hermes provider/model/profile setup while retaining service/data selections.
+Reruns the relevant Hermes provider/model/profile setup while retaining service/data selections. It intentionally operates within the saved component policy. If the default profile is selected for LatticeVale local Ollama, this option reapplies that local-AI default; use **Change installed components -> Local AI / Honcho / Ollama** to switch the default profile away from installer-owned Ollama.
 
 Use for:
 
-- provider authentication/model changes
+- provider authentication/model changes within the saved provider policy
 - profile provider/model reconfiguration
 - repairing provider/profile setup without rebuilding unrelated services
 
@@ -701,7 +701,7 @@ Exact actions:
 3. **Rerun provider/profile setup and reset checkpoints**
 4. **Return to read-only verification and exit**
 
-Identity-changing Matrix recovery is intentionally narrow and uses preservation/backups for installer-owned state rather than deleting unknown/manual Matrix state.
+Identity-changing Matrix recovery is intentionally narrow and uses preservation/backups for installer-owned state rather than deleting unknown/manual Matrix state. It requires shared Matrix to be enabled. The rebuild is transactional: the existing human Matrix admin and all secondary-profile identities/rooms are preserved, the current default-bot credentials and default Matrix crypto store are copied to a private recovery directory, a unique replacement default bot/device bootstrap is persisted, and only then are old installer-owned default runtime identity files retired. The replacement identity starts with a fresh crypto store; ordinary Resume / repair does not rotate or delete the existing Matrix identity/store.
 
 ## 5.6 Update / repair installer-managed software
 
@@ -709,7 +709,9 @@ Controlled, on-demand bundle-aligned updater.
 
 Before refresh:
 
-- a managed `./manage.sh backup` must succeed
+- the **bundle-owned pre-update safety backup** must succeed
+- it runs independently of the currently installed `manage.sh`, so an outdated/broken management script cannot block its own repair
+- the backup transaction runs as WSL root only while required to read container-owned persistent files, validates PostgreSQL dumps/archive output, restores the previously-running containers, and returns backup ownership to the selected Linux user
 
 Then it forces the software versions/channels declared by the currently running LatticeVale bundle and continues through normal repair/verifiers.
 
@@ -788,7 +790,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.4.84
+# 8. Current managed software/source pins documented by v14.4.85
 
 The release's declared managed references include:
 
@@ -854,7 +856,7 @@ Current normal configuration flows **do not set or switch `[wsl2] networkingMode
 
 # 11. WSL networking behavior
 
-Current v14.4.84 policy:
+Current v14.4.85 policy:
 
 - discover active topology
 - preserve working NAT/default/VirtioProxy-capable paths
@@ -1030,7 +1032,7 @@ Current primary documentation and current source take precedence over archived v
 
 # 18. Documentation files reviewed for this consolidation
 
-## Current documentation set after v14.4.8 consolidation (retained by v14.4.84)
+## Current documentation set after v14.4.8 consolidation (retained by v14.4.85)
 
 The v14.4.0 audit originally reviewed a larger set of one-off patch-note files. Those v14.x detailed notes are now preserved in `docs/PATCH-NOTES.md`; `docs/CHANGELOG.md` remains canonical for version history. Current user/maintainer documentation is intentionally split by purpose rather than by individual patch.
 

@@ -5,7 +5,7 @@ ps1 = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='utf-8')
 configure = (ROOT / 'stack' / 'configure-stack.sh').read_text(encoding='utf-8')
 version = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
 
-assert version in {'14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}
+assert version in {'14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'}
 # Fresh installs must not expose the old default-heavy Quick setup path.
 assert "questionnaireMode = 'explicit'" in ps1
 assert "$script:RequireExplicitQuestionnaireChoices = $true" in ps1
@@ -27,7 +27,7 @@ assert "Get-OptionValue $old 'timezone' 'Etc/UTC'" not in ps1
 # Remote access may warn, but cannot silently force a global WSL lifetime setting.
 assert 'LatticeVale will preserve that choice; remote endpoints may become unavailable when WSL terminates.' in ps1
 assert '$keepWslServicesRunning = $true\n    Write-Info \'Enabling persistent WSL service-instance lifetime' not in ps1
-assert ("Use mirrored WSL networking as the shared mode for native Windows Ollama and Tailscale remote access?" not in ps1 and 'LatticeVale will not change global WSL networking' in ps1) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'} else (("Use mirrored WSL networking as the shared mode for native Windows Ollama and Tailscale remote access?" in ps1) if version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40'} else ("Read-ChoiceExplicit 'Switch global WSL2 networkingMode to nat" in ps1))
+assert ("Use mirrored WSL networking as the shared mode for native Windows Ollama and Tailscale remote access?" not in ps1 and 'LatticeVale will not change global WSL networking' in ps1) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'} else (("Use mirrored WSL networking as the shared mode for native Windows Ollama and Tailscale remote access?" in ps1) if version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40'} else ("Read-ChoiceExplicit 'Switch global WSL2 networkingMode to nat" in ps1))
 # Legacy external vault targets are inspected and explicitly detached before ownership/mode changes.
 assert "Detach this legacy vault symlink?" in ps1
 assert "Detach this existing vault mount from the LatticeVale stack path?" in ps1

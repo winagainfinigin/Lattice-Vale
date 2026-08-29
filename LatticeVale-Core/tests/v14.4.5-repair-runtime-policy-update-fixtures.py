@@ -6,7 +6,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}, version
+assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'}, version
 
 cfg = (root / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (root / 'stack/manage.sh').read_text(encoding='utf-8')

@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version == '14.4.84', version
+assert version == '14.4.85', version
 
 launcher = (ROOT / 'windows' / 'LatticeVale-Shortcut.ps1').read_text(encoding='ascii')
 installer = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
@@ -58,9 +58,9 @@ assert "Restart-Service -Name 'WslService' -Force" in repair
 assert 'wsl.exe --terminate' not in repair
 
 # Root public guidance must make 14.4.84 the direct first-install release.
-assert '# LatticeVale v14.4.84' in root_readme
-assert 'Install the full v14.4.84 release first' in root_readme
-assert 'Do not install v14.4.83 first' in root_readme
+assert '# LatticeVale v14.4.85' in root_readme
+assert 'Install the full v14.4.85 release first' in root_readme
+assert 'Do not install v14.4.84 first and then layer source patch files over the live stack' in root_readme
 assert 'Resume / repair installation' in root_readme
 
 print('v14.4.84 WSL shortcut/transport fixtures: PASS')

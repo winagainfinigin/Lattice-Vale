@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert VERSION == '14.4.84', VERSION
+assert VERSION in {'14.4.84','14.4.85'}, VERSION
 
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')

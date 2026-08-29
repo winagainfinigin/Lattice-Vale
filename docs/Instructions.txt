@@ -1,6 +1,8 @@
-LATTICEVALE v14.4.84 — INSTRUCTIONS
+LATTICEVALE v14.4.85 — INSTRUCTIONS
 
-CURRENT RELEASE: v14.4.84 is the version to install first. New installs should use the full v14.4.84 release directly, not install v14.4.83 and then layer an update. Existing installs should launch the full v14.4.84 release and choose Resume / repair first so the legacy shutdown-shortcut WSL transport migration can run.
+CURRENT RELEASE: v14.4.85 is the version to install first. New installs should use the full v14.4.85 release directly. Existing v14.4.84 installs should launch the full v14.4.85 release and choose Resume / repair first so required lifecycle/checkpoint migrations run before optional managed-software refresh.
+
+V14.4.85 RECONCILE / MAINTENANCE RELIABILITY: Startup verification is performed after final gateway lifecycle mutations and waits boundedly for managed Ollama, Matrix/Synapse, Hermes API, and Dashboard readiness. Update / repair uses a bundle-owned pre-update safety-backup helper rather than the installed manage.sh and prints exact backup failure diagnostics. Verify installation only reruns and prints a fresh Linux/Docker/Hermes and Windows-side read-only report.
 
 V14.4.84 WSL LIFECYCLE REPAIR: The old lifecycle helper also used a nested `bash -lc` positional-argument wrapper that could return exit 127 instead of reaching `manage.sh`; v14.4.84 uses direct WSL `--cd` + `./manage.sh start|stop`. The old Shut Down shortcut used targeted `wsl --terminate`, which can wedge new-session hvsocket transport on affected WSL 2.7.x systems. v14.4.84 stops the managed stack only. Resume / repair detects the exact old owned helper, performs bounded `wsl --shutdown` + WslService reset/re-probe, and rewrites the helper.
 
@@ -114,7 +116,7 @@ When a managed stack is detected the installer offers:
    Use for an interrupted, incomplete, stale, or partially unhealthy installation. Reuses saved choices and repairs/verifies the existing stack. It explicitly repairs stale adaptive runtime/RAM policy and performs the bounded installer-owned component refresh when the periodic age gate is due, the managed-refresh policy revision changes, or legacy refresh state is missing. A bundle-version change alone remains local-first; choose Option 6 to force package/image/source refresh immediately.
 
 2. Change installed components
-   Use when you want to enable/disable or change selected LatticeVale features. Unselected configuration scopes are retained from the saved installation. Component removal is designed to preserve associated persistent data unless an explicitly destructive recovery path says otherwise.
+   Use when you want to enable/disable or change selected LatticeVale features. Unselected configuration scopes are retained from the saved installation. Component removal is designed to preserve associated persistent data unless an explicitly destructive recovery path says otherwise. If a selected change makes a dependent integration impossible (for example disabling Dashboard while its LatticeVale-owned Tailscale exposure is still selected), only that dependent integration is disabled and the installer explains the normalization. Turning the installer-owned default Ollama provider off forces the default Hermes provider/model wizard in the same run so stale Ollama provider configuration is not silently retained.
 
    Current change scopes are:
      1) Optional components: Dashboard, SearXNG, QMD, Obsidian
@@ -129,10 +131,10 @@ When a managed stack is detected the installer offers:
    Read-only verification path for the persistent installation. Use when you want diagnostics without changing stack configuration.
 
 4. Reconfigure providers/profiles
-   Use to rerun Hermes provider/model/profile setup while retaining the rest of the service/data selections.
+   Use to rerun Hermes provider/model/profile setup while retaining the rest of the service/data selections. This operates within the saved component policy: if the default profile is intentionally configured for LatticeVale local Ollama, this option reapplies that local-AI policy. Use Option 2 -> Local AI / Honcho / Ollama to switch the default profile between installer-owned Ollama and an external provider.
 
 5. Advanced recovery
-   Use only for the specifically described recovery action. Read the confirmation text. Identity-changing Matrix recovery is intentionally narrow and backs up installer-owned state before replacement.
+   Use only for the specifically described recovery action. Read the confirmation text. Identity-changing Matrix recovery requires the shared Matrix service to be enabled and is transactional: it preserves/reuses the existing human Matrix admin identity and all secondary-profile identities/rooms, backs up the current default bot credentials and default Matrix crypto store first, persists replacement default-bot bootstrap/device state, and only then retires the old installer-owned default runtime identity. Normal Resume / repair does not rotate that identity or delete its crypto store.
 
    Current recovery actions are:
      1) Reset checkpoints and reverify/reconcile every stage
@@ -141,7 +143,7 @@ When a managed stack is detected the installer offers:
      4) Return to read-only verification and exit
 
 6. Update / repair installer-managed software
-   Use a newer LatticeVale bundle to immediately apply that bundle's tested/declared installer-managed package/image/source versions. A managed backup must succeed before the forced refresh starts.
+   Use a newer LatticeVale bundle to immediately apply that bundle's tested/declared installer-managed package/image/source versions. A verified bundle-owned pre-update safety backup must succeed before the forced refresh starts; it does not depend on the currently installed manage.sh and runs only that backup transaction as WSL root so container-owned persistent files can be preserved safely.
 
 If you are unsure and simply need to recover a managed installation, choose option 1.
 

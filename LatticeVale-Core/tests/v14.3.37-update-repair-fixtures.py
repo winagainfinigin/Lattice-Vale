@@ -7,7 +7,7 @@ CONF = (ROOT/'stack'/'configure-stack.sh').read_text(encoding='utf-8')
 MANAGE = (ROOT/'stack'/'manage.sh').read_text(encoding='utf-8')
 VERSION = (ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
 
-assert VERSION in {'14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}, VERSION
+assert VERSION in {'14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'}, VERSION
 assert "Update / repair installer-managed software" in PS
 assert "$installMode = 'update'" in PS
 assert "$forceManagedUpdate = $true" in PS
@@ -15,9 +15,10 @@ assert "schema = 19" in PS
 assert "forceManagedUpdate = $forceManagedUpdate" in PS
 assert "@('resume','change','reconfigure','advanced','update')" in PS
 assert "@('resume','change','reconfigure','advanced','update')) -and $null -ne $existingOptions" in PS
-assert "Creating pre-update managed-stack backup" in PS
-assert "./manage.sh backup" in PS
-assert "Update / repair stopped before software refresh because the pre-update managed-stack backup failed" in PS
+assert "Creating pre-update managed-stack safety backup" in PS
+assert "pre-update-safety-backup.sh" in PS
+assert "./manage.sh backup" not in PS[PS.index("if ($forceManagedUpdate) {"):PS.index("if ($repairMaintenance) {")]
+assert "bundle-owned pre-update safety backup failed" in PS
 assert "$forceManagedUpdateArg" in PS and "$bundleVersion, $forceManagedUpdateArg" in PS
 
 assert 'force_managed_update="${4:-false}"' in BOOT

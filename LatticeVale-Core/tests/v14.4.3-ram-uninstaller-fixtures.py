@@ -15,7 +15,7 @@ boot = (root / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 uninstall = (root / 'Uninstall-LatticeVale.ps1').read_text(encoding='utf-8')
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
 
-assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84'}, version
+assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85'}, version
 
 # Clean + repair adoption must both converge on the current policy v4. The startup helper is the
 # repair/cold-start migration backstop when a saved adaptive overlay is stale.

@@ -1711,6 +1711,11 @@ PY_NATIVE_INFRA_VERIFY
 
 verify_matrix() {
   [[ "$(opt_bool matrix)" != true ]] && return 0
+  # An explicit Advanced Recovery identity rebuild is a transaction, not a healthy
+  # steady state. Even when the old identity is still fully usable (interruption before
+  # replacement bootstrap persistence), force the Matrix stage to inspect the pending
+  # marker instead of silently adopting/keeping the checkpoint as complete.
+  [[ ! -e .matrix-identity-rebuild-pending ]] || return 1
   [[ -s secrets/matrix-bot.env && -s .matrix-info ]] || return 1
   matrix_client_api_ready || return 1
   local token e2ee_mode device_id user_id room_id live_user recorded_version configured_version
@@ -2046,12 +2051,16 @@ wait_profile_gateway_down_exact() {
   return 1
 }
 
-stop_profile_gateway_after_matrix_failure() {
+stop_profile_gateway_exact() {
   local name="$1" service="/run/service/gateway-$1"
   timeout --foreground --kill-after=5s 20s docker exec -u hermes hermes-agent hermes -p "$name" gateway stop >/dev/null 2>&1 || true
   wait_profile_gateway_down_exact "$name" && return 0
   timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svc -d "$service" >/dev/null 2>&1 || true
   wait_profile_gateway_down_exact "$name"
+}
+
+stop_profile_gateway_after_matrix_failure() {
+  stop_profile_gateway_exact "$1"
 }
 
 quiesce_profile_gateway_for_credential_write() {
@@ -2361,6 +2370,7 @@ for p in paths:
     mem=cfg.get('memory') or {}
     if bool(mem.get('provider')=='honcho') != bool(opts.get('honcho')): raise SystemExit(1)
     if ('dashboard_auth/basic' in enabled) != bool(opts.get('dashboard')): raise SystemExit(1)
+matrix_keys={'MATRIX_HOMESERVER','MATRIX_ACCESS_TOKEN','MATRIX_USER_ID','MATRIX_PASSWORD','MATRIX_ALLOWED_USERS','MATRIX_ALLOWED_ROOMS','MATRIX_E2EE_MODE','MATRIX_DEVICE_ID','MATRIX_RECOVERY_KEY','MATRIX_RECOVERY_KEY_OUTPUT_FILE','MATRIX_REACTIONS','MATRIX_APPROVAL_REQUIRE_SENDER'}
 if opts.get('matrix'):
     keys={}
     for line in (root/'.env').read_text().splitlines() if (root/'.env').exists() else []:
@@ -2372,6 +2382,15 @@ if opts.get('matrix'):
         if '=' in line:
             k,v=line.split('=',1); values[k]=v.strip().lower()
     if values.get('MATRIX_REACTIONS')!='true' or values.get('MATRIX_APPROVAL_REQUIRE_SENDER')!='true': raise SystemExit(1)
+else:
+    root_env=(root/'.env').read_text(encoding='utf-8',errors='replace') if (root/'.env').exists() else ''
+    if any(line.split('=',1)[0] in matrix_keys for line in root_env.splitlines() if '=' in line): raise SystemExit(1)
+for name in names:
+    envp=root/'profiles'/name/'.env'
+    if not envp.exists(): continue
+    present={line.split('=',1)[0] for line in envp.read_text(encoding='utf-8',errors='replace').splitlines() if '=' in line}
+    enabled=bool(opts.get('matrix')) and any(w.get('name')==name and isinstance(w.get('matrix'),dict) and w['matrix'].get('enabled') is True for w in (opts.get('workers') or []))
+    if not enabled and (present & matrix_keys): raise SystemExit(1)
 raise SystemExit(0)
 PY_VERIFY_INTEGRATIONS
 }
@@ -3378,16 +3397,25 @@ PY_MATRIX_TEMP_REG
   fi
   matrix_bot='hermes'
   matrix_admin_default=''
-  if [[ "$(opt_bool rebuildMatrixIdentity)" == true ]]; then
-    echo 'Advanced recovery: rebuilding the installer-owned Matrix bot/room identity while preserving Synapse data.'
+  matrix_admin_locked=false
+  matrix_bot_device_id='LATTICEVALE_BOT'
+  rebuild_marker='.matrix-identity-rebuild-pending'
+  if [[ "$(opt_bool rebuildMatrixIdentity)" == true && ! -s "$matrix_bootstrap" ]]; then
+    echo 'Advanced recovery: preparing a transactional rebuild of the installer-owned Matrix bot/room identity while preserving Synapse data.'
     recovery_dir="backups/matrix-identity-$(date -u +%Y%m%dT%H%M%SZ)"; mkdir -p "$recovery_dir"; chmod 0700 "$recovery_dir"
-    for f in secrets/matrix-bot.env secrets/matrix-bootstrap.env .matrix-info .matrix-configured; do [[ -e "$f" ]] && cp -a "$f" "$recovery_dir/"; done
-    rm -f secrets/matrix-bot.env secrets/matrix-bootstrap.env .matrix-info .matrix-configured
+    for f in secrets/matrix-bot.env .matrix-info .matrix-configured; do [[ -e "$f" ]] && cp -a "$f" "$recovery_dir/"; done
+    if [[ -d data/hermes/platforms/matrix/store ]]; then
+      cp -a data/hermes/platforms/matrix/store "$recovery_dir/matrix-store"
+    fi
+    printf '%s\n' "$recovery_dir" > "$rebuild_marker"; chmod 0600 "$rebuild_marker"
     recovery_suffix="$(openssl rand -hex 3)"
     matrix_bot="hermes_recovery_$recovery_suffix"
-    recovery_owner="${USER//[^a-zA-Z0-9._=-]/}"; recovery_owner="${recovery_owner:-owner}"
-    matrix_admin_default="${recovery_owner}_recovery_$recovery_suffix"
-    echo 'A new installer-owned recovery admin and bot will be created; existing Matrix users/rooms remain untouched.'
+    matrix_bot_device_id="LATTICEVALE_RECOVERY_${recovery_suffix^^}"
+    matrix_admin_default="$(read_env_file_value_optional .matrix-info MATRIX_ADMIN)"
+    [[ -n "$matrix_admin_default" ]] || { echo 'Advanced Matrix bot/room rebuild requires the existing installer-recorded human Matrix admin identity; .matrix-info does not contain MATRIX_ADMIN, so refusing a broader identity replacement.' >&2; return 1; }
+    matrix_admin_locked=true
+    echo "Advanced recovery will preserve human Matrix admin '@$matrix_admin_default:hermes.local' and every secondary profile identity/room. Only the installer-owned default bot/device/room will be replaced."
+    echo 'The current Matrix credentials and crypto store remain active until replacement bootstrap credentials are safely persisted.'
   fi
   if [[ -s secrets/matrix-bot.env && ! -s "$matrix_bootstrap" ]]; then
     echo 'Existing Matrix bot credentials are present but failed live verification. Automatic identity replacement is unsafe.' >&2
@@ -3400,27 +3428,34 @@ PY_MATRIX_TEMP_REG
     matrix_password="$(sed -n 's/^MATRIX_ADMIN_PASSWORD=//p' "$matrix_bootstrap" | head -n1)"
     bot_password="$(sed -n 's/^MATRIX_BOT_PASSWORD=//p' "$matrix_bootstrap" | head -n1)"
     matrix_bot="$(sed -n 's/^MATRIX_BOT_USERNAME=//p' "$matrix_bootstrap" | head -n1)"
+    matrix_bot_device_id="$(sed -n 's/^MATRIX_BOT_DEVICE_ID=//p' "$matrix_bootstrap" | head -n1)"
     matrix_bot="${matrix_bot:-hermes}"
+    matrix_bot_device_id="${matrix_bot_device_id:-LATTICEVALE_BOT}"
   else
     default_admin="${matrix_admin_default:-${USER//[^a-zA-Z0-9._=-]/}}"; default_admin="${default_admin:-owner}"
-    while true; do
-      read -r -p "Matrix admin username [$default_admin]: " matrix_admin
-      matrix_admin="${matrix_admin:-$default_admin}"
-      matrix_admin="${matrix_admin#"${matrix_admin%%[![:space:]]*}"}"
-      matrix_admin="${matrix_admin%"${matrix_admin##*[![:space:]]}"}"
-      if [[ "$matrix_admin" =~ ^[A-Za-z0-9._=-]{1,64}$ ]]; then
-        if [[ "$matrix_admin" == "$matrix_bot" ]]; then
-          echo "Matrix admin username '$matrix_admin' conflicts with the default Hermes bot identity; choose a different admin username." >&2
-          continue
+    if [[ "$matrix_admin_locked" == true ]]; then
+      matrix_admin="$default_admin"
+      echo "Advanced Matrix recovery is reusing existing human admin '@$matrix_admin:hermes.local'; its username will not be changed."
+    else
+      while true; do
+        read -r -p "Matrix admin username [$default_admin]: " matrix_admin
+        matrix_admin="${matrix_admin:-$default_admin}"
+        matrix_admin="${matrix_admin#"${matrix_admin%%[![:space:]]*}"}"
+        matrix_admin="${matrix_admin%"${matrix_admin##*[![:space:]]}"}"
+        if [[ "$matrix_admin" =~ ^[A-Za-z0-9._=-]{1,64}$ ]]; then
+          if [[ "$matrix_admin" == "$matrix_bot" ]]; then
+            echo "Matrix admin username '$matrix_admin' conflicts with the default Hermes bot identity; choose a different admin username." >&2
+            continue
+          fi
+          if jq -e --arg u "$matrix_admin" '.workers[]? | select(.matrix.enabled == true and (.matrix.localpart // .name) == $u)' install-options.json >/dev/null 2>&1; then
+            echo "Matrix admin username '$matrix_admin' conflicts with a Matrix-enabled Hermes profile localpart; choose a different admin username." >&2
+            continue
+          fi
+          break
         fi
-        if jq -e --arg u "$matrix_admin" '.workers[]? | select(.matrix.enabled == true and (.matrix.localpart // .name) == $u)' install-options.json >/dev/null 2>&1; then
-          echo "Matrix admin username '$matrix_admin' conflicts with a Matrix-enabled Hermes profile localpart; choose a different admin username." >&2
-          continue
-        fi
-        break
-      fi
-      echo 'Use 1-64 letters, numbers, ., _, =, or - for the Matrix username.' >&2
-    done
+        echo 'Use 1-64 letters, numbers, ., _, =, or - for the Matrix username.' >&2
+      done
+    fi
     matrix_password="$(read_password_twice 'Matrix admin password')"
     bot_password="$(random_hex 24)"
     cat > "$matrix_bootstrap" <<EOF_MATRIX_BOOTSTRAP
@@ -3428,15 +3463,33 @@ MATRIX_ADMIN=$matrix_admin
 MATRIX_ADMIN_PASSWORD=$matrix_password
 MATRIX_BOT_PASSWORD=$bot_password
 MATRIX_BOT_USERNAME=$matrix_bot
+MATRIX_BOT_DEVICE_ID=$matrix_bot_device_id
 EOF_MATRIX_BOOTSTRAP
     chmod 0600 "$matrix_bootstrap"
   fi
+
+  # Once replacement bootstrap credentials are durable, retire only the old
+  # installer-owned runtime identity. The preserved backup remains available, while
+  # Hermes receives a fresh crypto store for the new Matrix account/device as required
+  # by its E2EE model. If interrupted after this point, matrix-bootstrap.env + the
+  # pending marker make Resume deterministic instead of falling back to @hermes.
+  if [[ -s "$rebuild_marker" ]]; then
+    recovery_dir="$(head -n1 "$rebuild_marker" 2>/dev/null || true)"
+    [[ -n "$recovery_dir" && -d "$recovery_dir" ]] || { echo 'Matrix identity rebuild marker exists but its recovery backup directory is missing; refusing to replace the active identity.' >&2; return 1; }
+    rm -f secrets/matrix-bot.env .matrix-info .matrix-configured
+    remove_env_keys data/hermes/.env MATRIX_HOMESERVER MATRIX_ACCESS_TOKEN MATRIX_USER_ID MATRIX_PASSWORD MATRIX_ALLOWED_USERS MATRIX_ALLOWED_ROOMS MATRIX_E2EE_MODE MATRIX_DEVICE_ID MATRIX_RECOVERY_KEY MATRIX_RECOVERY_KEY_OUTPUT_FILE MATRIX_REACTIONS MATRIX_APPROVAL_REQUIRE_SENDER
+    rm -rf data/hermes/platforms/matrix/store
+    mkdir -p data/hermes/platforms/matrix/store
+    chmod 0700 data/hermes/platforms/matrix/store
+  fi
+
   timeout --foreground --kill-after=5s 60s docker exec hermes-synapse register_new_matrix_user -c /data/homeserver.yaml -u "$matrix_admin" -p "$matrix_password" -a http://127.0.0.1:8008 >/dev/null 2>&1 || echo 'Matrix admin may already exist; verifying the saved credentials.'
   timeout --foreground --kill-after=5s 60s docker exec hermes-synapse register_new_matrix_user -c /data/homeserver.yaml -u "$matrix_bot" -p "$bot_password" --no-admin http://127.0.0.1:8008 >/dev/null 2>&1 || echo 'Matrix bot may already exist; verifying the saved credentials.'
   # Hermes image/E2EE dependency validation runs after the image is pulled and the
   # core container is started in stage_profiles. Room creation can safely happen first.
-  bot_device_id="$(read_env_file_value_optional secrets/matrix-bot.env MATRIX_DEVICE_ID)"
-  [[ -n "$bot_device_id" ]] || bot_device_id='LATTICEVALE_BOT' 
+  bot_device_id="$matrix_bot_device_id"
+  [[ -n "$bot_device_id" ]] || bot_device_id="$(read_env_file_value_optional secrets/matrix-bot.env MATRIX_DEVICE_ID)"
+  [[ -n "$bot_device_id" ]] || bot_device_id='LATTICEVALE_BOT'
   admin_login="$(matrix_login_json "$matrix_admin" "$matrix_password")"
   bot_login="$(matrix_login_json "$matrix_bot" "$bot_password" "$bot_device_id")"
   admin_token="$(jq -er .access_token <<<"$admin_login")"
@@ -3549,7 +3602,7 @@ PY_MATRIX_LOCK
   wait_matrix_client_api 60
   unset matrix_password bot_password admin_token bot_token
   touch .matrix-configured
-  rm -f "$matrix_bootstrap"
+  rm -f "$matrix_bootstrap" "$rebuild_marker"
 fi
 return 0
 }
@@ -4735,10 +4788,24 @@ for f in "${profile_envs[@]}"; do
   remove_env_keys "$f" GATEWAY_MULTIPLEX_PROFILES
   if [[ "$(opt_bool searxng)" == true ]]; then set_env "$f" SEARXNG_URL http://searxng:8080; else remove_env_keys "$f" SEARXNG_URL; fi
   if [[ "$(opt_bool qmd)" == true ]]; then set_env "$f" OBSIDIAN_VAULT_PATH /vault; else remove_env_keys "$f" OBSIDIAN_VAULT_PATH; fi
+
+  # Matrix runtime credentials are active only when both the shared Matrix service
+  # and this exact profile's Matrix intent are enabled. Preserve installer secret
+  # stores/rooms when disabled, but remove live gateway credentials so a stale
+  # profile process cannot keep retrying a Synapse service the user turned off.
+  matrix_runtime_enabled=false
+  if [[ "$f" == data/hermes/.env ]]; then
+    [[ "$(opt_bool matrix)" == true ]] && matrix_runtime_enabled=true
+  elif [[ "$(opt_bool matrix)" == true ]]; then
+    matrix_profile_name="${f#data/hermes/profiles/}"; matrix_profile_name="${matrix_profile_name%%/*}"
+    if jq -e --arg n "$matrix_profile_name" '.workers[]? | select(.name == $n and .matrix.enabled == true)' install-options.json >/dev/null 2>&1; then
+      matrix_runtime_enabled=true
+    fi
+  fi
+  if [[ "$matrix_runtime_enabled" != true ]]; then
+    remove_env_keys "$f" MATRIX_HOMESERVER MATRIX_ACCESS_TOKEN MATRIX_USER_ID MATRIX_PASSWORD MATRIX_ALLOWED_USERS MATRIX_ALLOWED_ROOMS MATRIX_E2EE_MODE MATRIX_DEVICE_ID MATRIX_RECOVERY_KEY MATRIX_RECOVERY_KEY_OUTPUT_FILE MATRIX_REACTIONS MATRIX_APPROVAL_REQUIRE_SENDER
+  fi
 done
-if [[ "$(opt_bool matrix)" != true ]]; then
-  remove_env_keys data/hermes/.env MATRIX_HOMESERVER MATRIX_ACCESS_TOKEN MATRIX_USER_ID MATRIX_PASSWORD MATRIX_ALLOWED_USERS MATRIX_ALLOWED_ROOMS MATRIX_E2EE_MODE MATRIX_DEVICE_ID MATRIX_RECOVERY_KEY MATRIX_RECOVERY_KEY_OUTPUT_FILE MATRIX_REACTIONS MATRIX_APPROVAL_REQUIRE_SENDER
-fi
 
 if [[ "$(opt_bool honcho)" == true ]]; then
   # Honcho uses a dedicated AI peer per profile while sharing the user's workspace.
@@ -4866,26 +4933,44 @@ if ! start_or_restart_default_gateway_exact; then
   echo 'Default Hermes gateway could not be reconciled after Kanban/config initialization.' >&2
   return 1
 fi
-while IFS= read -r matrix_profile; do
-  [[ -n "$matrix_profile" ]] || continue
-  matrix_profile_secret="secrets/matrix-profiles/$matrix_profile.env"
-  matrix_profile_state="$(read_env_file_value_optional "$matrix_profile_secret" LATTICEVALE_PROVISIONING_STATE)"
-  [[ -n "$matrix_profile_state" ]] || matrix_profile_state="$(read_env_file_value_optional "$matrix_profile_secret" FOUNDRY_PROVISIONING_STATE)"
-  if [[ "$matrix_profile_state" == pending-manual ]]; then
-    echo "Profile '$matrix_profile' Matrix activation is incomplete; retrying the bounded finisher before gateway reconciliation."
-    if ./manage.sh matrix-profile-finish "$matrix_profile"; then
-      matrix_profile_state=complete
-    else
-      echo "WARNING: Matrix profile '$matrix_profile' remains pending; skipping its gateway reconciliation without blocking the core stack." >&2
-      continue
+# Stop installer-managed profile gateways that are no longer runtime-enabled for
+# Matrix before starting the selected ones. LatticeVale keeps their secret stores and
+# rooms intact so re-enabling Matrix can restore the same identity later.
+while IFS= read -r managed_profile; do
+  [[ -n "$managed_profile" ]] || continue
+  profile_matrix_enabled=false
+  if [[ "$(opt_bool matrix)" == true ]] && jq -e --arg n "$managed_profile" '.workers[]? | select(.name == $n and .matrix.enabled == true)' install-options.json >/dev/null 2>&1; then
+    profile_matrix_enabled=true
+  fi
+  if [[ "$profile_matrix_enabled" != true ]]; then
+    if ! stop_profile_gateway_exact "$managed_profile"; then
+      echo "WARNING: profile '$managed_profile' is not Matrix-enabled but its exact gateway could not be stopped cleanly; preserved profile state was not deleted." >&2
     fi
   fi
-  [[ "$matrix_profile_state" == complete ]] || continue
-  if ! start_or_restart_profile_gateway_exact "$matrix_profile"; then
-    echo "WARNING: Matrix profile '$matrix_profile' gateway could not be started; preserving profile state without blocking the core stack." >&2
-    continue
-  fi
-done < <(jq -r '.workers[]? | select(.matrix.enabled == true) | .name' install-options.json)
+done < .installer-managed-profiles
+
+if [[ "$(opt_bool matrix)" == true ]]; then
+  while IFS= read -r matrix_profile; do
+    [[ -n "$matrix_profile" ]] || continue
+    matrix_profile_secret="secrets/matrix-profiles/$matrix_profile.env"
+    matrix_profile_state="$(read_env_file_value_optional "$matrix_profile_secret" LATTICEVALE_PROVISIONING_STATE)"
+    [[ -n "$matrix_profile_state" ]] || matrix_profile_state="$(read_env_file_value_optional "$matrix_profile_secret" FOUNDRY_PROVISIONING_STATE)"
+    if [[ "$matrix_profile_state" == pending-manual ]]; then
+      echo "Profile '$matrix_profile' Matrix activation is incomplete; retrying the bounded finisher before gateway reconciliation."
+      if ./manage.sh matrix-profile-finish "$matrix_profile"; then
+        matrix_profile_state=complete
+      else
+        echo "WARNING: Matrix profile '$matrix_profile' remains pending; skipping its gateway reconciliation without blocking the core stack." >&2
+        continue
+      fi
+    fi
+    [[ "$matrix_profile_state" == complete ]] || continue
+    if ! start_or_restart_profile_gateway_exact "$matrix_profile"; then
+      echo "WARNING: Matrix profile '$matrix_profile' gateway could not be started; preserving profile state without blocking the core stack." >&2
+      continue
+    fi
+  done < <(jq -r '.workers[]? | select(.matrix.enabled == true) | .name' install-options.json)
+fi
 # This stage performs the last gateway restart in the installer. Do not mark it done
 # until the gateway-owned API/Dashboard surfaces have actually returned.
 wait_hermes_gateway_surfaces 'Kanban/final gateway reload' 60
