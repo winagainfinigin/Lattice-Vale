@@ -57,10 +57,11 @@ assert 'Resume / repair will replace the helper/configuration' in installer
 assert "Restart-Service -Name 'WslService' -Force" in repair
 assert 'wsl.exe --terminate' not in repair
 
-# Root public guidance must make 14.4.84 the direct first-install release.
+# Root public guidance must direct existing installs to the full current release
+# and keep the source-only overwrite patch separate from live-stack repair.
 assert '# LatticeVale v14.4.85' in root_readme
-assert 'Install the full v14.4.85 release first' in root_readme
-assert 'Do not install v14.4.84 first and then layer source patch files over the live stack' in root_readme
-assert 'Resume / repair installation' in root_readme
+assert 'For an existing LatticeVale installation, launch the **full v14.4.85 release**' in root_readme
+assert 'choose **Resume / repair installation** first' in root_readme
+assert 'The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.' in root_readme
 
 print('v14.4.84 WSL shortcut/transport fixtures: PASS')
