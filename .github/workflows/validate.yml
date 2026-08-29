@@ -15,6 +15,10 @@ jobs:
         working-directory: LatticeVale-Core
     steps:
       - uses: actions/checkout@v4
+      - name: Finalize overwrite-patch cleanup
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: .\tools\Finalize-LatticeVale-OverwritePatch.ps1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.13'
@@ -90,6 +94,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Finalize overwrite-patch cleanup
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: .\tools\Finalize-LatticeVale-OverwritePatch.ps1
       - name: Parse PowerShell source with Windows PowerShell 5.1
         shell: powershell
         run: |

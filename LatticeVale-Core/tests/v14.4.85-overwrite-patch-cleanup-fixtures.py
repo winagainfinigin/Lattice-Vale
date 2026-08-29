@@ -5,6 +5,7 @@ REPO=ROOT.parent
 lst=(REPO/'installer/PATCH-DELETE.txt').read_text(encoding='utf-8')
 helper=(REPO/'tools/Finalize-LatticeVale-OverwritePatch.ps1').read_text(encoding='utf-8')
 manifest=(REPO/'tools/ReleaseManifest.ps1').read_text(encoding='utf-8')
+workflow=(REPO/'.github/workflows/validate.yml').read_text(encoding='utf-8')
 expected=[
  'LatticeVale-Core/tests/v14.4.84-hotfix2-reconcile-startup-fixtures.py',
  'LatticeVale-Core/tests/v14.4.84-hotfix2-post-gateway-readiness-fixtures.py',
@@ -18,4 +19,9 @@ assert "PATCH-DELETE path escapes repository root" in helper
 assert "Remove-Item -LiteralPath $candidate -Force -Recurse" in helper
 assert "Obsolete source file remains from an older overwrite patch" in manifest
 assert "Finalize-LatticeVale-OverwritePatch.ps1" in manifest
+
+assert workflow.count('Finalize overwrite-patch cleanup') >= 2
+assert workflow.count('Finalize-LatticeVale-OverwritePatch.ps1') >= 2
+assert workflow.index('Finalize overwrite-patch cleanup') < workflow.index('Static audit')
+assert workflow.rindex('Finalize overwrite-patch cleanup') < workflow.index('Verify source manifest')
 print('v14.4.85 OVERWRITE PATCH CLEANUP FIXTURES: PASS')
