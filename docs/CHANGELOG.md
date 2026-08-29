@@ -1,5 +1,15 @@
 # Changelog
 
+## 14.5.0 - 2026-08-28
+
+- Added a **read-only WSL-native planning foundation**: `latticevale_readonly.py` provides a typed standard-library view of existing `install-options.json`, derived `.env`, advisory installer state, checkpoint metadata, and user-override presence/hashes without writing any source back.
+- Added `./manage.sh plan` and `./manage.sh repair --plan`. The planner combines existing checkpoint/revision state with `state-audit.py`, reports stale/incomplete stages and live drift, calls out explicitly requested Matrix identity rebuilds, and directs all actual repair through the existing Windows installer Resume / repair path.
+- Added `checkpoint-metadata.json` as a read-only mirror of the **existing** revision gate. The mutating `configure-stack.sh` checkpoint table remains hardcoded exactly as before; regression coverage verifies the mirror stays synchronized, so no replacement migration engine or new repair authority was introduced.
+- Added `./manage.sh audit-free` to report whether the current installation has an installer-declared local/free default Hermes path, whether that AI path is fully WSL-native (managed Ollama), and to distinguish optional Windows/third-party/proprietary integrations without treating a vendor free tier as a permanent guarantee.
+- CI now auto-discovers `tests/*-fixtures.py` through `tests/run-regressions.py`, eliminating the hand-maintained fixture invocation list while retaining the existing Windows PowerShell/manifest job.
+- Documented the v14.5 ownership boundary: core runtime/planning/reconciliation stays inside WSL; Windows PowerShell remains for bootstrap and Windows-native host integrations/recovery. `compose.override.yaml` remains user-owned and opaque to the planner.
+- Deliberately deferred any write-authority canonical config, full desired-state engine, plugin framework, CLI replacement, or migration-system replacement to later releases.
+
 ## 14.4.85 - 2026-08-28
 
 - Fixed Option 6 pre-update backups for container-owned persistent files (for example Ollama `id_ed25519`) by running only the bundle-owned backup transaction as WSL root and returning backup ownership to the selected Linux user; successful Compose lifecycle noise is no longer dumped into backup errors.

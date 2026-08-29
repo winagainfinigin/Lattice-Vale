@@ -78,7 +78,7 @@ if [[ -d "$stack_dir" ]]; then
   backup_dir="$stack_dir/backups/pre-$installer_version-$stamp"
   install -d -m 0700 -o "$linux_uid" -g "$linux_gid" "$backup_dir"
   backup_items=()
-  for item in compose.yaml compose.latticevale.yaml compose.override.yaml configure-stack.sh manage.sh state-audit.py install-options.json .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
+  for item in compose.yaml compose.latticevale.yaml compose.override.yaml configure-stack.sh manage.sh state-audit.py latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json install-options.json .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
     [[ -e "$stack_dir/$item" ]] && backup_items+=("$item")
   done
   # Logs are diagnostic, not application state. Preserve them in the configuration
@@ -819,6 +819,7 @@ unset rel path
 # or hostile prior install could redirect a repair write outside the dedicated stack tree.
 installer_owned_files=(
   compose.yaml Dockerfile.qmd patch-qmd-bind.py configure-stack.sh manage.sh state-audit.py
+  latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json
   qmd-index-cycle.sh native-ollama-relay.py native-ollama-relay.sh install-options.json
 )
 for rel in "${installer_owned_files[@]}"; do
@@ -841,6 +842,14 @@ install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/manage.sh" "$stack_dir/manage.sh"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/state-audit.py" "$stack_dir/state-audit.py"
+install -m 0644 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/latticevale_readonly.py" "$stack_dir/latticevale_readonly.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/repair-plan.py" "$stack_dir/repair-plan.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/audit-free.py" "$stack_dir/audit-free.py"
+install -m 0644 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/checkpoint-metadata.json" "$stack_dir/checkpoint-metadata.json"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/qmd-index-cycle.sh" "$stack_dir/qmd-index-cycle.sh"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
@@ -865,6 +874,7 @@ verify_write_dirs=(
 verify_write_files=(
   "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/patch-qmd-bind.py"
   "$stack_dir/configure-stack.sh" "$stack_dir/manage.sh" "$stack_dir/state-audit.py"
+  "$stack_dir/latticevale_readonly.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
   "$stack_dir/qmd-index-cycle.sh" "$stack_dir/native-ollama-relay.py" "$stack_dir/native-ollama-relay.sh" "$stack_dir/install-options.json" "$stack_dir/.env"
   "$stack_dir/.repair-package-refresh" "$stack_dir/.repair-package-refresh-pending"
   "$stack_dir/.installer-state.json" "$stack_dir/.install-info" "$stack_dir/.configured"

@@ -71,6 +71,28 @@ The installer and root README now include the selected Linux user in Windows `ws
 
 # Consolidated Patch Notes
 
+## v14.5.0 — read-only planning foundation
+
+### Scope
+
+v14.5.0 intentionally starts the architectural cleanup with **read-only surfaces only**. It does not port the proven Bash reconciliation engine into Python, does not replace checkpoint revisions, and does not create a new write-authority configuration file.
+
+### Repair planning
+
+`./manage.sh repair --plan` (also `./manage.sh plan`) reads installer options/state, shared checkpoint revision metadata, and the existing state audit. It reports likely replay/verification work, live component drift, user-owned Compose override presence, and any explicit Matrix identity rebuild request. The planner itself never writes files and cannot apply a repair.
+
+### Configuration/state ownership
+
+`install-options.json` remains the installer-choice source; `.env` and generated service files remain derived; `compose.override.yaml` remains opaque/user-owned and applied after generated policy; `.installer-state.json` remains advisory history. The new Python reader is a consumer of those sources, not their replacement.
+
+### Checkpoint compatibility
+
+`checkpoint-metadata.json` records the same stage revisions/descriptions already used by `configure-stack.sh` for read-only tooling. The mutating `checkpoint_revision()` table remains hardcoded exactly as before; regression coverage verifies the metadata mirror matches it, so deleting or editing the metadata cannot change repair behavior.
+
+### Free/local audit and CI
+
+`./manage.sh audit-free` distinguishes a current installer-declared local Ollama default path from a user-selected external provider, reports managed Ollama as the WSL-native baseline while classifying Windows-native Ollama as an optional host integration, and labels Tailscale/Obsidian as optional external/proprietary integrations rather than required core dependencies. CI fixture execution is now auto-discovered by `tests/run-regressions.py`; the existing Windows PowerShell parse/source-manifest job remains in place.
+
 `CHANGELOG.md` is the canonical version history. This file preserves the more detailed implementation, audit, migration, and compatibility notes that were previously split across many one-off v14.x patch-note files. Historical v13 notes remain under `legacy-patch-notes/`.
 
 ## v14.4.82 WSL recovery return-value hotfix

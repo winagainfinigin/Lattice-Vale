@@ -5323,6 +5323,10 @@ $requiredBundleFiles = @(
     'stack\configure-stack.sh',
     'stack\manage.sh',
     'stack\state-audit.py',
+    'stack\latticevale_readonly.py',
+    'stack\repair-plan.py',
+    'stack\audit-free.py',
+    'stack\checkpoint-metadata.json',
     'stack\qmd-index-cycle.sh',
     'windows\LatticeVale-WslNativeRelay.ps1',
     'windows\LatticeVale-WindowsNativeServiceRelay.ps1',
@@ -6679,7 +6683,7 @@ if (-not $mkdirProbe.Success) {
 try {
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'compatibility.conf') "$stageLinux/compatibility.conf" '0600'
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'linux\bootstrap.sh') "$stageLinux/linux/bootstrap.sh" '0600'
-    foreach ($file in @('compose.yaml','Dockerfile.qmd','patch-qmd-bind.py','configure-stack.sh','manage.sh','state-audit.py','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh')) {
+    foreach ($file in @('compose.yaml','Dockerfile.qmd','patch-qmd-bind.py','configure-stack.sh','manage.sh','state-audit.py','latticevale_readonly.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh')) {
         Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot "stack\$file") "$stageLinux/stack/$file" '0600'
     }
     $optionsJson = $options | ConvertTo-Json -Depth 8 -Compress

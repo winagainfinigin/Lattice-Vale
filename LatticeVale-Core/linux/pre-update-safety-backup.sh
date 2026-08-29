@@ -127,7 +127,7 @@ fi
 STEP=archive-persistent-state
 items=()
 for p in \
-  .env install-options.json .installer-state.json state-audit.py .install-info \
+  .env install-options.json .installer-state.json state-audit.py latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json .install-info \
   .configured .provider-configured .installer-managed-profiles .matrix-configured \
   .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
   compose.yaml compose.override.yaml config secrets logs \

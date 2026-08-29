@@ -11,6 +11,10 @@ Usage: ./manage.sh COMMAND [ARG]
   status                 Show current Hermes/service state without treating normal startup as failure
   verify [seconds]       Wait up to 300s (or supplied timeout) for the selected stack to become healthy
   audit                  State-aware read-only audit (includes incomplete/legacy state)
+  audit-free             Read-only check of the current free/local operating path
+  plan [--offline]       Show a read-only repair plan; never changes the stack
+  repair --plan [--offline]
+                         Alias for plan; applying repair still uses the Windows installer
   start                  Start Hermes and all selected services
   stop                   Stop the selected stack
   logs [service]         Follow logs (all selected services by default)
@@ -993,6 +997,16 @@ case "$cmd" in
   status) status ;;
   verify) verify "${2:-300}" ;;
   audit) python3 ./state-audit.py --stack . ;;
+  audit-free) python3 ./audit-free.py --stack . "${@:2}" ;;
+  plan) python3 ./repair-plan.py --stack . "${@:2}" ;;
+  repair)
+    if [[ "${2:-}" == --plan ]]; then
+      python3 ./repair-plan.py --stack . "${@:3}"
+    else
+      echo 'Repair application remains owned by the Windows installer. Use: ./manage.sh repair --plan' >&2
+      echo 'Then rerun Install-LatticeVale.ps1 and choose Resume / repair to apply verified changes.' >&2
+      exit 2
+    fi ;;
   repair-info)
     echo 'Rerun Install-LatticeVale.ps1 from the Windows bundle.'
     echo 'Resume / repair preserves completed work and reruns failed/incomplete/stale stages; it refreshes installer-owned components when the periodic gate is due or the managed-refresh policy revision changes. A bundle-version change alone stays local-first.'

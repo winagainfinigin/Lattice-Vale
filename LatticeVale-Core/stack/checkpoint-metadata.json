@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "description": "Read-only metadata for the existing LatticeVale checkpoint/revision system. Revisions remain the installer migration gate; this file does not create a second migration engine.",
+  "stages": {
+    "prepare_config": {"order": 10, "revision": 1, "description": "Prepare installer-owned configuration", "recovery": "forward-fix"},
+    "infrastructure": {"order": 20, "revision": 1, "description": "Start and verify selected supporting infrastructure", "recovery": "forward-fix"},
+    "matrix_bootstrap": {"order": 30, "revision": 1, "description": "Bootstrap and verify Matrix identity/room", "recovery": "preserve-identity-or-explicit-rebuild"},
+    "provider_setup": {"order": 40, "revision": 1, "description": "Configure and verify default Hermes provider/model", "recovery": "forward-fix"},
+    "profiles": {"order": 50, "revision": 1, "description": "Create/repair and verify Hermes profiles", "recovery": "preserve-existing-profile-config"},
+    "matrix_profiles": {"order": 60, "revision": 3, "description": "Provision and verify profile-specific Matrix identities/rooms", "recovery": "preserve-identity-or-pending-manual"},
+    "matrix_cross_signing": {"order": 70, "revision": 1, "description": "Secure Matrix device cross-signing settings", "recovery": "forward-fix-or-manual-recovery"},
+    "matrix_profile_cross_signing": {"order": 80, "revision": 3, "description": "Secure profile-specific Matrix device cross-signing settings", "recovery": "forward-fix-or-manual-recovery"},
+    "integrations": {"order": 90, "revision": 4, "description": "Apply and verify Hermes integrations", "recovery": "forward-fix"},
+    "reconcile": {"order": 100, "revision": 4, "description": "Reconcile and health-check the complete Docker stack", "recovery": "forward-fix"},
+    "kanban_gateway": {"order": 110, "revision": 4, "description": "Initialize Kanban and reload the Hermes gateway", "recovery": "forward-fix"},
+    "finalize": {"order": 120, "revision": 2, "description": "Write final installer metadata", "recovery": "forward-fix"}
+  }
+}

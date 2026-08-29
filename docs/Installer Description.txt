@@ -1,6 +1,8 @@
-LATTICEVALE v14.4.85 — INSTALLER DESCRIPTION
+LATTICEVALE v14.5.0 — INSTALLER DESCRIPTION
 
-CURRENT RELEASE: v14.4.85 is the direct first-install release. It retains the v14.4.84 WSL shortcut/transport repair and adds startup-aware reconcile/post-gateway readiness plus safer existing-install maintenance: Option 6 uses a bundle-owned verified pre-update backup, and Option 3 prints a fresh read-only Linux/Windows verification report.
+CURRENT RELEASE: v14.5.0 is the direct first-install release. It inherits the v14.4.85 reconciliation/maintenance behavior and adds a read-only WSL-side planning/config-state layer. The existing installer remains the only mutating repair engine; the new planner cannot overwrite user configuration.
+
+V14.5.0 READ-ONLY PLANNING: The installer stages `latticevale_readonly.py`, `repair-plan.py`, `audit-free.py`, and `checkpoint-metadata.json` into `~/hermes-stack`. `./manage.sh repair --plan` reports stale/incomplete checkpoint revisions and state-audit findings but never applies changes. `compose.override.yaml` remains user-owned/opaque.
 
 V14.4.85 STARTUP / REPAIR RELIABILITY: Reconcile waits for selected managed-service, Matrix/Synapse, Hermes API, and Dashboard readiness after the final gateway lifecycle mutation. Default gateway fallback is exact and checked rather than silently ignored. Existing v14.4.84 installs replay the required internal lifecycle checkpoints during Resume / repair without recreating persistent identities or data.
 

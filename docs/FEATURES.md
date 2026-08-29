@@ -1,12 +1,26 @@
-# LatticeVale v14.4.85 — Complete Features and Install Options Reference
+# LatticeVale v14.5.0 — Complete Features and Install Options Reference
+
+> **v14.5.0:** adds a read-only WSL-native planner/config-state reader, shared checkpoint metadata, a free/local-operation audit, and regression auto-discovery while retaining all v14.4.85 runtime/reconciliation behavior.
 
 > **v14.4.85:** retains the v14.4.84 WSL lifecycle repair and adds startup-aware reconcile/post-gateway readiness, a bundle-owned Option 6 pre-update safety backup with root-scoped archive access for container-owned state, and an explicit Option 3 read-only verification report.
 
+
+## v14.5.0 read-only architecture boundary
+
+- `install-options.json` remains authoritative for installer-selected options.
+- `.env`, generated Compose policy, and generated Hermes/service configuration remain derived runtime files.
+- `compose.override.yaml` remains user-owned, applies after generated policy, and is intentionally treated as opaque by the v14.5.0 planner.
+- `.installer-state.json` remains advisory checkpoint/history state.
+- `checkpoint-metadata.json` exposes the existing checkpoint revision numbers/descriptions to read-only tooling; it does not introduce a parallel migration engine.
+- `latticevale_readonly.py`, `repair-plan.py`, and `audit-free.py` are read-only WSL-side tools. They do not write configuration or apply repair.
+- Mutating repair remains `Install-LatticeVale.ps1` → existing WSL bootstrap/configure/reconcile path.
+- Windows-side code remains for Windows-only host responsibilities: WSL selection/recovery, shortcuts/Task Scheduler, Windows Tailscale integration, and optional native-Windows Ollama bridging.
+
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.4.85 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.5.0 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.4.85 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.5.0 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -522,7 +536,7 @@ When enabled LatticeVale:
 - uses 64 MiB PostgreSQL `shared_buffers` on <=12 GiB WSL VMs and 128 MiB above that, while retaining Honcho PostgreSQL `max_connections=200`
 - recalculates when relevant WSL-visible resources change or an older adaptive-policy revision must be migrated
 
-Policy v3 reserves 30% of WSL-visible RAM on <=6 GiB, 25% on <=12 GiB, 20% on <=24 GiB, and 15% above that, with bounded minimum/maximum reserve values. These are **ceilings, not reservations**, and are not a global WSL memory cap.
+Current policy v4 retains the v3 host-headroom schedule: it reserves 30% of WSL-visible RAM on <=6 GiB, 25% on <=12 GiB, 20% on <=24 GiB, and 15% above that, with bounded minimum/maximum reserve values. Policy v4 additionally protects managed Ollama headroom on full stacks. These are **ceilings, not reservations**, and are not a global WSL memory cap.
 
 LatticeVale does not set global WSL `memory` or `autoMemoryReclaim` for this feature. Those are host/user-owned WSL policies. A user `compose.override.yaml` is applied last and remains authoritative.
 

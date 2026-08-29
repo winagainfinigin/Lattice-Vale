@@ -357,13 +357,32 @@ def main() -> int:
             print("Hermes stack: NOT_INSTALLED")
         return 1 if args.strict else 0
 
-    core_files = ["compose.yaml", "configure-stack.sh", "manage.sh", "install-options.json"]
-    if selected("qmd"):
-        core_files.extend(["Dockerfile.qmd", "patch-qmd-bind.py", "qmd-index-cycle.sh"])
-    missing = [x for x in core_files if not (root / x).is_file()]
     options_schema = opts.get("schema") if isinstance(opts, dict) else None
     state_version = state.get("installerVersion") if isinstance(state, dict) else None
     options_version = opts.get("installerVersion") if isinstance(opts, dict) else None
+
+    def version_tuple(value):
+        if not isinstance(value, str):
+            return ()
+        text = value.strip().lower().lstrip("v")
+        parts = text.split(".")
+        out = []
+        for part in parts[:3]:
+            if not part.isdigit():
+                break
+            out.append(int(part))
+        return tuple(out)
+
+    # The Windows installer stages this audit before upgrading an existing stack. Do not
+    # classify a healthy v14.4.x installation as BROKEN merely because v14.5 read-only
+    # helper files have not been copied yet; require them once stack metadata is v14.5+.
+    core_files = ["compose.yaml", "configure-stack.sh", "manage.sh", "install-options.json"]
+    detected_version = state_version or options_version
+    if version_tuple(detected_version) >= (14, 5):
+        core_files.extend(["state-audit.py", "latticevale_readonly.py", "repair-plan.py", "audit-free.py", "checkpoint-metadata.json"])
+    if selected("qmd"):
+        core_files.extend(["Dockerfile.qmd", "patch-qmd-bind.py", "qmd-index-cycle.sh"])
+    missing = [x for x in core_files if not (root / x).is_file()]
     legacy_schema = isinstance(options_schema, int) and options_schema < 13
     def version_major(value):
         if not isinstance(value, str):
@@ -397,6 +416,7 @@ def main() -> int:
     ]
     writable_files = [
         root / "compose.yaml", root / "configure-stack.sh", root / "manage.sh", root / "state-audit.py",
+        root / "latticevale_readonly.py", root / "repair-plan.py", root / "audit-free.py", root / "checkpoint-metadata.json",
         root / "install-options.json", root / ".env", root / ".installer-state.json",
     ]
     permission_failures: list[str] = []

@@ -1,6 +1,8 @@
-LATTICEVALE v14.4.85 — INSTRUCTIONS
+LATTICEVALE v14.5.0 — INSTRUCTIONS
 
-CURRENT RELEASE: v14.4.85 is the version to install first. New installs should use the full v14.4.85 release directly. Existing v14.4.84 installs should launch the full v14.4.85 release and choose Resume / repair first so required lifecycle/checkpoint migrations run before optional managed-software refresh.
+CURRENT RELEASE: v14.5.0 is the version to install first. New installs should use the full v14.5.0 release directly. Existing v14.4.85 installs should launch the full v14.5.0 release and choose Resume / repair. The new planner is read-only; actual repair still uses the existing installer reconciliation path.
+
+V14.5.0 READ-ONLY PLAN / ARCHITECTURE: `./manage.sh repair --plan` and `./manage.sh plan` inspect existing checkpoint revisions plus live/offline state without modifying the stack. `./manage.sh audit-free` reports whether the current default Hermes path is installer-declared local/free and whether the selected local-AI path is fully WSL-native (managed Ollama). `compose.override.yaml` remains user-owned and opaque to the planner. Windows remains bootstrap/host-integration; core operation stays in WSL.
 
 V14.4.85 RECONCILE / MAINTENANCE RELIABILITY: Startup verification is performed after final gateway lifecycle mutations and waits boundedly for managed Ollama, Matrix/Synapse, Hermes API, and Dashboard readiness. Update / repair uses a bundle-owned pre-update safety-backup helper rather than the installed manage.sh and prints exact backup failure diagnostics. Verify installation only reruns and prints a fresh Linux/Docker/Hermes and Windows-side read-only report.
 

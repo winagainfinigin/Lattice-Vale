@@ -1,5 +1,9 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.5.0 source-policy note
+
+v14.5.0 adds only first-party Python/JSON source for read-only planning/auditing and introduces no new runtime package dependency: the new reader/planner use the Python standard library. Existing third-party image/application pins are unchanged. The release manifest continues to cover every shipped source/config file.
+
 ## v14.4.85 source-policy note
 
 v14.4.85 adds no new third-party dependency or bundled binary. It promotes the accumulated reconcile/readiness and maintenance fixes into a normal versioned release: exact gateway lifecycle checks, bounded post-gateway Hermes/Matrix readiness, and a bundle-owned pre-update backup helper. Existing upstream application/image/model pins and ownership boundaries remain unchanged from the validated v14.4.84 line.

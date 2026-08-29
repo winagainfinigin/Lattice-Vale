@@ -30,56 +30,27 @@ jobs:
         run: bash -n linux/bootstrap.sh stack/configure-stack.sh stack/manage.sh stack/qmd-index-cycle.sh stack/native-ollama-relay.sh
       - name: Python compile
         run: |
-          python -m py_compile stack/state-audit.py stack/patch-qmd-bind.py stack/native-ollama-relay.py tests/*.py
+          python -m py_compile stack/state-audit.py stack/latticevale_readonly.py stack/repair-plan.py stack/audit-free.py stack/patch-qmd-bind.py stack/native-ollama-relay.py tests/*.py
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
       - name: Static audit
         run: python tests/static-audit.py
-      - name: Current v14.4.85 release identity, WSL lifecycle, and inherited policy regressions
-        run: |
-          python tests/v14.3.38-kanban-skill-policy-fixtures.py
-          python tests/v14.3.39-existing-install-qc-fixtures.py
-          python tests/v14.3.40-documentation-separation-fixtures.py
-          python tests/v14.3.41-wsl-host-safety-fixtures.py
-          python tests/v14.3.42-clean-host-reset-fixtures.py
-          python tests/v14.3.43-scheduled-task-action-compat-fixtures.py
-          python tests/v14.4.0-documentation-audit-fixtures.py
-          python tests/v14.4.1-release-layout-fixtures.py
-          python tests/v14.4.2-memory-efficiency-fixtures.py
-          python tests/v14.4.3-ram-uninstaller-fixtures.py
-          python tests/v14.4.4-repair-metadata-race-fixtures.py
-          python tests/v14.4.5-repair-runtime-policy-update-fixtures.py
-          python tests/v14.4.6-resource-fingerprint-audit-fixtures.py
-          python tests/v14.4.6-upgrade-refresh-gating-fixtures.py
-          python tests/v14.4.7-web-extraction-fixtures.py
-          python tests/v14.4.81-wsl-launch-recovery-fixtures.py
-          python tests/v14.4.82-wsl-helper-exitcode-fixtures.py
-          python tests/v14.4.83-runtime-policy-overcommit-ubuntu-pro-fixtures.py
-          python tests/v14.4.83-hotfix2-public-entrypoint-fixtures.py
-          python tests/v14.4.84-wsl-shortcut-transport-fixtures.py
-          python tests/v14.4.85-reconcile-startup-fixtures.py
-          python tests/v14.4.85-post-gateway-readiness-fixtures.py
-          python tests/v14.4.85-update-backup-audit-fixtures.py
-          python tests/v14.4.85-overwrite-patch-cleanup-fixtures.py
+      - name: Auto-discovered deterministic regression fixtures
+        run: python tests/run-regressions.py
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |
-          grep -q '^14.4.85$' LatticeVale-Core/VERSION.txt
-          grep -q '^# LatticeVale v14.4.85' README.md
-          grep -q '^LATTICEVALE v14.4.85' docs/Instructions.txt
-          grep -q '^LATTICEVALE v14.4.85' 'docs/Installer Description.txt'
-          grep -q '^## 14.4.85 ' docs/CHANGELOG.md
-          grep -q 'placeholder: 14.4.85' .github/ISSUE_TEMPLATE/bug_report.yml
-          grep -q 'Existing-stack Resume / repair adopts required migrations' .github/PULL_REQUEST_TEMPLATE.md
+          grep -q '^14.5.0$' LatticeVale-Core/VERSION.txt
+          grep -q '^# LatticeVale v14.5.0' README.md
+          grep -q '^LATTICEVALE v14.5.0' docs/Instructions.txt
+          grep -q '^LATTICEVALE v14.5.0' 'docs/Installer Description.txt'
+          grep -q '^## 14.5.0 ' docs/CHANGELOG.md
+          grep -q 'placeholder: 14.5.0' .github/ISSUE_TEMPLATE/bug_report.yml
+          grep -q 'read-only planner/config-state code must never write' .github/PULL_REQUEST_TEMPLATE.md
           grep -q 'PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md docs/SUPPORT.md docs/RELEASE.md
           grep -q 'PATCH-NOTES.md' README.md LatticeVale-Core/README.md
-      - name: Deterministic regression fixtures
-        run: |
-          set -euo pipefail
-          for test in tests/*-fixtures.py; do
-            echo "==> $test"
-            python "$test"
-          done
+          grep -q 'repair --plan' README.md LatticeVale-Core/README.md docs/FEATURES.md
+          grep -q 'compose.override.yaml.*opaque' docs/FEATURES.md
       - name: Mocked resume simulations
         run: |
           python tests/minimal-resume-simulation.py
