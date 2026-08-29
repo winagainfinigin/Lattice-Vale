@@ -91,7 +91,9 @@ assert 'Refusing to reuse a foreign network.' in cfg
 # Fresh Matrix config must use selected Matrix host port, not a database secret.
 assert 'python3 - "$synapse_db_password" "$registration_secret" "$MATRIX_HOST_PORT"' in cfg
 assert "cfg['public_baseurl']=f'http://localhost:{int(sys.argv[3])}/'" in cfg
-assert 'while true; do\n      read -r -p "Matrix admin username' in cfg
+assert 'read -r -p "Matrix admin username [$default_admin]: " matrix_admin' in cfg
+assert 'if [[ "$matrix_admin_locked" == true ]]; then' in cfg
+assert 'Advanced Matrix recovery is reusing existing human admin' in cfg
 
 # TTY regression and special-variable safety remain in place.
 assert 'runuser --pty -u "$linux_user"' in boot

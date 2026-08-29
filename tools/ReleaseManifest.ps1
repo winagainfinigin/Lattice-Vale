@@ -89,7 +89,18 @@ function Test-LatticeValeSourceManifest {
     $actualFiles=@($items | Where-Object { -not $_.PSIsContainer -and [IO.Path]::GetFullPath($_.FullName) -ne $manifest })
     foreach ($file in $actualFiles) {
         $relativeActual=$file.FullName.Substring($root.Length).TrimStart('\','/').Replace('\','/')
-        if (-not $listed.ContainsKey($relativeActual.ToLowerInvariant())) { throw "Unexpected release file is not covered by SOURCE-SHA256SUMS.txt: $relativeActual" }
+        if (-not $listed.ContainsKey($relativeActual.ToLowerInvariant())) {
+            $deleteListPath = Join-Path $root 'installer\PATCH-DELETE.txt'
+            $knownObsolete = $false
+            if (Test-Path -LiteralPath $deleteListPath -PathType Leaf) {
+                $obsolete = @(Get-Content -LiteralPath $deleteListPath | ForEach-Object { $_.Trim() } | Where-Object { $_ -and -not $_.StartsWith('#') })
+                $knownObsolete = $obsolete -contains $relativeActual
+            }
+            if ($knownObsolete) {
+                throw "Obsolete source file remains from an older overwrite patch: $relativeActual. Run .\tools\Finalize-LatticeVale-OverwritePatch.ps1 from the repository root, then rerun verification."
+            }
+            throw "Unexpected release file is not covered by SOURCE-SHA256SUMS.txt: $relativeActual"
+        }
     }
     if ($actualFiles.Count -ne $listed.Count) { throw "Source-manifest coverage mismatch: manifest=$($listed.Count), extracted-files=$($actualFiles.Count)." }
     return $checked

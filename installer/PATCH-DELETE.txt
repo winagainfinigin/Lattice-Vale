@@ -1,0 +1,6 @@
+# Paths relative to the LatticeVale repository root that were shipped by
+# unreleased/intermediate source overlays but are intentionally absent from
+# the current release. The finalize helper safely ignores paths that do not exist.
+LatticeVale-Core/tests/v14.4.84-hotfix2-reconcile-startup-fixtures.py
+LatticeVale-Core/tests/v14.4.84-hotfix2-post-gateway-readiness-fixtures.py
+LatticeVale-Core/tests/v14.4.84-hotfix2-update-backup-audit-fixtures.py

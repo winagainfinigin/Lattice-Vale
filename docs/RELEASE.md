@@ -113,3 +113,7 @@ Before publishing a release:
 16. If the release is a downstream/customized build, label it clearly as modified, preserve the MIT notice, document system-specific assumptions, and do not reuse upstream release hashes for changed content.
 
 Do not claim Windows/WSL/Tailscale/Element/GPU end-to-end testing unless that exact release was actually exercised on those live platforms.
+
+### Source overwrite patch cleanup
+
+When applying an overwrite patch on top of a development/intermediate checkout, extract the patch and then run `pwsh ./tools/Finalize-LatticeVale-OverwritePatch.ps1` from the repository root before release verification. This removes obsolete source files listed in `installer/PATCH-DELETE.txt` that ZIP extraction cannot delete by itself. Clean release archives are unaffected; missing paths are ignored.

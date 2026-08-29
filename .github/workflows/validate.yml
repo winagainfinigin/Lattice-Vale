@@ -56,6 +56,7 @@ jobs:
           python tests/v14.4.85-reconcile-startup-fixtures.py
           python tests/v14.4.85-post-gateway-readiness-fixtures.py
           python tests/v14.4.85-update-backup-audit-fixtures.py
+          python tests/v14.4.85-overwrite-patch-cleanup-fixtures.py
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |

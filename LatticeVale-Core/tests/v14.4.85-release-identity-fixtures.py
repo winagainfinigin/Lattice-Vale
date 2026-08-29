@@ -17,6 +17,8 @@ issue=(REPO/'.github/ISSUE_TEMPLATE/bug_report.yml').read_text(encoding='utf-8')
 assert 'placeholder: 14.4.85' in issue
 workflow=(REPO/'.github/workflows/validate.yml').read_text(encoding='utf-8')
 assert 'Current v14.4.85 release identity' in workflow
+assert (REPO/'installer/PATCH-DELETE.txt').exists()
+assert (REPO/'tools/Finalize-LatticeVale-OverwritePatch.ps1').exists()
 assert "grep -q '^14.4.85$' LatticeVale-Core/VERSION.txt" in workflow
 for obsolete in [
     'v14.4.84-hotfix2-reconcile-startup-fixtures.py',
