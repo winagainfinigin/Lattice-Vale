@@ -6,14 +6,14 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0'}, version
+assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1'}, version
 
 cfg = (root / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (root / 'stack/manage.sh').read_text(encoding='utf-8')
 boot = (root / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 compat = (root / 'compatibility.conf').read_text(encoding='utf-8')
 
-# Resume / repair must explicitly reconcile current policy v4 even when prepare_config has an
+# Resume / repair must explicitly reconcile current adaptive policy even when prepare_config has an
 # old completed checkpoint. The final installer state must not become complete while
 # that live policy is still stale/partial.
 for token in (
@@ -39,7 +39,7 @@ assert pos == sorted(pos), pos
 
 # Policy verification must require the current fingerprint and all v3 RAM controls.
 for token in (
-    'saved_version" == 4',
+    'saved_version" == 9',
     'MALLOC_ARENA_MAX:',
     'SYNAPSE_CACHE_FACTOR:',
     'shared_buffers=',
@@ -71,17 +71,28 @@ opt_bool() {
   esac
 }
 managed_ollama_enabled() { return 1; }
+resource_matrix_profile_gateways() { printf '0'; }
+resource_kanban_concurrency() { printf '1'; }
+resource_hermes_floor_mib() { printf '1024'; }
+resource_ollama_model_metrics() { printf '0:0:0:0'; }
 state_mark() { printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >> state.log; }
 write_latticevale_compose_overlay() {
   local cpus mem_mib
   cpus="$(nproc)"
   mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo)"
   cat > .latticevale-resource-state <<EOF
-POLICY_VERSION=4
+POLICY_VERSION=9
 CPUS=$cpus
 MEM_MIB=$mem_mib
 RESERVE_MIB=1024
 BUDGET_MIB=$((mem_mib-1024))
+MATRIX_PROFILE_GATEWAYS=0
+KANBAN_CONCURRENCY=1
+HERMES_MIN_MIB=1024
+OLLAMA_TEXT_ARTIFACT_MIB=0
+OLLAMA_EMBED_ARTIFACT_MIB=0
+OLLAMA_CONTEXT_LENGTH=0
+OLLAMA_MODEL_FLOOR_MIB=0
 EOF
   cat > compose.latticevale.yaml <<'EOF'
 services:
@@ -117,7 +128,7 @@ repair_runtime_policy_reconcile
 verify_adaptive_runtime_policy
 [[ "$(grep -c '^infrastructure|pending|' state.log)" == 1 ]]
 [[ "$(grep -c '^reconcile|pending|' state.log)" == 1 ]]
-[[ "$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state)" == 4 ]]
+[[ "$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state)" == 9 ]]
 grep -q '^COMPOSE_FILE=compose.yaml:compose.latticevale.yaml:compose.override.yaml$' .env
 before="$(wc -l < state.log)"
 repair_runtime_policy_reconcile
@@ -128,10 +139,10 @@ repair_runtime_policy_reconcile
     r = subprocess.run(['bash', str(harness)], cwd=td, text=True, capture_output=True, timeout=20)
     assert r.returncode == 0, r.stdout + r.stderr
 
-# Normal starts use the same policy version as the generator; do not regenerate v3
+# Normal starts use the same policy version as the generator; do not regenerate older policy
 # forever because of a stale v2 comparison constant.
-assert 'if [[ "$saved_version" != 4 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then' in manage
-assert 'if [[ "$saved_version" != 2 ||' not in manage
+assert './configure-stack.sh --refresh-resource-policy' in manage
+assert 'model artifacts/context' in manage
 
 # If manage.sh itself refreshes the policy during restart, it must reconcile Compose
 # before restart because `docker compose restart` alone does not apply changed

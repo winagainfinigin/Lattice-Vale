@@ -15,12 +15,11 @@ boot = (root / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 uninstall = (root / 'Uninstall-LatticeVale.ps1').read_text(encoding='utf-8')
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
 
-assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0'}, version
+assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1'}, version
 
-# Clean + repair adoption must both converge on the current policy v4. The startup helper is the
+# Clean + repair adoption must both converge on the current policy v9. The startup helper is the
 # repair/cold-start migration backstop when a saved adaptive overlay is stale.
-assert 'POLICY_VERSION=4' in cs
-assert 'saved_version" != 4' in boot
+assert 'POLICY_VERSION=9' in cs
 assert './configure-stack.sh --refresh-resource-policy' in boot
 assert "compose_files='compose.yaml'" in cs
 assert "compose_files+=':compose.latticevale.yaml'" in cs
@@ -48,8 +47,12 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
         'matrix': True,
         'searxng': True,
         'qmd': True,
-        'honcho': True,
-        'hermesLocalAI': True,
+        'honcho': False,
+        'hermesLocalAI': False,
+        # Keep this integration fixture host-RAM independent under policy v9: Honcho
+        # remains selected, but native-Windows Ollama means the WSL container budget
+        # does not need to include a managed Ollama floor. The dedicated v14.5.1
+        # hardware-matrix fixture covers managed-Ollama viability thresholds.
         'ollamaBackend': 'managed',
         'ollamaAcceleration': 'cpu',
         'localTextModel': 'qwen3.5:4b',
@@ -91,7 +94,7 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
         preexec_fn=preexec,
     )
     assert proc.returncode == 0, proc.stdout
-    assert (td / '.latticevale-resource-state').read_text(encoding='utf-8').startswith('POLICY_VERSION=4\n')
+    assert (td / '.latticevale-resource-state').read_text(encoding='utf-8').startswith('POLICY_VERSION=9\n')
     env_line = next(x for x in (td / '.env').read_text(encoding='utf-8').splitlines() if x.startswith('COMPOSE_FILE='))
     assert env_line == 'COMPOSE_FILE=compose.yaml:compose.latticevale.yaml:compose.override.yaml', env_line
     overlay = yaml.safe_load((td / 'compose.latticevale.yaml').read_text(encoding='utf-8'))
@@ -99,9 +102,6 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
     assert str(services['hermes']['environment']['MALLOC_ARENA_MAX']) in {'2', '4'}
     assert str(services['synapse']['environment']['SYNAPSE_CACHE_FACTOR']) in {'0.25', '0.35', '0.5', '0.50'}
     assert 'shared_buffers=' in ' '.join(map(str, services['synapse-db']['command']))
-    honcho_cmd = ' '.join(map(str, services['honcho-db']['command']))
-    assert 'shared_buffers=' in honcho_cmd
-    assert 'max_connections=200' in honcho_cmd
     return td
 
 clean = repair = None

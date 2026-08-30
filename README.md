@@ -1,8 +1,15 @@
-# LatticeVale v14.5.0
+# LatticeVale v14.5.1
 
-> For an existing LatticeVale installation, launch the **full v14.5.0 release** and choose **Resume / repair installation** first. v14.5.0 adds read-only planning/reporting surfaces; the proven installer reconciliation path remains the only mutating repair engine.
+> For an existing LatticeVale installation, launch the **full v14.5.1 release** and choose **Resume / repair installation** first. v14.5.1 is a resource-policy/OOM-detection patch over v14.5.0; the proven installer reconciliation path remains the only mutating repair engine.
+- v14.5.1 also hardens bounded slow-start gateway recovery discovered on a real Resume / repair: exact s6 readiness tolerates transient status-probe failures for up to 60 seconds, requires stable consecutive `up` observations, retries only the proven gateway service slot once, and fixes the exact-gateway diagnostic `printf` path. `./manage.sh audit` remains a snapshot while `./manage.sh verify` is the bounded convergence check.
 
 > The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
+
+### v14.5.1 — adaptive CPU/RAM/OOM reliability patch
+
+v14.5.1 corrects adaptive resource-policy failures found by real full-stack WSL audits. Policy v4 could protect managed Ollama so aggressively that the central `hermes-agent` container received only 544 MiB on a roughly 9.7 GiB WSL VM, causing repeated cgroup OOM kills even while WSL still had multiple GiB available. The initial v14.5.1 policy-v6 balance fixed Hermes but left CPU-backed managed Ollama at only 4128 MiB; a subsequent live run held Ollama at ~98% of that hard ceiling and recorded more than 15,000 cgroup `memory.max` pressure events. Current resource policy **v9** keeps the bounded aggregate-budget model and user-owned `compose.override.yaml`, preserves the 1024 MiB Hermes and 512 MiB Honcho API preferred floors, and gives CPU-backed managed Ollama a real **4608 MiB viability floor**. On >6-12 GiB WSL allocations with CPU-backed managed Ollama selected, v9 uses a 10% non-container reserve; other >6-24 GiB shapes retain 20%, <=6 GiB remains 30%, and >24 GiB remains 15%. Policy v9 is topology-aware for public multi-profile setups: its 1024 MiB Hermes baseline covers the default gateway plus up to one secondary Matrix gateway and Kanban concurrency up to 3; each additional persistent secondary Matrix gateway adds 192 MiB to the Hermes minimum and each Kanban slot above 3 adds 96 MiB, capped at a 4096 MiB topology floor. Hermes CPU keeps the ordinary ~75% ceiling for common topology but can rise toward 100% of WSL-visible CPUs under additional gateway/worker pressure.
+
+`state-audit.py`, `./manage.sh verify`, and the v14.5 read-only planner now treat a running selected container with Docker `OOMKilled=true` as a repairable runtime-policy problem instead of allowing recovered endpoints to produce a false `HEALTHY` result. Existing policy-v2/v3/v4/v5/v6/v7/v8 fingerprints automatically become stale and are regenerated/reconciled by normal Resume / repair or the existing start-time resource refresh. The policy fingerprint also persists each generated service ceiling, and final reconciliation compares those values with Docker's live `HostConfig.Memory`; an existing v14.5.0 container that still has the old 544 MiB Hermes cgroup cannot be accepted merely because the current YAML/state files were rewritten. LatticeVale still does not write global WSL `memory` or `autoMemoryReclaim` settings.
 
 ### v14.5.0 — read-only planning foundation
 
@@ -353,21 +360,23 @@ wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh
 
 ## Adaptive RAM and resource policy
 
-LatticeVale resource policy **v4** is designed to reduce unnecessary WSL/Docker memory pressure while retaining operational headroom.
+LatticeVale resource policy **v9** keeps hard per-container ceilings and a bounded aggregate managed-container budget. It preserves the v6 Hermes/Honcho correction for the policy-v4 544 MiB Hermes starvation failure, and additionally fixes audited CPU-backed Ollama pressure: the v6 ~4128 MiB Ollama ceiling reached ~98% utilization and more than 15,000 `memory.max` events without an OOM. On sufficiently sized hosts, v9 gives Hermes a 1024 MiB preferred minimum, Honcho API 512 MiB, and CPU-backed managed Ollama a **4608 MiB provisional floor** before model artifacts are measurable, then a model/context-aware floor after download. If the selected service set cannot fit its defined minimum ceilings inside the managed budget, v9 refuses to generate misleading tiny hard limits and tells the user to increase WSL RAM, deselect components, use native-Windows Ollama where appropriate, or disable LatticeVale ceilings.
 
 Depending on the enabled services, it can apply:
 
-- adaptive per-container memory ceilings
-- WSL-aware memory budgeting
+- adaptive per-container CPU and memory ceilings
+- WSL-aware memory budgeting with 30% reserve on <=6 GiB; 10% on >6-12 GiB when CPU-backed managed Ollama is selected; 20% on other >6-24 GiB shapes; and 15% above 24 GiB, subject to reserve floors/caps
 - reduced glibc allocator arenas
 - Synapse cache tuning
 - reduced PostgreSQL fixed `shared_buffers`
-- protected managed-Ollama memory headroom within the aggregate WSL container budget
+- protected managed-Ollama memory headroom within the aggregate WSL container budget, including a 4608 MiB CPU-backed viability floor
 - controlled Ollama model residency
 - bounded Ollama parallelism
 - short Ollama model keep-alive behavior
+- OOM-aware runtime auditing for selected running containers
+- live Docker CPU/RAM-ceiling verification during reconciliation so stale quotas cannot survive clean/repair convergence
 
-Explicit user `compose.override.yaml` configuration remains authoritative and is applied after generated LatticeVale resource policy.
+Clean installs generate policy v9 before first container creation. Existing adaptive policy-v2/v3/v4/v5/v6/v7/v8 installs regenerate through normal Resume / repair or managed start-time resource reconciliation, and final reconciliation compares effective merged Compose `mem_limit`/`cpus` with Docker's live `HostConfig.Memory`/`HostConfig.NanoCpus`. Explicit user `compose.override.yaml` configuration remains authoritative and is applied after generated LatticeVale resource policy. LatticeVale does not write global WSL `memory` or `autoMemoryReclaim` settings. The adaptive fingerprint also includes Matrix-enabled secondary gateway count, Kanban concurrency, and the derived Hermes topology floor. Generated root/Windows-start helpers evaluate current CPU, RAM, enabled-limit state, profile topology, and Kanban concurrency when the helper runs rather than freezing install-time values.
 
 ---
 
@@ -437,7 +446,9 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.4.82** | Hotfix | Correct successful WSL-recovery exit-code handling |
 | **v14.4.83** | Patch / Hotfix 2 | Ollama policy v4, Redis/Valkey overcommit prerequisite, Ubuntu Pro integration removal, canonical public launcher correction |
 | **v14.4.84** | Release / Hotfix 1 | WSL lifecycle transport repair plus Matrix gateway startup-readiness hotfix |
-| **v14.4.85** | **Current install release** | Startup-aware reconcile/post-gateway readiness, self-repairing pre-update backup, and explicit read-only verification output |
+| **v14.4.85** | Release | Startup-aware reconcile/post-gateway readiness, self-repairing pre-update backup, and explicit read-only verification output |
+| **v14.5.0** | Release | Read-only WSL-native repair planning/config-state foundation and free/local-path audit |
+| **v14.5.1** | **Current install release** | Adaptive resource policy v9, OOM-aware health, low-RAM viability guards, and live Docker CPU/RAM convergence for clean/repair |
 
 ### v14.4.1
 
@@ -644,3 +655,5 @@ For an existing installation, the installer provides state-aware verification, R
 LatticeVale is licensed under the MIT License.
 
 See [LICENSE](LICENSE).
+
+Policy v9 also closes the last model-selection generalization gap for the public repository. Managed Ollama no longer assumes every local model has the same RAM requirement: once the selected text/embedding manifests exist, the allocator fingerprints their artifact sizes and the persisted context length, derives a larger CPU/GPU-aware floor when necessary, and performs a second bounded reconciliation after model download. The text and embedding sizes are not summed because LatticeVale constrains managed Ollama to one loaded model. If the model-aware minimum plus enabled services cannot fit, installation/repair fails with an actionable resource message. Self-hosted Honcho now receives an adaptive supported request timeout while preserving explicit user timeout values, and `./manage.sh status` distinguishes historical `memory.max` counters from new pressure by sampling deltas.

@@ -1,5 +1,9 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.5.1 source-policy note
+
+v14.5.1 changes only first-party resource-allocation, audit, tests, and documentation source. It adds no runtime package, image, hosted service, model, or paid API dependency; all third-party pins remain unchanged.
+
 ## v14.5.0 source-policy note
 
 v14.5.0 adds only first-party Python/JSON source for read-only planning/auditing and introduces no new runtime package dependency: the new reader/planner use the Python standard library. Existing third-party image/application pins are unchanged. The release manifest continues to cover every shipped source/config file.

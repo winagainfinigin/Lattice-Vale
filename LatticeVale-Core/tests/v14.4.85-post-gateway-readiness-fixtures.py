@@ -6,7 +6,7 @@ ROOT=Path(__file__).resolve().parents[1]
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.85','14.5.0'}, version
+assert version in {'14.4.85','14.5.0','14.5.1'}, version
 
 stage=cfg[cfg.index('stage_reconcile()'):cfg.index('stage_kanban_gateway()')]
 restart=stage.index('start_or_restart_default_gateway_exact')

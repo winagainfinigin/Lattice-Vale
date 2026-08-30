@@ -1,6 +1,6 @@
-# LatticeVale v14.5.0 — Stable
+# LatticeVale v14.5.1 — Stable
 
-> **v14.5.0:** current direct-install release. It adds the read-only `repair --plan`/`plan` planner, a typed standard-library Python reader for existing installer/runtime state, shared read-only checkpoint revision metadata, `audit-free`, and auto-discovered regression fixtures. It deliberately does **not** replace the existing checkpoint/reconciliation engine or make a canonical configuration file a new write authority. Existing v14.4.85 installs should run the full v14.5.0 release and choose Resume / repair.
+> **v14.5.1:** current direct-install release. It retains the v14.5.0 read-only planner architecture and fixes adaptive memory policy v4 starvation found in a real full-stack audit. Policy v9 preserves the audited Hermes/Honcho balance and makes managed Ollama sizing model/context-aware, derives CPU ceilings from the processors actually visible to WSL, verifies live Docker CPU and RAM ceilings, and refuses selected-service combinations whose minimum safe memory set cannot fit the bounded aggregate WSL budget; running-container Docker OOM history remains a repairable audit condition. Existing installations should run the full v14.5.1 release and choose Resume / repair.
 
 > **v14.4.85:** prior direct-install release. It promotes the accumulated pre-release reliability fixes into a normal versioned release, retaining the v14.4.84 WSL lifecycle repair while adding startup-aware reconcile/post-gateway readiness, exact checked gateway lifecycle handling, a bundle-owned Option 6 pre-update safety backup that can safely read container-owned persistent files, and a useful Option 3 read-only verification report. Existing v14.4.84 installs should run the full v14.4.85 release and choose Resume / repair.
 
@@ -14,7 +14,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retains those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4, v14.4.8's Hermes/web maintenance, and v14.4.6's replacement of the version-only component-refresh trigger with the managed-refresh revision/age/explicit-force model.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retained those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4; v14.5.1 now advances enabled adaptive state to policy v9 to correct audited Hermes cgroup starvation and make managed-Ollama sizing model/context-aware, while retaining v14.4.8's Hermes/web maintenance and v14.4.6's managed-refresh revision/age/explicit-force model.
 
 For detailed history, use `CHANGELOG.md`. Detailed implementation/audit notes for the v14.x patch line are consolidated in `PATCH-NOTES.md`; the v13 archive remains under `legacy-patch-notes/`.
 
@@ -33,9 +33,14 @@ Run public entry points from the repository root using `./installer/...` as show
 
 ### Inherited v14.4.3 RAM-efficiency policy
 
-When adaptive container resource limits are enabled, policy v4:
+When adaptive container resource limits are enabled, policy v9:
 
-- derives ceilings from CPU/RAM actually visible inside WSL while reserving 30% on <=6 GiB, 25% on <=12 GiB, 20% on <=24 GiB, and 15% above that, with bounded reserve floors/caps;
+- CPU ceilings scale from processors actually visible to WSL (`nproc` semantics): Hermes about 75%, managed Ollama 100%, medium services about 50%, light stores about 25%, with a one-CPU minimum. Hermes may rise toward 100% when additional persistent Matrix profile gateways or Kanban concurrency above 3 increase in-container workload.
+- Memory minima are computed only from enabled services and configured Hermes topology. The 1024 MiB Hermes baseline covers the default gateway plus up to one secondary Matrix gateway and Kanban concurrency up to 3; each additional persistent secondary Matrix gateway adds 192 MiB and each Kanban slot above 3 adds 96 MiB, capped at a 4096 MiB topology floor. If those minima cannot fit inside the post-reserve container budget, policy v9 refuses the plan instead of proportionally shrinking containers into implausibly small hard limits.
+- Clean/repair/start reconciliation verifies effective Compose `mem_limit` and `cpus` against live Docker `HostConfig.Memory` and `HostConfig.NanoCpus`; user `compose.override.yaml` remains final and authoritative.
+
+
+- derives ceilings from CPU/RAM actually visible inside WSL while reserving 30% on <=6 GiB; 10% on >6-12 GiB when CPU-backed managed Ollama is selected; 20% on other >6-24 GiB shapes; and 15% above 24 GiB, with bounded reserve floors/caps;
 - applies `MALLOC_ARENA_MAX` to long-lived glibc/Python services to limit allocator arena growth;
 - lowers Synapse's supported `SYNAPSE_CACHE_FACTOR` on smaller WSL VMs;
 - uses 64 MiB PostgreSQL `shared_buffers` on <=12 GiB WSL VMs and 128 MiB above that while preserving Honcho PostgreSQL's existing `max_connections=200`;
@@ -264,7 +269,7 @@ The Dashboard normally remains on `http://localhost:9119`. Matrix/Synapse is loc
 
 Repair checkpoints are recorded in `.installer-state.json`, but they never override live validation. **The state file is only a hint**: repair stages still verify the components they own and rerun required migrations when the installed release changes.
 
-In v14.4.5, adaptive runtime/RAM policy is reconciled outside the old `prepare_config` checkpoint. If policy v4 is missing/stale or the WSL-visible CPU/RAM fingerprint changed, repair regenerates the installer-owned overlay, marks infrastructure/full-stack reconciliation pending, and requires a final live policy verification before declaring success.
+In v14.4.5, adaptive runtime/RAM policy is reconciled outside the old `prepare_config` checkpoint. If policy v9 is missing/stale, the WSL-visible CPU/RAM fingerprint changed, or the Matrix-profile/Kanban topology changed, repair regenerates the installer-owned overlay, marks infrastructure/full-stack reconciliation pending, and requires a final live policy verification before declaring success.
 
 Managed software refresh is policy-aware rather than version-number-driven. Normal Resume / repair runs the bounded installer-owned package/image/source refresh when the 30-day age gate is due, the `MANAGED_REPAIR_REFRESH_REVISION` changes, or a legacy install lacks valid refresh state. The marker still records the installer version for provenance, but a version change alone does not trigger another pull/build cycle. An interrupted refresh with the same refresh-policy revision resumes its user-level phase without repeating completed root package work; a revision mismatch reruns the bounded root phase. Explicit Update / repair always forces the current bundle's managed refresh.
 

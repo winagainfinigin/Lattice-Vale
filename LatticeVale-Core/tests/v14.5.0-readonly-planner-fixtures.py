@@ -15,7 +15,7 @@ sys.path.insert(0, str(STACK_SRC))
 from latticevale_readonly import StackSnapshot, options_hash  # noqa: E402
 
 version = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
-assert version == "14.5.0", version
+assert version in {"14.5.0", "14.5.1"}, version
 
 metadata = json.loads((STACK_SRC / "checkpoint-metadata.json").read_text())
 assert metadata["schema"] == 1
@@ -71,7 +71,7 @@ with tempfile.TemporaryDirectory(prefix="lv145-plan-") as td:
 
     options = {
         "schema": 19,
-        "installerVersion": "14.5.0",
+        "installerVersion": version,
         "installerMode": "resume",
         "dashboard": False,
         "multiAgent": False,
@@ -93,7 +93,7 @@ with tempfile.TemporaryDirectory(prefix="lv145-plan-") as td:
     current_hash = options_hash(options)
     state = {
         "schema": 1,
-        "installerVersion": "14.5.0",
+        "installerVersion": version,
         "optionsHash": current_hash,
         "status": "complete",
         "stages": {

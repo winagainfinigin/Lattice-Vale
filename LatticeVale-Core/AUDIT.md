@@ -1,6 +1,16 @@
-# LatticeVale v14.4.83 audit
+# LatticeVale v14.5.1 audit
 
-## v14.4.83 runtime-policy / Redis-Valkey / Ubuntu Pro audit
+## v14.5.1 adaptive resource-policy / OOM audit
+
+- Adaptive resource fingerprints now require `POLICY_VERSION=9` across generator, repair verifier, runtime start/restart refresh, root startup helper, and read-only state audit. Existing policy-v8-or-older state is stale and converges through the existing Compose reconciliation path. The fingerprint also records Matrix-enabled secondary gateway count, Kanban concurrency, and the derived Hermes topology floor.
+- Policy v9 retains hard per-container ceilings and an aggregate budget rather than removing safeguards. It preserves the audited Hermes correction and adds CPU-backed Ollama pressure headroom: <=6 GiB retains a 30% reserve; CPU-backed managed Ollama on >6-12 GiB uses a 10% reserve and a 4608 MiB provisional floor before model artifacts are measurable, then a model/context-aware floor after download; other >6-24 GiB shapes use 20%; >24 GiB uses 15%. Hermes keeps a 1024 MiB preferred floor and Honcho API 512 MiB.
+- CPU ceilings remain derived from processors visible to WSL and are now verified live against Docker `HostConfig.NanoCpus` as well as memory against `HostConfig.Memory`; stale CPU quotas are therefore repairable policy drift.
+- The old proportional low-RAM fallback is removed: if enabled-service plus profile/Kanban topology minima cannot fit inside the post-reserve budget, policy v9 refuses the adaptive plan instead of manufacturing tiny hard ceilings. Lighter selections remain valid when their own minima fit.
+- On the audited ~9946 MiB CPU-backed full-stack shape, the deterministic planner now yields approximately Hermes 1040 / Honcho API 528 / Ollama 4640 MiB. This retains the policy-v4 Hermes correction and adds measured headroom over policy v6, where Ollama reached ~98% of a 4128 MiB hard ceiling and recorded >15,000 `memory.max` events.
+- `state-audit.py` now treats Docker `OOMKilled=true` on a selected running managed container as `runtimePolicy PARTIAL`. `./manage.sh verify` and the v14.5 read-only repair planner inherit that result instead of allowing recovered endpoints to mask active cgroup starvation.
+- Global WSL `memory` / `autoMemoryReclaim`, user `compose.override.yaml`, profiles/providers, Matrix identity, persistent volumes, and the existing mutating reconciliation engine remain outside this patch.
+
+## v14.4.83 runtime-policy / Redis-Valkey / Ubuntu Pro audit (historical)
 
 - Adaptive resource fingerprints now require `POLICY_VERSION=4` across generator, repair verifier, runtime start/restart refresh, root startup helper, and read-only state audit. Policy-v3 state must converge through the existing Compose reconciliation path rather than being treated as current.
 - Policy v4 preserves the existing aggregate WSL container budget/reserve and the established non-Ollama minima. Managed Ollama receives additional protected minimum memory only from budget that remains after those minima; it does not take ownership of global WSL memory/reclaim settings or bypass `compose.override.yaml`.
@@ -213,3 +223,9 @@ The user preference and failure evidence require service persistence without sec
 The bundle is validated with Bash syntax checks, Python compilation, Compose YAML parsing, deterministic/static regression fixtures, the direct helper-generation fixture, variable-before-colon scans for both PowerShell entrypoints, and ZIP integrity/hash verification. The Linux build environment cannot faithfully execute real Windows Task Scheduler, WSL VM lifecycle, Windows Tailscale, or a full destructive Windows/WSL clean install; those remain runtime validations for the target Windows system.
 
 Historical patch/version audit details are consolidated in the `../docs/CHANGELOG.md`.
+
+- Policy v9 verifies the generated root startup helper defers WSL CPU/RAM, adaptive-limit selection, profile-gateway count, and Kanban-concurrency probes until helper runtime. This keeps Windows auto-start/shortcut startup adaptive after hardware or profile changes.
+
+- Policy v9 fingerprints managed-Ollama text/embedding artifact sizes, effective context, and the derived model floor. Clean install can use a provisional floor only until the models are downloaded; the infrastructure stage then regenerates/reconciles before inference verification.
+- Honcho request timeout is adaptive and ownership-aware: root `timeout` is updated only when absent or equal to the prior LatticeVale-owned value; explicit user values are preserved.
+- Runtime memory-pressure reporting uses short `memory.events` deltas so lifetime `memory.max` counts are not mistaken for active pressure.

@@ -464,12 +464,171 @@ clamp_int() {
   printf '%s' "$value"
 }
 
+resource_matrix_profile_gateways() {
+  if [[ "$(opt_bool matrix)" != true ]]; then
+    printf '0'
+    return 0
+  fi
+  local count
+  count="$(jq -r '[.workers[]? | select((.matrix.enabled // false) == true)] | length' install-options.json 2>/dev/null || true)"
+  [[ "$count" =~ ^[0-9]+$ && "$count" -le 8 ]] || { echo 'Could not determine Matrix-enabled secondary profile count for adaptive resource planning.' >&2; return 1; }
+  printf '%s' "$count"
+}
+
+resource_kanban_concurrency() {
+  if [[ "$(opt_bool kanban)" != true ]]; then
+    printf '1'
+    return 0
+  fi
+  local count
+  count="$(jq -r '.kanbanMaxInProgress // 2' install-options.json 2>/dev/null || true)"
+  [[ "$count" =~ ^[0-9]+$ && "$count" -ge 1 && "$count" -le 8 ]] || { echo 'Could not determine Kanban concurrency for adaptive resource planning.' >&2; return 1; }
+  printf '%s' "$count"
+}
+
+resource_hermes_floor_mib() {
+  local matrix_gateways="$1" kanban_concurrency="$2" extra_gateways extra_kanban floor
+  # The 1024 MiB baseline is the real-world-proven shape for the default gateway,
+  # Dashboard/API overhead, up to one secondary Matrix gateway, and up to three
+  # concurrent Kanban tasks. Scale only beyond that baseline so ordinary one/two-
+  # profile installs retain the known-good v5-v7 balance while larger public setups
+  # receive additional headroom inside the same aggregate budget.
+  extra_gateways=$(( matrix_gateways > 1 ? matrix_gateways - 1 : 0 ))
+  extra_kanban=$(( kanban_concurrency > 3 ? kanban_concurrency - 3 : 0 ))
+  floor=$((1024 + extra_gateways*192 + extra_kanban*96))
+  (( floor > 4096 )) && floor=4096
+  printf '%s' "$floor"
+}
+
+
+ollama_model_manifest_mib() {
+  local model="$1"
+  [[ -n "$model" ]] || return 1
+  python3 - "$PWD/data/ollama/models/manifests" "$model" <<'PY_OLLAMA_MANIFEST_SIZE'
+from pathlib import Path
+import json,sys
+root=Path(sys.argv[1]); raw=sys.argv[2].strip()
+if not raw or not root.is_dir(): raise SystemExit(1)
+name,tag=raw,'latest'
+last_slash=name.rfind('/')
+last_colon=name.rfind(':')
+if last_colon>last_slash:
+    name,tag=name[:last_colon],name[last_colon+1:] or 'latest'
+parts=[p for p in name.split('/') if p]
+if not parts: raise SystemExit(1)
+if len(parts)==1:
+    expected=root/'registry.ollama.ai'/'library'/parts[0]/tag
+elif '.' in parts[0] or ':' in parts[0] or parts[0]=='localhost':
+    expected=root.joinpath(*parts,tag)
+else:
+    expected=root/'registry.ollama.ai'/Path(*parts)/tag
+candidates=[]
+if expected.is_file(): candidates.append(expected)
+suffix=tuple(parts+[tag])
+for f in root.rglob(tag):
+    if not f.is_file() or f in candidates: continue
+    fp=f.parts
+    if len(fp)>=len(suffix) and tuple(fp[-len(suffix):])==suffix:
+        candidates.append(f)
+for manifest in candidates:
+    try:
+        data=json.loads(manifest.read_text(encoding='utf-8'))
+        entries=[]
+        cfg=data.get('config')
+        if isinstance(cfg,dict): entries.append(cfg)
+        entries.extend(x for x in (data.get('layers') or []) if isinstance(x,dict))
+        total=sum(int(x.get('size') or 0) for x in entries)
+        if total>0:
+            print((total+1048575)//1048576)
+            raise SystemExit(0)
+    except (OSError,ValueError,TypeError,json.JSONDecodeError):
+        continue
+raise SystemExit(1)
+PY_OLLAMA_MANIFEST_SIZE
+}
+
+resource_ollama_context_length() {
+  local context mem_kib
+  context="$(sed -n 's/^OLLAMA_CONTEXT_LENGTH=//p' .env 2>/dev/null | head -n1 || true)"
+  if [[ "$context" =~ ^[0-9]+$ && "$context" -ge 1024 ]]; then
+    printf '%s' "$context"
+  elif declare -F choose_ollama_context_length >/dev/null 2>&1; then
+    choose_ollama_context_length
+  else
+    # Keep the resource planner self-contained when reused by deterministic tooling
+    # or recovery slices that intentionally extract it before the later helper
+    # definition. Production normally takes the shared helper branch above.
+    mem_kib="$(awk '/^MemTotal:/ {print $2; exit}' /proc/meminfo 2>/dev/null || true)"
+    [[ "$mem_kib" =~ ^[0-9]+$ && "$mem_kib" -gt 0 ]] || return 1
+    if (( mem_kib < 10*1024*1024 )); then printf '8192'
+    elif (( mem_kib < 18*1024*1024 )); then printf '16384'
+    elif (( mem_kib < 34*1024*1024 )); then printf '32768'
+    else printf '65536'
+    fi
+  fi
+}
+
+resource_ollama_model_metrics() {
+  local accel="$1" text_model embed_model text_mib=0 embed_mib=0 artifact_mib=0 context floor transient context_overhead gpu_vram=0 host_model_mib
+  managed_ollama_enabled || { printf '0:0:0:0\n'; return 0; }
+  text_model="$(opt_text localTextModel)"
+  embed_model="$(opt_text localEmbeddingModel)"
+  text_mib="$(ollama_model_manifest_mib "$text_model" 2>/dev/null || printf 0)"
+  if [[ "$(opt_bool honcho)" == true ]]; then
+    embed_mib="$(ollama_model_manifest_mib "$embed_model" 2>/dev/null || printf 0)"
+  fi
+  [[ "$text_mib" =~ ^[0-9]+$ ]] || text_mib=0
+  [[ "$embed_mib" =~ ^[0-9]+$ ]] || embed_mib=0
+  artifact_mib=$(( text_mib > embed_mib ? text_mib : embed_mib ))
+  context="$(resource_ollama_context_length)" || return 1
+  [[ "$context" =~ ^[0-9]+$ ]] || return 1
+  if [[ "$accel" == cpu ]]; then
+    floor=4608
+    if (( artifact_mib > 0 )); then
+      transient=$((artifact_mib/4)); (( transient < 1024 )) && transient=1024
+      context_overhead=$(((context+15)/16)); (( context_overhead < 256 )) && context_overhead=256; (( context_overhead > 2048 )) && context_overhead=2048
+      floor=$((artifact_mib+transient+context_overhead))
+      floor=$((((floor+255)/256)*256))
+      (( floor < 4608 )) && floor=4608
+    fi
+  else
+    if [[ "$accel" == nvidia ]]; then
+      local smi
+      smi="$(command -v nvidia-smi 2>/dev/null || true)"; [[ -n "$smi" ]] || [[ ! -x /usr/lib/wsl/lib/nvidia-smi ]] || smi=/usr/lib/wsl/lib/nvidia-smi
+      if [[ -n "$smi" ]]; then gpu_vram="$("$smi" --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | awk '{s+=$1} END {if(s>0) printf "%.0f",s}')"; fi
+    elif [[ "$accel" == amd ]]; then
+      gpu_vram=0
+      shopt -s nullglob
+      local vf vb
+      for vf in /sys/class/drm/card*/device/mem_info_vram_total; do vb="$(cat "$vf" 2>/dev/null || true)"; [[ "$vb" =~ ^[0-9]+$ ]] && gpu_vram=$((gpu_vram+vb/1048576)); done
+      shopt -u nullglob
+    fi
+    [[ "$gpu_vram" =~ ^[0-9]+$ ]] || gpu_vram=0
+    host_model_mib=$((artifact_mib/4))
+    if (( artifact_mib > 0 && gpu_vram > 0 )); then
+      local usable_vram=$((gpu_vram*80/100))
+      host_model_mib=$((artifact_mib>usable_vram ? artifact_mib-usable_vram : artifact_mib/8))
+    fi
+    context_overhead=$(((context+31)/32)); (( context_overhead < 256 )) && context_overhead=256; (( context_overhead > 2048 )) && context_overhead=2048
+    floor=$((2048+host_model_mib+context_overhead))
+    floor=$((((floor+255)/256)*256))
+    (( floor < 2048 )) && floor=2048
+  fi
+  printf '%s:%s:%s:%s\n' "$text_mib" "$embed_mib" "$context" "$floor"
+}
+
 write_latticevale_compose_overlay() {
-  local accel="$1" limits="$2" cpus mem_mib compose_files
+  local accel="$1" limits="$2" cpus mem_mib compose_files matrix_profile_gateways kanban_concurrency hermes_floor_mib ollama_metrics ollama_text_mib ollama_embed_mib ollama_context ollama_floor_mib
   cpus="$(nproc 2>/dev/null || true)"
   [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 ]] || { echo 'Could not determine the CPU allocation currently visible to WSL; refusing to invent adaptive resource defaults.' >&2; return 1; }
   mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
   [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || { echo 'Could not determine the RAM allocation currently visible to WSL; refusing to invent adaptive resource defaults.' >&2; return 1; }
+  matrix_profile_gateways="$(resource_matrix_profile_gateways)" || return 1
+  kanban_concurrency="$(resource_kanban_concurrency)" || return 1
+  hermes_floor_mib="$(resource_hermes_floor_mib "$matrix_profile_gateways" "$kanban_concurrency")" || return 1
+  ollama_metrics="$(resource_ollama_model_metrics "$accel")" || return 1
+  IFS=: read -r ollama_text_mib ollama_embed_mib ollama_context ollama_floor_mib <<<"$ollama_metrics"
+  [[ "$ollama_text_mib" =~ ^[0-9]+$ && "$ollama_embed_mib" =~ ^[0-9]+$ && "$ollama_context" =~ ^[0-9]+$ && "$ollama_floor_mib" =~ ^[0-9]+$ ]] || { echo 'Could not determine model-aware Ollama resource metrics.' >&2; return 1; }
 
   # LatticeVale v14.3.32 resource policy: calculate one aggregate container-memory
   # budget from the RAM actually visible inside WSL, reserve headroom for the WSL
@@ -477,14 +636,19 @@ write_latticevale_compose_overlay() {
   # actually enabled. This avoids the old per-service percentage scheme whose
   # theoretical maxima could substantially overcommit a small WSL VM.
   local reserve_pct reserve_mib budget_mib
-  # v14.4.3 RAM-efficiency patch: leave a larger non-container reserve on
-  # memory-constrained WSL VMs. Container limits are ceilings, not allocations, but
-  # tighter aggregate ceilings prevent burst workloads from needlessly ballooning the
-  # WSL VM and leave Windows/Docker/kernel page-cache headroom.
-  if (( mem_mib <= 6144 )); then reserve_pct=30
-  elif (( mem_mib <= 12288 )); then reserve_pct=25
-  elif (( mem_mib <= 24576 )); then reserve_pct=20
-  else reserve_pct=15
+  # v14.5.1 resource policy v9: retain hard aggregate budgeting while sizing managed
+  # Ollama from installed model artifacts + context when measurable. CPU-backed
+  # Ollama on >6-12 GiB WSL VMs uses a bounded 10% non-container reserve so common
+  # local models retain transient headroom without re-starving Hermes.
+  # Other >6-24 GiB shapes keep 20%; <=6 GiB keeps the conservative 30% reserve.
+  if (( mem_mib <= 6144 )); then
+    reserve_pct=30
+  elif (( mem_mib <= 12288 )) && [[ "$accel" == cpu ]] && managed_ollama_enabled; then
+    reserve_pct=10
+  elif (( mem_mib <= 24576 )); then
+    reserve_pct=20
+  else
+    reserve_pct=15
   fi
   reserve_mib=$((mem_mib*reserve_pct/100))
   (( reserve_mib < 768 )) && reserve_mib=768
@@ -492,12 +656,33 @@ write_latticevale_compose_overlay() {
   budget_mib=$((mem_mib-reserve_mib))
   (( budget_mib >= 384 )) || { echo "WSL exposes only ${mem_mib} MiB RAM, leaving too little memory for a safe adaptive LatticeVale container budget." >&2; return 1; }
 
-  local hermes_cpu heavy_cpu medium_cpu light_cpu
+  local hermes_cpu heavy_cpu medium_cpu light_cpu topology_cpu_pressure topology_cpu_bonus
   local malloc_arena_max synapse_cache_factor pg_shared_buffers
   hermes_cpu=$(((cpus*3+3)/4)); (( hermes_cpu < 1 )) && hermes_cpu=1; (( hermes_cpu > cpus )) && hermes_cpu=$cpus
+  topology_cpu_pressure=$(( (matrix_profile_gateways > 1 ? matrix_profile_gateways - 1 : 0) + (kanban_concurrency > 3 ? kanban_concurrency - 3 : 0) ))
+  if (( topology_cpu_pressure > 0 )); then
+    topology_cpu_bonus=$(((topology_cpu_pressure+2)/3))
+    hermes_cpu=$((hermes_cpu+topology_cpu_bonus))
+    (( hermes_cpu > cpus )) && hermes_cpu=$cpus
+  fi
   heavy_cpu=$cpus
   medium_cpu=$(((cpus+1)/2)); (( medium_cpu < 1 )) && medium_cpu=1
   light_cpu=$(((cpus+3)/4)); (( light_cpu < 1 )) && light_cpu=1
+  # CPU ceilings are CFS quotas, not pinned cores or reservations. They scale from
+  # the processors actually visible to this WSL process: Hermes starts near 75% and
+  # scales toward 100% for profile/Kanban-heavy topologies; CPU-heavy Ollama gets
+  # 100%, medium services ~50%, and light stores ~25% (minimum one CPU).
+  # Policy v9 persists the generated per-service quota too, so clean/repair/start
+  # can prove Docker actually consumed a changed WSL CPU allocation.
+  declare -A cpu_limits=(
+    [hermes]="$hermes_cpu"
+    [synapse-db]="$medium_cpu" [synapse]="$medium_cpu"
+    [searxng-valkey]="$light_cpu" [searxng]="$medium_cpu"
+    [qmd]="$medium_cpu" [qmd-indexer]="$medium_cpu"
+    [ollama]="$heavy_cpu"
+    [honcho-db]="$medium_cpu" [honcho-redis]="$light_cpu"
+    [honcho-api]="$medium_cpu" [honcho-deriver]="$medium_cpu"
+  )
 
   # Conservative application-level RAM defaults layered on top of hard ceilings.
   # Synapse documents SYNAPSE_CACHE_FACTOR as its supported cache/RAM tradeoff.
@@ -517,52 +702,66 @@ write_latticevale_compose_overlay() {
   if [[ "$limits" == true ]]; then
     resource_plan="$(python3 - "$budget_mib" \
       "$(opt_bool matrix)" "$(opt_bool searxng)" "$(opt_bool qmd)" \
-      "$(if managed_ollama_enabled; then printf true; else printf false; fi)" "$(opt_bool honcho)" <<'PY_RESOURCE_PLAN'
+      "$(if managed_ollama_enabled; then printf true; else printf false; fi)" "$(opt_bool honcho)" "$accel" "$hermes_floor_mib" "$ollama_floor_mib" <<'PY_RESOURCE_PLAN'
 import sys
 budget=int(sys.argv[1])
-matrix=sys.argv[2]=='true'; searxng=sys.argv[3]=='true'; qmd=sys.argv[4]=='true'; ollama=sys.argv[5]=='true'; honcho=sys.argv[6]=='true'
+matrix=sys.argv[2]=='true'; searxng=sys.argv[3]=='true'; qmd=sys.argv[4]=='true'; ollama=sys.argv[5]=='true'; honcho=sys.argv[6]=='true'; accel=sys.argv[7]
+hermes_floor=int(sys.argv[8]); requested_ollama_floor=int(sys.argv[9])
+if not 1024 <= hermes_floor <= 4096:
+    raise SystemExit('Invalid adaptive Hermes topology floor.')
 # name, weight, preferred minimum MiB, useful ceiling MiB
-specs=[('hermes',5,512,4096)]
+# Policy v9 scales the central container floor with persistent secondary Matrix
+# gateways and high Kanban concurrency while keeping the proven common-case floor.
+hermes_cap=max(4096,min(8192,hermes_floor+4096))
+specs=[('hermes',8,hermes_floor,hermes_cap)]
 if matrix: specs += [('synapse-db',2,256,2048),('synapse',2,256,1536)]
 if searxng: specs += [('searxng-valkey',1,128,768),('searxng',2,256,1536)]
 if qmd: specs += [('qmd',2,256,2048),('qmd-indexer',2,256,2048)]
-if honcho: specs += [('honcho-db',2,256,2048),('honcho-redis',1,128,768),('honcho-api',3,384,3072),('honcho-deriver',3,384,3072)]
-# Policy v4 protects managed Ollama from the ~3 GiB hard ceiling observed under a
-# normal full-stack 10 GiB WSL allocation. Preserve the same aggregate container
-# budget: raise Ollama only when enough budget remains after the established minima
-# for all other enabled services. Constrained hosts still scale coherently rather than
-# borrowing from WSL/kernel/Docker reserve or changing global WSL memory settings.
+if honcho: specs += [('honcho-db',2,256,2048),('honcho-redis',1,128,768),('honcho-api',4,512,3072),('honcho-deriver',3,384,3072)]
+# Policy v9 retains the corrected Hermes balance while making managed-Ollama viability model-aware, but the central Hermes runtime
+# now has a 1 GiB preferred floor and Honcho API gets 512 MiB. This is based on a
+# real full-stack failure where Hermes repeatedly hit a 544 MiB cgroup limit while
+# WSL still had multiple GiB available. The aggregate still stays within budget.
+# Policy v9 treats these minima as viability requirements instead of proportionally
+# crushing them when the selected service set cannot fit the managed budget.
 if ollama:
     other_min_total=sum(m for _n,_w,m,_c in specs)
-    ollama_floor=max(2048,min(4096,budget-other_min_total-256))
-    specs += [('ollama',12,ollama_floor,32768)]
+    ollama_floor=max(2048,requested_ollama_floor)
+    ollama_cap=max(32768,min(65536,ollama_floor+8192))
+    specs += [('ollama',12,ollama_floor,ollama_cap)]
 mins={n:m for n,w,m,c in specs}; caps={n:c for n,w,m,c in specs}; weights={n:w for n,w,m,c in specs}
 alloc={n:0 for n,_,_,_ in specs}
 min_total=sum(mins.values())
-if min_total >= budget:
-    # Extremely constrained WSL allocations still get a coherent plan rather than
-    # impossible nominal floors. Divide proportionally and keep the aggregate <= budget.
-    raw={n:budget*mins[n]/min_total for n in alloc}
-    alloc={n:max(32,int(v//16)*16) for n,v in raw.items()}
-    while sum(alloc.values()) > budget:
-        n=max(alloc,key=alloc.get); alloc[n]=max(16,alloc[n]-16)
-else:
-    alloc.update(mins)
-    remaining=budget-min_total
-    # Weighted water-fill until all remaining budget is assigned or useful caps are hit.
-    while remaining >= 16:
-        open_names=[n for n in alloc if alloc[n]+16 <= caps[n]]
-        if not open_names: break
-        total_w=sum(weights[n] for n in open_names)
-        progressed=False
-        for n in sorted(open_names,key=lambda x:weights[x],reverse=True):
-            if remaining < 16: break
-            share=max(16,int((remaining*weights[n]/total_w)//16)*16)
-            add=min(share,caps[n]-alloc[n],remaining)
-            add=(add//16)*16
-            if add>=16:
-                alloc[n]+=add; remaining-=add; progressed=True
-        if not progressed: break
+if min_total > budget:
+    # Policy v9 never turns a selected service set into superficially valid but
+    # implausibly tiny hard ceilings. The enabled set must fit its defined safe
+    # minima inside the managed budget; otherwise the user can increase WSL RAM,
+    # deselect services, use native-Windows Ollama, or disable LatticeVale ceilings.
+    enabled=", ".join(n for n,_,_,_ in specs)
+    print(
+        f"Adaptive resource policy v9 cannot safely fit the selected services: "
+        f"budget={budget}MiB, minimum={min_total}MiB, services={enabled}. "
+        "Increase WSL-visible RAM, deselect components, use native-Windows Ollama where appropriate, "
+        "or disable adaptive container ceilings.",
+        file=sys.stderr,
+    )
+    raise SystemExit(3)
+alloc.update(mins)
+remaining=budget-min_total
+# Weighted water-fill until all remaining budget is assigned or useful caps are hit.
+while remaining >= 16:
+    open_names=[n for n in alloc if alloc[n]+16 <= caps[n]]
+    if not open_names: break
+    total_w=sum(weights[n] for n in open_names)
+    progressed=False
+    for n in sorted(open_names,key=lambda x:weights[x],reverse=True):
+        if remaining < 16: break
+        share=max(16,int((remaining*weights[n]/total_w)//16)*16)
+        add=min(share,caps[n]-alloc[n],remaining)
+        add=(add//16)*16
+        if add>=16:
+            alloc[n]+=add; remaining-=add; progressed=True
+    if not progressed: break
 for n,_,_,_ in specs:
     print(f'{n}={alloc[n]}')
 PY_RESOURCE_PLAN
@@ -646,9 +845,25 @@ PY_RESOURCE_PLAN
   [[ -s compose.override.yaml ]] && compose_files+=':compose.override.yaml'
   set_env .env COMPOSE_FILE "$compose_files"
   if [[ "$limits" == true ]]; then
-    printf 'POLICY_VERSION=4\nCPUS=%s\nMEM_MIB=%s\nRESERVE_MIB=%s\nBUDGET_MIB=%s\n' "$cpus" "$mem_mib" "$reserve_mib" "$budget_mib" > .latticevale-resource-state
+    {
+      printf 'POLICY_VERSION=9\nCPUS=%s\nMEM_MIB=%s\nRESERVE_MIB=%s\nBUDGET_MIB=%s\nMATRIX_PROFILE_GATEWAYS=%s\nKANBAN_CONCURRENCY=%s\nHERMES_MIN_MIB=%s\nOLLAMA_TEXT_ARTIFACT_MIB=%s\nOLLAMA_EMBED_ARTIFACT_MIB=%s\nOLLAMA_CONTEXT_LENGTH=%s\nOLLAMA_MODEL_FLOOR_MIB=%s\n' \
+        "$cpus" "$mem_mib" "$reserve_mib" "$budget_mib" "$matrix_profile_gateways" "$kanban_concurrency" "$hermes_floor_mib" "$ollama_text_mib" "$ollama_embed_mib" "$ollama_context" "$ollama_floor_mib"
+      # Persist the exact generated hard ceilings as part of the installer-owned
+      # resource fingerprint. v14.5.1 uses these values to verify that an existing
+      # running container was actually reconciled, not merely that the YAML on disk
+      # was rewritten. This closes the earlier repair-path gap where a policy upgrade could leave
+      # the old 544 MiB Hermes cgroup alive behind current-looking files/checkpoints.
+      local resource_state_svc resource_state_key
+      for resource_state_svc in hermes synapse-db synapse searxng-valkey searxng qmd qmd-indexer ollama honcho-db honcho-redis honcho-api honcho-deriver; do
+        [[ -n "${mem_limits[$resource_state_svc]:-}" ]] || continue
+        resource_state_key="${resource_state_svc^^}"
+        resource_state_key="${resource_state_key//-/_}"
+        printf 'LIMIT_%s_MIB=%s\n' "$resource_state_key" "${mem_limits[$resource_state_svc]}"
+        printf 'CPU_%s_MILLI=%s000\n' "$resource_state_key" "${cpu_limits[$resource_state_svc]}"
+      done
+    } > .latticevale-resource-state
     chmod 0600 .latticevale-resource-state
-    echo "Adaptive container ceilings (policy v4): WSL CPUs=$cpus, RAM=${mem_mib}MiB, reserved=${reserve_mib}MiB, container budget=${budget_mib}MiB across ${active_count} enabled services; managed Ollama receives additional protected headroom when the aggregate budget safely permits it; RAM-efficiency tuning: malloc arenas=${malloc_arena_max}, Synapse cache factor=${synapse_cache_factor}, PostgreSQL shared_buffers=${pg_shared_buffers}; user compose.override.yaml is applied last."
+    echo "Adaptive container ceilings (policy v9): WSL CPUs=$cpus, RAM=${mem_mib}MiB, reserved=${reserve_mib}MiB, container budget=${budget_mib}MiB across ${active_count} enabled services; Hermes topology floor=${hermes_floor_mib}MiB for ${matrix_profile_gateways} secondary Matrix gateway(s) and Kanban concurrency ${kanban_concurrency}; managed Ollama model-aware floor=${ollama_floor_mib}MiB (text artifact=${ollama_text_mib}MiB, embedding artifact=${ollama_embed_mib}MiB, context=${ollama_context}); RAM-efficiency tuning: malloc arenas=${malloc_arena_max}, Synapse cache factor=${synapse_cache_factor}, PostgreSQL shared_buffers=${pg_shared_buffers}; user compose.override.yaml is applied last."
   else
     rm -f .latticevale-resource-state
     echo 'Adaptive container ceilings: disabled; any existing user compose.override.yaml remains authoritative.'
@@ -658,7 +873,7 @@ PY_RESOURCE_PLAN
 
 verify_adaptive_runtime_policy() {
   [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
-  local cpus mem_mib saved_version saved_cpus saved_mem compose_selector overlay
+  local cpus mem_mib saved_version saved_cpus saved_mem saved_matrix_gateways saved_kanban_concurrency saved_hermes_floor current_matrix_gateways current_kanban_concurrency current_hermes_floor compose_selector overlay accel ollama_metrics current_text_mib current_embed_mib current_ollama_context current_ollama_floor saved_text_mib saved_embed_mib saved_ollama_context saved_ollama_floor
   cpus="$(nproc 2>/dev/null || true)"
   mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
   [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 && "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || return 1
@@ -666,7 +881,24 @@ verify_adaptive_runtime_policy() {
   saved_version="$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_cpus="$(sed -n 's/^CPUS=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
   saved_mem="$(sed -n 's/^MEM_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
-  [[ "$saved_version" == 4 && "$saved_cpus" == "$cpus" && "$saved_mem" == "$mem_mib" ]] || return 1
+  saved_matrix_gateways="$(sed -n 's/^MATRIX_PROFILE_GATEWAYS=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_kanban_concurrency="$(sed -n 's/^KANBAN_CONCURRENCY=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_hermes_floor="$(sed -n 's/^HERMES_MIN_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_text_mib="$(sed -n 's/^OLLAMA_TEXT_ARTIFACT_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_embed_mib="$(sed -n 's/^OLLAMA_EMBED_ARTIFACT_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_ollama_context="$(sed -n 's/^OLLAMA_CONTEXT_LENGTH=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  saved_ollama_floor="$(sed -n 's/^OLLAMA_MODEL_FLOOR_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
+  current_matrix_gateways="$(resource_matrix_profile_gateways)" || return 1
+  current_kanban_concurrency="$(resource_kanban_concurrency)" || return 1
+  current_hermes_floor="$(resource_hermes_floor_mib "$current_matrix_gateways" "$current_kanban_concurrency")" || return 1
+  accel=cpu; if managed_ollama_enabled; then accel="$(resolve_ollama_acceleration)" || return 1; fi
+  ollama_metrics="$(resource_ollama_model_metrics "$accel")" || return 1
+  IFS=: read -r current_text_mib current_embed_mib current_ollama_context current_ollama_floor <<<"$ollama_metrics"
+  [[ "$saved_version" == 9 && "$saved_cpus" == "$cpus" && "$saved_mem" == "$mem_mib" && \
+     "$saved_matrix_gateways" == "$current_matrix_gateways" && "$saved_kanban_concurrency" == "$current_kanban_concurrency" && \
+     "$saved_hermes_floor" == "$current_hermes_floor" && "$saved_text_mib" == "$current_text_mib" && \
+     "$saved_embed_mib" == "$current_embed_mib" && "$saved_ollama_context" == "$current_ollama_context" && \
+     "$saved_ollama_floor" == "$current_ollama_floor" ]] || return 1
   [[ -s compose.latticevale.yaml && ! -L compose.latticevale.yaml ]] || return 1
   overlay="$(cat compose.latticevale.yaml 2>/dev/null)" || return 1
   grep -q 'MALLOC_ARENA_MAX:' <<<"$overlay" || return 1
@@ -680,6 +912,76 @@ verify_adaptive_runtime_policy() {
   fi
   compose_selector="$(sed -n 's/^COMPOSE_FILE=//p' .env 2>/dev/null | head -n1)"
   [[ ":$compose_selector:" == *':compose.latticevale.yaml:'* ]] || return 1
+  return 0
+}
+
+verify_live_resource_policy_limits() {
+  [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
+  [[ -s .latticevale-resource-state && ! -L .latticevale-resource-state ]] || return 1
+  command -v docker >/dev/null 2>&1 || return 1
+
+  # Compare against the EFFECTIVE Compose model, not merely LatticeVale's generated
+  # overlay, because compose.override.yaml is user-owned and deliberately applied last.
+  # Policy v9 proves an existing container consumed both current mem_limit and cpus
+  # while preserving user overrides as authoritative.
+  local effective_limits
+  effective_limits="$(timeout --foreground --kill-after=3s 15s docker compose config --format json 2>/dev/null | python3 -c '
+import json,re,sys
+try: data=json.load(sys.stdin)
+except Exception: raise SystemExit(2)
+def size_bytes(v):
+    if isinstance(v,(int,float)): return int(v)
+    s=str(v or "").strip().lower()
+    if not s: return 0
+    if s.isdigit(): return int(s)
+    m=re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b?)",s)
+    if not m: return 0
+    n=float(m.group(1)); u=m.group(2)
+    mult={"":1,"b":1,"k":1024,"kb":1024,"ki":1024,"kib":1024,"m":1024**2,"mb":1024**2,"mi":1024**2,"mib":1024**2,"g":1024**3,"gb":1024**3,"gi":1024**3,"gib":1024**3,"t":1024**4,"tb":1024**4,"ti":1024**4,"tib":1024**4}.get(u,0)
+    return int(n*mult) if mult else 0
+def cpu_nanos(v):
+    try: return int(round(float(v or 0)*1_000_000_000))
+    except Exception: return 0
+for name,cfg in (data.get("services") or {}).items():
+    cfg=cfg or {}
+    print(f"{name}={size_bytes(cfg.get('"'"'mem_limit'"'"'))}:{cpu_nanos(cfg.get('"'"'cpus'"'"'))}")
+')" || return 1
+
+  local -a resource_pairs=("hermes:hermes-agent")
+  [[ "$(opt_bool matrix)" == true ]] && resource_pairs+=("synapse-db:hermes-synapse-db" "synapse:hermes-synapse")
+  [[ "$(opt_bool searxng)" == true ]] && resource_pairs+=("searxng-valkey:hermes-searxng-valkey" "searxng:hermes-searxng")
+  [[ "$(opt_bool qmd)" == true ]] && resource_pairs+=("qmd:hermes-qmd" "qmd-indexer:hermes-qmd-indexer")
+  managed_ollama_enabled && resource_pairs+=("ollama:hermes-ollama")
+  [[ "$(opt_bool honcho)" == true ]] && resource_pairs+=("honcho-db:hermes-honcho-db" "honcho-redis:hermes-honcho-redis" "honcho-api:hermes-honcho-api" "honcho-deriver:hermes-honcho-deriver")
+
+  local pair service container expected_pair expected_bytes expected_nano actual_pair actual_bytes actual_nano
+  for pair in "${resource_pairs[@]}"; do
+    service="${pair%%:*}"; container="${pair#*:}"
+    expected_pair="$(sed -n "s/^${service}=//p" <<<"$effective_limits" | head -n1)"
+    expected_bytes="${expected_pair%%:*}"; expected_nano="${expected_pair#*:}"
+    [[ "$expected_bytes" =~ ^[0-9]+$ && "$expected_bytes" -gt 0 ]] || {
+      echo "Adaptive resource verification failed: effective Compose mem_limit for $service is missing or invalid." >&2
+      return 1
+    }
+    [[ "$expected_nano" =~ ^[0-9]+$ && "$expected_nano" -gt 0 ]] || {
+      echo "Adaptive resource verification failed: effective Compose cpus for $service is missing or invalid." >&2
+      return 1
+    }
+    actual_pair="$(timeout --foreground --kill-after=2s 8s docker inspect -f '{{.HostConfig.Memory}}:{{.HostConfig.NanoCpus}}' "$container" 2>/dev/null || true)"
+    actual_bytes="${actual_pair%%:*}"; actual_nano="${actual_pair#*:}"
+    [[ "$actual_bytes" =~ ^[0-9]+$ && "$actual_nano" =~ ^[0-9]+$ ]] || {
+      echo "Adaptive resource verification failed: selected container $container is not available for live CPU/RAM verification." >&2
+      return 1
+    }
+    if [[ "$actual_bytes" != "$expected_bytes" ]]; then
+      echo "Adaptive resource verification failed: $container is still using $actual_bytes memory bytes instead of effective Compose limit $expected_bytes bytes. Compose reconciliation is required." >&2
+      return 1
+    fi
+    if [[ "$actual_nano" != "$expected_nano" ]]; then
+      echo "Adaptive resource verification failed: $container is still using $actual_nano NanoCPUs instead of effective Compose CPU limit $expected_nano NanoCPUs. Compose reconciliation is required." >&2
+      return 1
+    fi
+  done
   return 0
 }
 
@@ -1917,19 +2219,29 @@ profile_gateway_is_running_exact() {
 }
 
 wait_profile_gateway_up_exact() {
-  local name="$1" i state consecutive_up=0
-  for i in $(seq 1 20); do
-    if ! state="$(profile_gateway_s6_state "$name")"; then
-      return 2
-    fi
-    if [[ "$state" == up ]]; then
-      consecutive_up=$((consecutive_up+1))
-      (( consecutive_up >= 2 )) && return 0
+  local name="$1" wait_seconds="${2:-60}" i state consecutive_up=0 observed_state=false
+  [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]] || wait_seconds=60
+  # Gateway lifecycle commands can temporarily tear down/recreate the dynamic s6
+  # service while the Python runtime is under CPU/memory pressure. Treat a transient
+  # s6-svstat/exec failure as STARTING rather than immediately poisoning reconcile.
+  # Require two consecutive 'up' observations so a momentary process spawn is not
+  # mistaken for stable readiness. The loop remains strictly bounded.
+  for i in $(seq 1 "$wait_seconds"); do
+    if state="$(profile_gateway_s6_state "$name" 2>/dev/null)"; then
+      observed_state=true
+      if [[ "$state" == up ]]; then
+        consecutive_up=$((consecutive_up+1))
+        (( consecutive_up >= 2 )) && return 0
+      else
+        consecutive_up=0
+      fi
     else
+      state=unknown
       consecutive_up=0
     fi
     sleep 1
   done
+  [[ "$observed_state" == true ]] || return 2
   return 1
 }
 
@@ -1939,7 +2251,7 @@ profile_gateway_log_tail_exact() {
 name="$1"
 log="/opt/data/logs/gateways/$name/current"
 if [ -f "$log" ]; then
-  printf "--- exact Hermes gateway log: %s ---\n" "$name"
+  printf '%s\n' "--- exact Hermes gateway log: $name ---"
   tail -n 120 "$log"
 else
   printf "No rotated gateway log exists yet for profile %s at %s\n" "$name" "$log"
@@ -1987,10 +2299,18 @@ start_or_restart_profile_gateway_exact() {
       }
     fi
   fi
-  if ! wait_profile_gateway_up_exact "$name"; then
-    echo "Profile '$name' exact s6 gateway service did not become running after $action." >&2
-    profile_gateway_log_tail_exact "$name"
-    return 1
+  if ! wait_profile_gateway_up_exact "$name" 60; then
+    # A successful Hermes lifecycle command may return before its dynamic s6 service
+    # has settled. Request only this proven service slot up once, then grant one final
+    # bounded readiness window. This is preservation-first: no profile recreation,
+    # container-wide restart, or process-name kill is used.
+    echo "WARNING: Profile '$name' exact s6 gateway service is still settling after $action; requesting the same exact service slot up and retrying readiness." >&2
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "/run/service/gateway-$name" >/dev/null 2>&1 || true
+    if ! wait_profile_gateway_up_exact "$name" 60; then
+      echo "Profile '$name' exact s6 gateway service did not become stably running after bounded $action recovery." >&2
+      profile_gateway_log_tail_exact "$name"
+      return 1
+    fi
   fi
   return 0
 }
@@ -2031,10 +2351,17 @@ start_or_restart_default_gateway_exact() {
       }
     fi
   fi
-  if ! wait_profile_gateway_up_exact default; then
-    echo "Default gateway exact s6 service did not become running after $action." >&2
-    profile_gateway_log_tail_exact default
-    return 1
+  if ! wait_profile_gateway_up_exact default 60; then
+    # Hermes can report restart success before the exact dynamic s6 slot has settled.
+    # Reassert only the already-proven default slot as wanted-up and allow one final
+    # bounded readiness window instead of failing a healthy-but-slow repair.
+    echo "WARNING: Default gateway exact s6 service is still settling after $action; requesting the same exact service slot up and retrying readiness." >&2
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
+    if ! wait_profile_gateway_up_exact default 60; then
+      echo "Default gateway exact s6 service did not become stably running after bounded $action recovery." >&2
+      profile_gateway_log_tail_exact default
+      return 1
+    fi
   fi
   return 0
 }
@@ -2410,6 +2737,10 @@ verify_reconcile() {
   fi
   if [[ "$(opt_bool dashboard)" == true ]] && ! http_status_ok http://127.0.0.1:${DASHBOARD_HOST_PORT}/; then
     echo 'Reconcile verification failed: Dashboard endpoint is not ready.' >&2
+    return 1
+  fi
+  if ! verify_live_resource_policy_limits; then
+    echo 'Reconcile verification failed: live Docker CPU/RAM ceilings do not match the current adaptive resource policy.' >&2
     return 1
   fi
   if managed_ollama_enabled; then
@@ -3006,6 +3337,58 @@ if [[ "$(opt_bool honcho)" == true ]]; then
   fi
   unset honcho_db_populated honcho_local_config
 
+choose_honcho_timeout() {
+  local cpus accel text_mib=0 timeout
+  cpus="$(nproc 2>/dev/null || printf 4)"; [[ "$cpus" =~ ^[0-9]+$ ]] || cpus=4
+  if windows_native_ollama_enabled; then
+    timeout=150
+  else
+    accel="$(sed -n 's/^LATTICEVALE_OLLAMA_ACCELERATION=//p' .env 2>/dev/null | head -n1)"; [[ -n "$accel" ]] || accel="$(resolve_ollama_acceleration 2>/dev/null || printf cpu)"
+    if [[ "$accel" == cpu ]]; then
+      if (( cpus <= 4 )); then timeout=180; elif (( cpus <= 8 )); then timeout=150; else timeout=120; fi
+    else
+      timeout=90
+    fi
+  fi
+  text_mib="$(ollama_model_manifest_mib "$(opt_text localTextModel)" 2>/dev/null || printf 0)"
+  if [[ "$text_mib" =~ ^[0-9]+$ ]]; then
+    if (( text_mib >= 16384 )); then timeout=$((timeout+120)); elif (( text_mib >= 8192 )); then timeout=$((timeout+60)); elif (( text_mib >= 4096 )); then timeout=$((timeout+30)); fi
+  fi
+  (( timeout > 300 )) && timeout=300
+  printf '%s' "$timeout"
+}
+
+apply_honcho_timeout_policy() {
+  local path="$1" recommended marker
+  [[ -s "$path" ]] || return 1
+  recommended="$(choose_honcho_timeout)" || return 1
+  marker="${path}.latticevale-timeout-auto"
+  python3 - "$path" "$marker" "$recommended" <<'PY_HONCHO_TIMEOUT'
+from pathlib import Path
+import json,sys
+path=Path(sys.argv[1]); marker=Path(sys.argv[2]); recommended=float(sys.argv[3])
+try: cfg=json.loads(path.read_text(encoding='utf-8'))
+except Exception as exc: raise SystemExit(f'Invalid Honcho JSON {path}: {exc}')
+if not isinstance(cfg,dict): raise SystemExit('Honcho config root must be an object')
+current=cfg.get('timeout', cfg.get('requestTimeout'))
+previous=None
+try: previous=float(marker.read_text(encoding='utf-8').strip()) if marker.is_file() else None
+except Exception: previous=None
+owned=(current is None) or (previous is not None and isinstance(current,(int,float)) and float(current)==previous)
+if owned:
+    cfg.pop('requestTimeout',None)
+    cfg['timeout']=recommended
+    path.write_text(json.dumps(cfg,indent=2)+'\n',encoding='utf-8')
+    path.chmod(0o600)
+    marker.write_text(str(int(recommended) if recommended.is_integer() else recommended)+'\n',encoding='utf-8')
+    marker.chmod(0o600)
+    print(f'Honcho request timeout: LatticeVale-managed {recommended:g}s ({path})')
+else:
+    marker.unlink(missing_ok=True)
+    print(f'Preserving user-set Honcho request timeout={current} ({path})')
+PY_HONCHO_TIMEOUT
+}
+
   # Active Honcho inference is now entirely local. "ollama-local" is a dummy
   # compatibility value for the OpenAI client; it is not a cloud credential.
   : > secrets/honcho.env
@@ -3209,6 +3592,23 @@ done
 return 1
 }
 
+reconcile_model_aware_ollama_resources() {
+  managed_ollama_enabled || return 0
+  [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
+  local accel before after
+  accel="$(resolve_ollama_acceleration)" || return 1
+  before="$(sha256sum .latticevale-resource-state 2>/dev/null | awk '{print $1}' || true)"
+  write_latticevale_compose_overlay "$accel" true || return 1
+  after="$(sha256sum .latticevale-resource-state 2>/dev/null | awk '{print $1}' || true)"
+  if [[ "$before" != "$after" ]]; then
+    echo 'Managed Ollama model artifacts are now measurable; reconciling the model-aware policy v9 ceiling before model inference/embedding verification.'
+    timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --no-build ollama || return 1
+    wait_managed_ollama_healthy 60 || return 1
+    state_mark reconcile pending 'model-aware Ollama resource fingerprint changed after model download; complete stack requires Compose reconciliation'
+  fi
+  return 0
+}
+
 stage_infrastructure() {
 # Validate the Compose model before starting, downloading, or building anything.
 docker compose config --quiet
@@ -3256,6 +3656,9 @@ if local_ai_enabled; then
   ensure_ollama_model "$(opt_text localTextModel)"
   if [[ "$(opt_bool honcho)" == true ]]; then
     ensure_ollama_model "$(opt_text localEmbeddingModel)"
+  fi
+  reconcile_model_aware_ollama_resources || return 1
+  if [[ "$(opt_bool honcho)" == true ]]; then
     if managed_ollama_enabled; then
       echo 'Restarting managed Ollama before embedding verification to release any resident text model and reclaim memory.'
       timeout --foreground --kill-after=10s 90s docker compose restart ollama
@@ -4818,10 +5221,22 @@ names=[x.strip() for x in managed.read_text().splitlines() if x.strip()] if mana
 for name in ['default']+[n for n in names if (Path('data/hermes/profiles')/n).is_dir()]:
     host='hermes' if name=='default' else 'hermes.'+name
     path=Path('data/hermes/honcho.json') if name=='default' else Path('data/hermes/profiles')/name/'honcho.json'
-    cfg={'baseUrl':'http://honcho-api:8000','hosts':{host:{'enabled':True,'aiPeer':'hermes' if name=='default' else name,'peerName':peer,'workspace':'hermes'}}}
+    try: cfg=json.loads(path.read_text(encoding='utf-8')) if path.is_file() else {}
+    except Exception: cfg={}
+    if not isinstance(cfg,dict): cfg={}
+    cfg['baseUrl']='http://honcho-api:8000'
+    hosts=cfg.get('hosts') if isinstance(cfg.get('hosts'),dict) else {}
+    block=hosts.get(host) if isinstance(hosts.get(host),dict) else {}
+    block.update({'enabled':True,'aiPeer':'hermes' if name=='default' else name,'peerName':peer,'workspace':'hermes'})
+    hosts[host]=block; cfg['hosts']=hosts
     path.write_text(json.dumps(cfg,indent=2)+'\n')
     path.chmod(0o600)
 PY
+  apply_honcho_timeout_policy data/hermes/honcho.json || return 1
+  while IFS= read -r honcho_profile; do
+    [[ -n "$honcho_profile" && -s "data/hermes/profiles/$honcho_profile/honcho.json" ]] || continue
+    apply_honcho_timeout_policy "data/hermes/profiles/$honcho_profile/honcho.json" || return 1
+  done < .installer-managed-profiles
 fi
 
 
@@ -4910,6 +5325,10 @@ wait_hermes_gateway_surfaces 'reconcile gateway restart' 60
 if [[ "$(opt_bool matrix)" == true ]]; then
   wait_matrix_backend_from_hermes 60
 fi
+verify_live_resource_policy_limits || {
+  echo 'Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v9.' >&2
+  return 1
+}
 return 0
 }
 
@@ -5049,6 +5468,9 @@ return 0
 # effective only after the WSL VM restarts; recalculating here means the next normal
 # LatticeVale start automatically follows the resources WSL now exposes.
 if [[ "${1:-}" == --refresh-resource-policy ]]; then
+  if [[ "$(opt_bool containerResourceLimits)" == true ]] && verify_adaptive_runtime_policy; then
+    exit 0
+  fi
   refresh_accel=cpu
   if managed_ollama_enabled; then refresh_accel="$(resolve_ollama_acceleration)" || exit 1; fi
   write_latticevale_compose_overlay "$refresh_accel" "$(opt_bool containerResourceLimits)"

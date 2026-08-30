@@ -1,5 +1,13 @@
 # Support
 
+## v14.5.1 adaptive CPU/RAM / OOM support note
+
+Current v14.5.1 resource policy v9 derives CPU ceilings from processors actually visible inside WSL, verifies effective Compose `cpus` against Docker `HostConfig.NanoCpus`, and gives CPU-backed managed Ollama a 4608 MiB provisional floor before model artifacts are measurable, then a model/context-aware floor after download after a measured policy-v6 4128 MiB ceiling produced sustained `memory.max` pressure. Effective Compose `mem_limit` is verified against `HostConfig.Memory` in the same pass. If WSL CPU/RAM allocation or Matrix-profile/Kanban topology changes, or policy-v8-or-older state is present, adaptive state becomes stale and is regenerated.
+
+Policy v9 does not promise that every selected component set can run inside every RAM size. It is feature-aware: only enabled services contribute to the minimum, but if that minimum cannot fit inside the post-reserve container budget, LatticeVale fails the adaptive plan with an actionable message instead of generating tiny hard ceilings. Increase WSL-visible RAM, deselect optional components, use native-Windows Ollama where appropriate, or disable adaptive container ceilings.
+
+If `./manage.sh audit`, `verify`, or `repair --plan` reports `runtimePolicy PARTIAL` because a selected running container has Docker `OOMKilled=true`, use the full v14.5.1 release and choose **Resume / repair installation**. Policy v9 intentionally treats policy-v8-or-older resource fingerprints or changed hardware/topology fingerprints as stale and recalculates/reconciles the generated Compose CPU/RAM ceilings without deleting volumes, changing profiles/providers, rotating Matrix identity, or taking ownership of global WSL memory settings. On a normal full ~10 GiB CPU-backed managed-Ollama stack, Hermes should receive at least a 1024 MiB preferred ceiling, Honcho API at least 512 MiB, and Ollama at least 4608 MiB while the aggregate budget remains bounded. User `compose.override.yaml` remains final/authoritative.
+
 ## v14.4.82: WSL recovered but installer still says no eligible distro
 
 If the installer prints `WSL launch recovered after wsl --shutdown` and then warns that the bounded helper exited with a long block of helper text ending in `0`, that is the v14.4.81 return-channel bug. Use v14.4.82. The WSL recovery itself succeeded; v14.4.82 keeps the helper output visible but returns only exit code `0`, causing the installer to re-probe the same distro and continue through normal eligibility. For an existing installer-managed stack, the existing 10 GiB Resume / repair free-space floor is then evaluated normally; this hotfix does not lower the 50 GiB true fresh-install reserve.
@@ -102,7 +110,7 @@ Implementation details: `PATCH-NOTES.md`.
 
 Resume / repair no longer fails merely because a live SQLite `*-shm`/`*-wal` sidecar or rotated log disappears during root-assisted ownership reconciliation. Rerun Resume / repair with v14.4.4; the bootstrap tolerates only paths that actually vanished and will still stop on a genuine ownership/permission error for an entry that remains present.
 
-The v14.4.3 RAM-efficiency and uninstaller behavior remains inherited, while v14.4.84 retains the v14.4.83 active adaptive policy v4; user `compose.override.yaml` remains authoritative, global WSL RAM/reclaim settings remain user-owned, and Docker-unavailable uninstall still fails closed when runtime may remain.
+The v14.4.3 RAM-efficiency and uninstaller behavior remains inherited. v14.4.84 historically retained policy v4; the current v14.5.1 resource policy is v9. Its Hermes floor and CPU ceiling adapt to persistent secondary Matrix gateways and high Kanban concurrency, and generated startup helpers probe current resources/topology at runtime. User `compose.override.yaml` remains authoritative, global WSL RAM/reclaim settings remain user-owned, and Docker-unavailable uninstall still fails closed when runtime may remain.
 
 ## v14.4.1 layout note
 
@@ -159,3 +167,7 @@ If **Update / repair** refuses to start because the pre-update backup cannot com
 
 
 For v14.4.4 live repair metadata-race behavior, see `PATCH-NOTES.md`.
+
+### Policy v9 model/timeout diagnostics
+
+For managed Ollama, `.latticevale-resource-state` records `OLLAMA_TEXT_ARTIFACT_MIB`, `OLLAMA_EMBED_ARTIFACT_MIB`, `OLLAMA_CONTEXT_LENGTH`, and `OLLAMA_MODEL_FLOOR_MIB`. A model download or user context change therefore makes the policy fingerprint stale and triggers normal bounded reconciliation. `./manage.sh status` reports cgroup pressure using a two-sample delta: a lifetime `memory.max` count that is not increasing is historical information, while new `memory.max`, `oom`, or `oom_kill` events indicate current pressure. Honcho timeout defaults are LatticeVale-owned only when the corresponding `.latticevale-timeout-auto` sidecar proves ownership; editing the JSON timeout makes it user-owned and it is preserved.

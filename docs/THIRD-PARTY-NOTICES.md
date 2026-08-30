@@ -1,6 +1,6 @@
 # Third-party notices
 
-v14.5.0 adds no new third-party runtime dependency, binary, image, model, hosted service, or paid API requirement. Its new read-only planner/config-state reader/free-operation audit use only Python standard-library functionality and existing LatticeVale state/audit surfaces.
+v14.5.1 adds no new third-party runtime dependency and changes no third-party pin. It modifies only first-party adaptive memory/audit behavior. v14.5.0 added no new third-party runtime dependency, binary, image, model, hosted service, or paid API requirement. Its new read-only planner/config-state reader/free-operation audit use only Python standard-library functionality and existing LatticeVale state/audit surfaces.
 
 The v14.4.7 web-extraction change, v14.4.8 Hermes clean/repair maintenance, v14.4.81/v14.4.82 WSL recovery hotfixes, and v14.4.83 runtime-policy/sysctl/Ubuntu-Pro-option-removal patch add no redistributed third-party binary, image, package, or license. Local browser support uses the Chromium/Playwright runtime already provided by the separately obtained Hermes Agent image.
 

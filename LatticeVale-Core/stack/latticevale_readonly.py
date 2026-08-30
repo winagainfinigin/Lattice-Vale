@@ -271,7 +271,7 @@ class StackSnapshot:
                 "user-owned Compose override applied after generated policy",
                 override.is_file(),
                 _sha256_file(override),
-                "opaque/user-owned: v14.5.0 does not parse, normalize, or rewrite this file",
+                "opaque/user-owned: the read-only planner does not parse, normalize, or rewrite this file",
             ),
             SourceInfo(
                 ".installer-state.json",

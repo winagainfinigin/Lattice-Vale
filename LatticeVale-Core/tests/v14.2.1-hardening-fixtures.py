@@ -13,7 +13,7 @@ install=(root/'installer/install.ps1').read_text(encoding='utf-8')
 verify=(root/'installer/verify-release.ps1').read_text(encoding='utf-8')
 shared=(root/'tools/ReleaseManifest.ps1').read_text(encoding='utf-8')
 generator=(root/'tools/New-SourceManifest.ps1').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0'}
+assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1'}
 assert 'schema = 19' in ps
 assert "ollamaAcceleration = $ollamaAcceleration" in ps
 assert "$options.Remove('ollamaAcceleration')" in ps and 'Legacy repair: preserving the existing Ollama image/runtime choice' in ps
@@ -59,7 +59,7 @@ assert 'function Assert-PortableReleaseRelativePath' not in generator
 # generation regressions that static string checks cannot.
 start=conf.index('clamp_int() {')
 end=conf.index('\nchoose_ollama_context_length()', start)
-functions=conf[start:end]
+functions=conf[start:end].replace('/proc/meminfo', 'fake-meminfo')
 with tempfile.TemporaryDirectory() as td:
     td=Path(td)
     harness=r'''set -Eeuo pipefail
@@ -88,6 +88,7 @@ managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed
 cat > install-options.json <<'JSON_OPTIONS'
 {"matrix":true,"searxng":true,"qmd":true,"honcho":true,"hermesLocalAI":true,"ollamaBackend":"managed"}
 JSON_OPTIONS
+printf 'MemTotal: 16777216 kB\n' > fake-meminfo
 write_latticevale_compose_overlay cpu true
 '''
     r=subprocess.run(['bash','-c',harness],cwd=td,text=True,capture_output=True,timeout=20)
@@ -96,7 +97,7 @@ write_latticevale_compose_overlay cpu true
     env=(td/'.env').read_text()
     assert 'cpus:' in overlay and 'mem_limit:' in overlay
     assert 'COMPOSE_FILE=compose.yaml:compose.latticevale.yaml' in env
-    mem_visible=int(next(line.split()[1] for line in Path('/proc/meminfo').read_text().splitlines() if line.startswith('MemTotal:')))//1024
+    mem_visible=16384
     limits=[int(x) for x in re.findall(r'mem_limit: "?(\d+)m"?', overlay)]
     assert limits and max(limits) <= mem_visible, (max(limits), mem_visible)
     parsed=yaml.safe_load(overlay)
@@ -134,7 +135,7 @@ managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed
 cat > install-options.json <<'JSON_OPTIONS'
 {"hermesLocalAI":true,"ollamaBackend":"managed"}
 JSON_OPTIONS
-''' + f'write_latticevale_compose_overlay {accel} false\n'
+''' + f"printf 'MemTotal: 16777216 kB\\n' > fake-meminfo\nwrite_latticevale_compose_overlay {accel} false\n"
         r=subprocess.run(['bash','-c',harness],cwd=td,text=True,capture_output=True,timeout=20)
         assert r.returncode==0, (accel,r.stderr)
         parsed=yaml.safe_load((td/'compose.latticevale.yaml').read_text())

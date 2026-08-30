@@ -497,10 +497,22 @@ if ! timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1; then
   for _ in {1..30}; do timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1 && break; sleep 1; done
 fi
 timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1 || { echo 'Docker daemon could not be started.' >&2; exit 1; }
-# Refresh adaptive ceilings only when that policy is enabled and either the policy
-# revision or WSL-visible CPU/RAM fingerprint changed. A routine start must not rewrite
-# Compose state needlessly.
-resource_limits_enabled="$(python3 - "\$stack_dir/install-options.json" <<'PY_RESOURCE_ENABLED'
+# Preserve explicit missing/stale-state handling under `set -Eeuo pipefail`: older
+# helpers inspected these fields directly, and an absent state file must never abort
+# before the authoritative policy-v9 refresh path gets a chance to regenerate it.
+saved_version=''
+saved_cpus=''
+saved_mem=''
+if [[ -s "\$stack_dir/.latticevale-resource-state" ]]; then
+  saved_version="\$(sed -n 's/^POLICY_VERSION=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
+  saved_cpus="\$(sed -n 's/^CPUS=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
+  saved_mem="\$(sed -n 's/^MEM_MIB=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
+fi
+# Ask the stack-owned policy verifier to refresh on every startup path. The refresh
+# subcommand is itself a no-op when policy v9 fingerprints already match, but it can
+# detect hardware, profile/Kanban topology, installed Ollama artifact/context, and
+# policy-revision changes without duplicating allocator logic in this root helper.
+resource_limits_enabled="\$(python3 - "\$stack_dir/install-options.json" <<'PY_RESOURCE_ENABLED'
 import json,sys
 try:
     d=json.load(open(sys.argv[1],encoding='utf-8'))
@@ -510,21 +522,8 @@ except Exception:
 PY_RESOURCE_ENABLED
 )"
 if [[ "\$resource_limits_enabled" == true ]]; then
-  current_cpus="$(nproc 2>/dev/null || true)"
-  current_mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-  if [[ -s "\$stack_dir/.latticevale-resource-state" ]]; then
-    saved_version="$(sed -n 's/^POLICY_VERSION=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
-    saved_cpus="$(sed -n 's/^CPUS=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
-    saved_mem="$(sed -n 's/^MEM_MIB=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
-  else
-    saved_version=''
-    saved_cpus=''
-    saved_mem=''
-  fi
-  if [[ "\$saved_version" != 4 || "\$saved_cpus" != "\$current_cpus" || "\$saved_mem" != "\$current_mem_mib" ]]; then
-    runuser -u "\$stack_user" -- env HOME="\$stack_home" USER="\$stack_user" DOCKER_HOST=unix:///var/run/docker.sock \
-      bash -c 'cd "\$1" && ./configure-stack.sh --refresh-resource-policy' bash "\$stack_dir" || { echo 'Could not refresh LatticeVale adaptive resource policy.' >&2; exit 1; }
-  fi
+  runuser -u "\$stack_user" -- env HOME="\$stack_home" USER="\$stack_user" DOCKER_HOST=unix:///var/run/docker.sock \
+    bash -c 'cd "\$1" && ./configure-stack.sh --refresh-resource-policy' bash "\$stack_dir" || { echo 'Could not refresh LatticeVale adaptive resource policy.' >&2; exit 1; }
 fi
 if [[ -s "\$stack_dir/.windows-native-info" ]]; then
   native_transport="\$(sed -n 's/^TRANSPORT=//p' "\$stack_dir/.windows-native-info" | head -n1 | tr -d '\r')"

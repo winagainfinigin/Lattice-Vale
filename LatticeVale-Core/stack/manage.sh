@@ -211,6 +211,52 @@ show_hardware_summary() {
   echo '  Note: model size vs VRAM is only a warning; quantization, context length, KV cache, multi-GPU use, and partial offload change actual memory needs.'
 }
 
+show_memory_pressure_summary() {
+  local -a containers=(hermes-agent)
+  [[ "$(opt_bool matrix)" == true ]] && containers+=(hermes-synapse-db hermes-synapse)
+  [[ "$(opt_bool searxng)" == true ]] && containers+=(hermes-searxng-valkey hermes-searxng)
+  [[ "$(opt_bool qmd)" == true ]] && containers+=(hermes-qmd hermes-qmd-indexer)
+  managed_ollama_enabled && containers+=(hermes-ollama)
+  [[ "$(opt_bool honcho)" == true ]] && containers+=(hermes-honcho-db hermes-honcho-redis hermes-honcho-api hermes-honcho-deriver)
+  declare -A ev_before_max=() ev_before_oom=() ev_before_kill=() ev_path=()
+  local c pid cg ev line
+  for c in "${containers[@]}"; do
+    pid="$(docker inspect -f '{{.State.Pid}}' "$c" 2>/dev/null || true)"
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 && -r "/proc/$pid/cgroup" ]] || continue
+    cg="$(awk -F: '$1=="0"{print $3;exit}' "/proc/$pid/cgroup" 2>/dev/null || true)"
+    ev="/sys/fs/cgroup${cg}/memory.events"
+    [[ -r "$ev" ]] || continue
+    ev_path[$c]="$ev"
+    ev_before_max[$c]="$(awk '$1=="max"{print $2}' "$ev")"
+    ev_before_oom[$c]="$(awk '$1=="oom"{print $2}' "$ev")"
+    ev_before_kill[$c]="$(awk '$1=="oom_kill"{print $2}' "$ev")"
+  done
+  ((${#ev_path[@]})) || return 0
+  sleep 2
+  echo
+  echo 'Current cgroup memory-pressure sample (2s delta; lifetime counters shown only as context):'
+  local now_max now_oom now_kill dmax doom dkill current max_limit pct
+  for c in "${containers[@]}"; do
+    ev="${ev_path[$c]:-}"; [[ -n "$ev" && -r "$ev" ]] || continue
+    now_max="$(awk '$1=="max"{print $2}' "$ev")"; now_oom="$(awk '$1=="oom"{print $2}' "$ev")"; now_kill="$(awk '$1=="oom_kill"{print $2}' "$ev")"
+    dmax=$((now_max-${ev_before_max[$c]:-0})); doom=$((now_oom-${ev_before_oom[$c]:-0})); dkill=$((now_kill-${ev_before_kill[$c]:-0}))
+    pid="$(docker inspect -f '{{.State.Pid}}' "$c" 2>/dev/null || true)"; cg="$(awk -F: '$1=="0"{print $3;exit}' "/proc/$pid/cgroup" 2>/dev/null || true)"
+    current="$(cat "/sys/fs/cgroup${cg}/memory.current" 2>/dev/null || printf 0)"; max_limit="$(cat "/sys/fs/cgroup${cg}/memory.max" 2>/dev/null || printf max)"
+    pct='n/a'; if [[ "$current" =~ ^[0-9]+$ && "$max_limit" =~ ^[0-9]+$ && "$max_limit" -gt 0 ]]; then pct="$((current*100/max_limit))%"; fi
+    if (( dkill > 0 )); then
+      printf '  %-24s CRITICAL oom_kill +%s, oom +%s, memory.max +%s, usage=%s\n' "$c" "$dkill" "$doom" "$dmax" "$pct"
+    elif (( doom > 0 )); then
+      printf '  %-24s PRESSURE oom +%s, memory.max +%s, usage=%s\n' "$c" "$doom" "$dmax" "$pct"
+    elif (( dmax > 0 )); then
+      printf '  %-24s ACTIVE memory.max +%s in 2s, usage=%s (lifetime max=%s)\n' "$c" "$dmax" "$pct" "$now_max"
+    elif (( now_max > 0 )); then
+      printf '  %-24s HISTORICAL no new max/OOM events in 2s, usage=%s (lifetime max=%s)\n' "$c" "$pct" "$now_max"
+    else
+      printf '  %-24s CLEAR no max/OOM events, usage=%s\n' "$c" "$pct"
+    fi
+  done
+}
+
 docker_ready() { docker info >/dev/null 2>&1; }
 ensure_docker_for_user() {
   docker_ready && return 0
@@ -462,6 +508,7 @@ status() {
   fi
   show_pin_summary
   show_hardware_summary
+  show_memory_pressure_summary
   echo
   docker exec -u hermes hermes-agent hermes profile list || true
   if [[ "$(opt_bool kanban)" == true ]]; then echo; docker exec -u hermes hermes-agent hermes kanban list || true; fi
@@ -549,14 +596,23 @@ exec /command/s6-svstat "$svc"
 }
 
 wait_profile_gateway_up_exact() {
-  local name="$1" i state
-  for i in $(seq 1 20); do
-    if ! state="$(profile_gateway_s6_state_exact "$name")"; then
-      return 2
+  local name="$1" wait_seconds="${2:-60}" i state consecutive_up=0 observed_state=false
+  [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]] || wait_seconds=60
+  for i in $(seq 1 "$wait_seconds"); do
+    if state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null)"; then
+      observed_state=true
+      if [[ "$state" == up ]]; then
+        consecutive_up=$((consecutive_up+1))
+        (( consecutive_up >= 2 )) && return 0
+      else
+        consecutive_up=0
+      fi
+    else
+      consecutive_up=0
     fi
-    [[ "$state" == up ]] && return 0
     sleep 1
   done
+  [[ "$observed_state" == true ]] || return 2
   return 1
 }
 
@@ -566,7 +622,7 @@ profile_gateway_log_tail_exact_manage() {
 name="$1"
 log="/opt/data/logs/gateways/$name/current"
 if [ -f "$log" ]; then
-  printf "--- exact Hermes gateway log: %s ---\n" "$name"
+  printf '%s\n' "--- exact Hermes gateway log: $name ---"
   tail -n 120 "$log"
 else
   printf "No rotated gateway log exists yet for profile %s at %s\n" "$name" "$log"
@@ -593,7 +649,8 @@ start_profile_gateway_exact_manage() {
   esac
 
   if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes -p "$name" gateway start >/dev/null; then
-    wait_profile_gateway_up_exact "$name" && return 0
+    wait_profile_gateway_up_exact "$name" 60 && return 0
+    echo "WARNING: Hermes named-profile gateway start returned before '$name' became stably ready; retrying only its exact s6 service slot." >&2
   else
     echo "WARNING: Hermes named-profile gateway start failed for '$name'; retrying only its exact s6 service slot." >&2
   fi
@@ -606,8 +663,8 @@ start_profile_gateway_exact_manage() {
     profile_gateway_log_tail_exact_manage "$name"
     return 1
   fi
-  if ! wait_profile_gateway_up_exact "$name"; then
-    echo "Profile '$name' exact s6 gateway service did not become running after fallback activation." >&2
+  if ! wait_profile_gateway_up_exact "$name" 60; then
+    echo "Profile '$name' exact s6 gateway service did not become stably running after bounded fallback activation." >&2
     profile_gateway_log_tail_exact_manage "$name"
     return 1
   fi
@@ -615,7 +672,7 @@ start_profile_gateway_exact_manage() {
 }
 
 reconcile_default_gateway_manage() {
-  local state action service
+  local state action service lifecycle_ok=false
   service="/run/service/gateway-default"
   state="$(profile_gateway_s6_state_exact default 2>/dev/null || true)"
   case "$state" in
@@ -633,16 +690,20 @@ reconcile_default_gateway_manage() {
   esac
 
   if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway "$action" >/dev/null 2>&1; then
-    wait_profile_gateway_up_exact default && return 0
+    lifecycle_ok=true
+    wait_profile_gateway_up_exact default 60 && return 0
+    echo "WARNING: Hermes default gateway $action returned before its exact s6 service became stably ready; reasserting only that service slot." >&2
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
+  else
+    echo "WARNING: Hermes default gateway $action failed; retrying only its exact s6 service slot." >&2
+    if [[ "$action" == start ]]; then
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
+    else
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
+    fi
   fi
 
-  echo "WARNING: Hermes default gateway $action failed; retrying only its exact s6 service slot." >&2
-  if [[ "$action" == start ]]; then
-    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
-  else
-    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
-  fi
-  wait_profile_gateway_up_exact default || {
+  wait_profile_gateway_up_exact default 60 || {
     profile_gateway_log_tail_exact_manage default
     return 1
   }
@@ -667,16 +728,19 @@ reconcile_profile_gateway_exact_manage() {
   esac
 
   if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes -p "$name" gateway "$action" >/dev/null 2>&1; then
-    wait_profile_gateway_up_exact "$name" && return 0
+    wait_profile_gateway_up_exact "$name" 60 && return 0
+    echo "WARNING: Hermes profile '$name' gateway $action returned before its exact s6 service became stably ready; reasserting only that service slot." >&2
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
+  else
+    echo "WARNING: Hermes profile '$name' gateway $action failed; retrying only its exact s6 service slot." >&2
+    if [[ "$action" == start ]]; then
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
+    else
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
+    fi
   fi
 
-  echo "WARNING: Hermes profile '$name' gateway $action failed; retrying only its exact s6 service slot." >&2
-  if [[ "$action" == start ]]; then
-    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
-  else
-    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
-  fi
-  wait_profile_gateway_up_exact "$name" || {
+  wait_profile_gateway_up_exact "$name" 60 || {
     profile_gateway_log_tail_exact_manage "$name"
     return 1
   }
@@ -936,16 +1000,12 @@ start_selected_matrix_profile_gateways() {
 refresh_adaptive_resource_policy() {
   RESOURCE_POLICY_CHANGED=false
   [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
-  local cpus mem_mib saved_cpus saved_mem saved_version
-  cpus="$(nproc 2>/dev/null || true)"
-  mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-  [[ "$cpus" =~ ^[0-9]+$ && "$mem_mib" =~ ^[0-9]+$ ]] || { echo 'Could not read current WSL CPU/RAM allocation for adaptive resource refresh.' >&2; return 1; }
-  saved_version="$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
-  saved_cpus="$(sed -n 's/^CPUS=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
-  saved_mem="$(sed -n 's/^MEM_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1)"
-  if [[ "$saved_version" != 4 || "$saved_cpus" != "$cpus" || "$saved_mem" != "$mem_mib" ]]; then
-    echo "WSL resource allocation changed or has not been fingerprinted (CPUs=${cpus}, RAM=${mem_mib}MiB); recalculating adaptive LatticeVale ceilings."
-    timeout --foreground --kill-after=10s 90s ./configure-stack.sh --refresh-resource-policy
+  local before after
+  before="$(sha256sum .latticevale-resource-state 2>/dev/null | awk '{print $1}' || true)"
+  timeout --foreground --kill-after=10s 90s ./configure-stack.sh --refresh-resource-policy || return 1
+  after="$(sha256sum .latticevale-resource-state 2>/dev/null | awk '{print $1}' || true)"
+  if [[ "$before" != "$after" ]]; then
+    echo 'Adaptive resource fingerprint changed (hardware, topology, model artifacts/context, or policy revision); Compose reconciliation will apply the new ceilings.'
     RESOURCE_POLICY_CHANGED=true
   fi
 }

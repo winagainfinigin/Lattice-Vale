@@ -1,6 +1,6 @@
-# LatticeVale v14.5.0 — Complete Features and Install Options Reference
+# LatticeVale v14.5.1 — Complete Features and Install Options Reference
 
-> **v14.5.0:** adds a read-only WSL-native planner/config-state reader, shared checkpoint metadata, a free/local-operation audit, and regression auto-discovery while retaining all v14.4.85 runtime/reconciliation behavior.
+> **v14.5.1:** retains the v14.5.0 read-only WSL-native planner/config-state foundation and adds adaptive resource policy v9, live CPU/RAM convergence, low-memory viability guards, and running-container OOM detection. The mutating reconciliation architecture is otherwise unchanged.
 
 > **v14.4.85:** retains the v14.4.84 WSL lifecycle repair and adds startup-aware reconcile/post-gateway readiness, a bundle-owned Option 6 pre-update safety backup with root-scoped archive access for container-owned state, and an explicit Option 3 read-only verification report.
 
@@ -18,9 +18,9 @@
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.5.0 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.5.1 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.5.0 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.5.1 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -536,9 +536,11 @@ When enabled LatticeVale:
 - uses 64 MiB PostgreSQL `shared_buffers` on <=12 GiB WSL VMs and 128 MiB above that, while retaining Honcho PostgreSQL `max_connections=200`
 - recalculates when relevant WSL-visible resources change or an older adaptive-policy revision must be migrated
 
-Current policy v4 retains the v3 host-headroom schedule: it reserves 30% of WSL-visible RAM on <=6 GiB, 25% on <=12 GiB, 20% on <=24 GiB, and 15% above that, with bounded minimum/maximum reserve values. Policy v4 additionally protects managed Ollama headroom on full stacks. These are **ceilings, not reservations**, and are not a global WSL memory cap.
+Current policy v9 retains a bounded host-headroom schedule while addressing both observed failures: policy-v4 Hermes starvation and policy-v6 CPU-backed Ollama `memory.max` pressure. It additionally makes the Hermes share topology-aware for public multi-profile/Kanban configurations. It reserves 30% of WSL-visible RAM on <=6 GiB; on >6-12 GiB it uses 10% when CPU-backed managed Ollama is selected and 20% otherwise; >12-24 GiB uses 20%; and >24 GiB uses 15%, with bounded minimum/maximum reserve values. Policy v9 gives Hermes a 1024 MiB common-topology minimum, Honcho API 512 MiB, and CPU-backed managed Ollama a 4608 MiB provisional floor before model artifacts are measurable, then a model/context-aware floor after download. The 1024 MiB Hermes baseline covers the default gateway plus up to one secondary Matrix gateway and Kanban concurrency up to 3; each additional persistent secondary Matrix gateway adds 192 MiB and each Kanban slot above 3 adds 96 MiB, capped at 4096 MiB. Hermes CPU normally uses about 75% of WSL-visible CPUs but gains bounded ceiling headroom toward 100% as that topology pressure increases. The minimum calculation is service-aware: lighter selections can fit smaller WSL allocations, but if the selected set cannot meet its defined hard minima, policy v9 refuses to generate the overlay instead of proportionally crushing every service. These are **ceilings, not reservations**, and are not a global WSL memory cap.
 
-LatticeVale does not set global WSL `memory` or `autoMemoryReclaim` for this feature. Those are host/user-owned WSL policies. A user `compose.override.yaml` is applied last and remains authoritative.
+Clean installs generate policy v9 before first container creation and verify the resulting live Docker CPU and memory ceilings. The resource fingerprint includes Matrix-enabled secondary gateway count, Kanban concurrency, and the derived Hermes topology floor. The generated root/Windows-start helper evaluates current CPU, RAM, enabled-limit state, profile topology, and Kanban concurrency at helper runtime so auto-start paths do not retain an install-time resource snapshot. Resume / repair and managed start-time resource reconciliation migrate enabled older policies, and final reconciliation compares effective merged Compose `mem_limit` and `cpus` with each selected container's live Docker `HostConfig.Memory` and `HostConfig.NanoCpus`. A running selected container with Docker `OOMKilled=true` is reported as a repairable runtime-policy degradation rather than accepted as healthy.
+
+LatticeVale does not set global WSL `memory` or `autoMemoryReclaim` for this feature. Those are host/user-owned WSL policies. A user `compose.override.yaml` is applied last and remains authoritative; live-limit verification therefore checks the effective merged Compose value rather than blindly enforcing the generated base value.
 
 ## 3.21 Unattended Ubuntu security updates
 
@@ -764,6 +766,10 @@ From `~/hermes-stack`, current documented management commands include:
 - `./manage.sh restart`
 - `./manage.sh status`
 - `./manage.sh verify`
+- `./manage.sh audit`
+- `./manage.sh plan [--offline]` — v14.5+ read-only repair plan
+- `./manage.sh repair --plan [--offline]` — alias for the read-only plan; applying repair still uses the Windows installer
+- `./manage.sh audit-free` — advisory free/local-path audit
 - `./manage.sh profiles`
 - `./manage.sh matrix-info`
 - `./manage.sh matrix-profile-finish <profile>`
@@ -804,7 +810,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.4.85
+# 8. Current managed software/source pins documented by v14.5.1
 
 The release's declared managed references include:
 
@@ -1121,3 +1127,9 @@ If incorporated into a future LatticeVale release, this file should be the **can
 - `docs/CHANGELOG.md` — historical version chronology
 
 Keeping a single feature/options catalog would prevent current questionnaire choices from becoming scattered across several documents again.
+
+### Policy v9 model-aware Ollama and Honcho timeout behavior
+
+When LatticeVale-managed Ollama is selected, policy v9 fingerprints the installed text-model artifact size, Honcho embedding-model artifact size, persisted `OLLAMA_CONTEXT_LENGTH`, and the derived `OLLAMA_MODEL_FLOOR_MIB`. Before a clean install has downloaded models, CPU-backed Ollama uses the proven provisional floor; after downloads complete, LatticeVale performs a second bounded resource reconciliation before inference/embedding verification. Because managed Ollama is constrained to one loaded model, text and embedding artifact sizes are treated as alternative resident requirements rather than blindly summed. If the model-aware minimum plus the selected services cannot fit inside the managed budget, LatticeVale refuses the unsafe plan.
+
+Self-hosted Honcho also receives an adaptive supported root request timeout. LatticeVale records ownership in a private sidecar and updates only the timeout value it previously owned; an explicit user timeout remains authoritative. `./manage.sh status` samples cgroup `memory.events` twice and distinguishes a historical lifetime `memory.max` count from new pressure during the sample window.

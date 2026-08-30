@@ -65,6 +65,65 @@ def read_json(path: Path, default: Any) -> Any:
         return default
 
 
+def parse_memory_size_bytes(value: Any) -> int:
+    """Parse Docker/Compose memory-size syntax using Docker's binary k/m/g semantics."""
+    if isinstance(value, (int, float)):
+        return int(value)
+    raw = str(value or "").strip().lower()
+    if not raw:
+        return 0
+    if raw.isdigit():
+        return int(raw)
+    m = re.fullmatch(r"([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b?)", raw)
+    if not m:
+        return 0
+    number = float(m.group(1))
+    unit = m.group(2)
+    multipliers = {
+        "": 1, "b": 1,
+        "k": 1024, "kb": 1024, "ki": 1024, "kib": 1024,
+        "m": 1024**2, "mb": 1024**2, "mi": 1024**2, "mib": 1024**2,
+        "g": 1024**3, "gb": 1024**3, "gi": 1024**3, "gib": 1024**3,
+        "t": 1024**4, "tb": 1024**4, "ti": 1024**4, "tib": 1024**4,
+    }
+    return int(number * multipliers.get(unit, 0))
+
+
+def parse_cpu_nanos(value: Any) -> int:
+    """Convert a Compose cpus value to Docker NanoCPUs."""
+    try:
+        return int(round(float(value or 0) * 1_000_000_000))
+    except (TypeError, ValueError):
+        return 0
+
+
+def effective_compose_resource_limits(root: Path) -> dict[str, tuple[int, int]]:
+    """Return final Compose (memory bytes, NanoCPUs) after user overrides."""
+    rc, out = run(["docker", "compose", "config", "--format", "json"], cwd=root, timeout=15)
+    if rc != 0 or not out:
+        return {}
+    try:
+        data = json.loads(out)
+    except Exception:
+        return {}
+    result: dict[str, tuple[int, int]] = {}
+    services = data.get("services") if isinstance(data, dict) else None
+    if not isinstance(services, dict):
+        return result
+    for name, cfg in services.items():
+        if isinstance(cfg, dict):
+            memory = parse_memory_size_bytes(cfg.get("mem_limit"))
+            cpu_nanos = parse_cpu_nanos(cfg.get("cpus"))
+            if memory > 0 or cpu_nanos > 0:
+                result[str(name)] = (memory, cpu_nanos)
+    return result
+
+
+def effective_compose_memory_limits(root: Path) -> dict[str, int]:
+    """Backward-compatible memory-only view used by older tests/helpers."""
+    return {name: limits[0] for name, limits in effective_compose_resource_limits(root).items() if limits[0] > 0}
+
+
 def env_keys(path: Path) -> set[str]:
     out: set[str] = set()
     if not path.is_file():
@@ -90,6 +149,104 @@ def env_value(path: Path, key: str) -> str:
     except Exception:
         pass
     return ""
+
+
+def ollama_manifest_mib(root: Path, model: str) -> int:
+    """Best-effort model artifact size from the managed Ollama manifest store."""
+    manifest_root = root / "data/ollama/models/manifests"
+    raw = str(model or "").strip()
+    if not raw or not manifest_root.is_dir():
+        return 0
+    name, tag = raw, "latest"
+    last_slash, last_colon = name.rfind("/"), name.rfind(":")
+    if last_colon > last_slash:
+        name, tag = name[:last_colon], (name[last_colon + 1:] or "latest")
+    parts = [p for p in name.split("/") if p]
+    if not parts:
+        return 0
+    if len(parts) == 1:
+        expected = manifest_root / "registry.ollama.ai" / "library" / parts[0] / tag
+    elif "." in parts[0] or ":" in parts[0] or parts[0] == "localhost":
+        expected = manifest_root.joinpath(*parts, tag)
+    else:
+        expected = manifest_root / "registry.ollama.ai" / Path(*parts) / tag
+    candidates = [expected] if expected.is_file() else []
+    suffix = tuple(parts + [tag])
+    try:
+        for f in manifest_root.rglob(tag):
+            if not f.is_file() or f in candidates:
+                continue
+            if len(f.parts) >= len(suffix) and tuple(f.parts[-len(suffix):]) == suffix:
+                candidates.append(f)
+    except Exception:
+        pass
+    for manifest in candidates:
+        try:
+            data = json.loads(manifest.read_text(encoding="utf-8"))
+            entries = []
+            cfg = data.get("config") if isinstance(data, dict) else None
+            if isinstance(cfg, dict):
+                entries.append(cfg)
+            layers = data.get("layers") if isinstance(data, dict) else None
+            if isinstance(layers, list):
+                entries.extend(x for x in layers if isinstance(x, dict))
+            total = sum(int(x.get("size") or 0) for x in entries)
+            if total > 0:
+                return (total + 1048575) // 1048576
+        except Exception:
+            continue
+    return 0
+
+
+def detected_gpu_vram_mib(accel: str) -> int:
+    if accel == "nvidia":
+        candidates = [shutil.which("nvidia-smi"), "/usr/lib/wsl/lib/nvidia-smi"]
+        smi = next((x for x in candidates if x and Path(x).is_file()), None)
+        if smi:
+            rc, out = run([smi, "--query-gpu=memory.total", "--format=csv,noheader,nounits"], timeout=8)
+            if rc == 0:
+                try: return sum(int(float(x.strip())) for x in out.splitlines() if x.strip())
+                except Exception: pass
+    elif accel == "amd":
+        total = 0
+        try:
+            for f in Path("/sys/class/drm").glob("card*/device/mem_info_vram_total"):
+                raw = f.read_text(encoding="ascii", errors="ignore").strip()
+                if raw.isdigit(): total += int(raw) // 1048576
+        except Exception:
+            pass
+        return total
+    return 0
+
+
+def expected_ollama_policy_metrics(root: Path, opts: dict[str, Any], resolved_accel: str, mem_mib: int) -> tuple[int, int, int, int]:
+    if not (opts.get("ollamaBackend") == "managed" and (opts.get("hermesLocalAI") is True or opts.get("honcho") is True)):
+        return (0, 0, 0, 0)
+    text_mib = ollama_manifest_mib(root, str(opts.get("localTextModel") or ""))
+    embed_mib = ollama_manifest_mib(root, str(opts.get("localEmbeddingModel") or "")) if opts.get("honcho") is True else 0
+    context_raw = env_value(root / ".env", "OLLAMA_CONTEXT_LENGTH")
+    try:
+        context = int(context_raw)
+    except Exception:
+        context = 8192 if mem_mib < 10240 else 16384 if mem_mib < 18432 else 32768 if mem_mib < 34816 else 65536
+    artifact = max(text_mib, embed_mib)
+    if resolved_accel == "cpu":
+        floor = 4608
+        if artifact > 0:
+            transient = max(1024, artifact // 4)
+            ctx = max(256, min(2048, (context + 15) // 16))
+            floor = ((artifact + transient + ctx + 255) // 256) * 256
+            floor = max(4608, floor)
+    else:
+        vram = detected_gpu_vram_mib(resolved_accel)
+        host_model = artifact // 4
+        if artifact > 0 and vram > 0:
+            usable = vram * 80 // 100
+            host_model = artifact - usable if artifact > usable else artifact // 8
+        ctx = max(256, min(2048, (context + 31) // 32))
+        floor = ((2048 + host_model + ctx + 255) // 256) * 256
+        floor = max(2048, floor)
+    return (text_mib, embed_mib, context, floor)
 
 
 def yaml_model_name(path: Path) -> str:
@@ -202,8 +359,8 @@ def classify_service(enabled: bool, configured: bool, running: bool, broken: boo
 
 def container_state(name: str) -> dict[str, Any]:
     """Return enough Docker state to distinguish startup, clean stop, and real failure."""
-    rc, out = run(["docker", "inspect", "-f", "{{json .State}}\n{{.HostConfig.RestartPolicy.Name}}", name])
-    empty = {"exists": False, "running": False, "health": "", "age": None, "status": "", "exitCode": None, "oomKilled": False, "error": "", "restartPolicy": ""}
+    rc, out = run(["docker", "inspect", "-f", "{{json .State}}\n{{.HostConfig.RestartPolicy.Name}}\n{{.HostConfig.Memory}}\n{{.HostConfig.NanoCpus}}", name])
+    empty = {"exists": False, "running": False, "health": "", "age": None, "status": "", "exitCode": None, "oomKilled": False, "error": "", "restartPolicy": "", "memoryLimitBytes": 0, "cpuLimitNanoCpus": 0}
     if rc != 0 or not out:
         return empty
     parts = out.splitlines()
@@ -212,6 +369,14 @@ def container_state(name: str) -> dict[str, Any]:
     except Exception:
         return {**empty, "exists": True}
     restart_policy = parts[1].strip().lower() if len(parts) > 1 else ""
+    try:
+        memory_limit_bytes = int(parts[2].strip()) if len(parts) > 2 and parts[2].strip() else 0
+    except Exception:
+        memory_limit_bytes = 0
+    try:
+        cpu_limit_nano = int(parts[3].strip()) if len(parts) > 3 and parts[3].strip() else 0
+    except Exception:
+        cpu_limit_nano = 0
     health = str(((state.get("Health") or {}).get("Status") or "")).strip().lower()
     running = bool(state.get("Running"))
     age = None
@@ -246,6 +411,8 @@ def container_state(name: str) -> dict[str, Any]:
         "oomKilled": bool(state.get("OOMKilled")),
         "error": str(state.get("Error") or "").strip(),
         "restartPolicy": restart_policy,
+        "memoryLimitBytes": memory_limit_bytes,
+        "cpuLimitNanoCpus": cpu_limit_nano,
     }
 
 
@@ -492,7 +659,7 @@ def main() -> int:
     runtime_cache: dict[str, dict[str, Any]] = {}
     def runtime(name: str) -> dict[str, Any]:
         if not docker_available:
-            return {"exists": False, "running": False, "health": "", "age": None, "status": "", "exitCode": None, "oomKilled": False, "error": "", "restartPolicy": ""}
+            return {"exists": False, "running": False, "health": "", "age": None, "status": "", "exitCode": None, "oomKilled": False, "error": "", "restartPolicy": "", "memoryLimitBytes": 0, "cpuLimitNanoCpus": 0}
         if name not in runtime_cache:
             runtime_cache[name] = container_state(name)
         return runtime_cache[name]
@@ -767,8 +934,66 @@ def main() -> int:
                     if line.startswith("MemTotal:"):
                         mem_kib=int(line.split()[1]); break
                 current_mem_mib=mem_kib//1024
-                if values.get("POLICY_VERSION") != "4" or str(current_cpus) != values.get("CPUS") or str(current_mem_mib) != values.get("MEM_MIB"):
-                    policy_issues.append("adaptive resource policy revision or WSL CPU/RAM allocation changed; next LatticeVale start or repair will recalculate the overlay")
+                matrix_profile_gateways = 0
+                if selected("matrix"):
+                    for worker in opts.get("workers", []) if isinstance(opts.get("workers", []), list) else []:
+                        if isinstance(worker, dict) and isinstance(worker.get("matrix"), dict) and worker["matrix"].get("enabled") is True:
+                            matrix_profile_gateways += 1
+                kanban_concurrency = int(opts.get("kanbanMaxInProgress") or 2) if selected("kanban") else 1
+                hermes_min_mib = min(4096, 1024 + max(0, matrix_profile_gateways - 1) * 192 + max(0, kanban_concurrency - 3) * 96)
+                audit_accel = env_value(root / ".env", "LATTICEVALE_OLLAMA_ACCELERATION").lower() or str(opts.get("ollamaAcceleration") or "cpu").lower()
+                text_mib, embed_mib, ollama_context, ollama_floor = expected_ollama_policy_metrics(root, opts, audit_accel, current_mem_mib)
+                if (values.get("POLICY_VERSION") != "9" or str(current_cpus) != values.get("CPUS") or str(current_mem_mib) != values.get("MEM_MIB") or
+                    str(matrix_profile_gateways) != values.get("MATRIX_PROFILE_GATEWAYS") or str(kanban_concurrency) != values.get("KANBAN_CONCURRENCY") or
+                    str(hermes_min_mib) != values.get("HERMES_MIN_MIB") or str(text_mib) != values.get("OLLAMA_TEXT_ARTIFACT_MIB") or
+                    str(embed_mib) != values.get("OLLAMA_EMBED_ARTIFACT_MIB") or str(ollama_context) != values.get("OLLAMA_CONTEXT_LENGTH") or
+                    str(ollama_floor) != values.get("OLLAMA_MODEL_FLOOR_MIB")):
+                    policy_issues.append("adaptive resource policy revision, WSL CPU/RAM allocation, Hermes profile/Kanban topology, or managed Ollama model/context fingerprint changed; next LatticeVale start or repair will recalculate the overlay")
+                # v14.5.1 repair correctness: desired policy files are not enough. Compare
+                # Docker's live hard ceiling with the EFFECTIVE Compose model after the
+                # user-owned compose.override.yaml layer, so user overrides stay authoritative.
+                live_limit_pairs = [("hermes", "hermes-agent")]
+                if selected("matrix"):
+                    live_limit_pairs += [("synapse-db", "hermes-synapse-db"), ("synapse", "hermes-synapse")]
+                if selected("searxng"):
+                    live_limit_pairs += [("searxng-valkey", "hermes-searxng-valkey"), ("searxng", "hermes-searxng")]
+                if selected("qmd"):
+                    live_limit_pairs += [("qmd", "hermes-qmd"), ("qmd-indexer", "hermes-qmd-indexer")]
+                if managed_ollama:
+                    live_limit_pairs += [("ollama", "hermes-ollama")]
+                if selected("honcho"):
+                    live_limit_pairs += [
+                        ("honcho-db", "hermes-honcho-db"), ("honcho-redis", "hermes-honcho-redis"),
+                        ("honcho-api", "hermes-honcho-api"), ("honcho-deriver", "hermes-honcho-deriver"),
+                    ]
+                if docker_available and not args.offline:
+                    effective_limits = effective_compose_resource_limits(root)
+                    if not effective_limits:
+                        policy_issues.append("effective Compose CPU/RAM policy could not be rendered for live-limit verification")
+                    else:
+                        for service_name, container_name in live_limit_pairs:
+                            expected_bytes, expected_nano = effective_limits.get(service_name, (0, 0))
+                            expected_bytes = int(expected_bytes or 0)
+                            expected_nano = int(expected_nano or 0)
+                            if expected_bytes <= 0:
+                                policy_issues.append(f"effective Compose mem_limit for {service_name} is missing or invalid")
+                                continue
+                            if expected_nano <= 0:
+                                policy_issues.append(f"effective Compose cpus for {service_name} is missing or invalid")
+                                continue
+                            live_state = runtime(container_name)
+                            if not live_state.get("exists"):
+                                continue
+                            actual_bytes = int(live_state.get("memoryLimitBytes") or 0)
+                            actual_nano = int(live_state.get("cpuLimitNanoCpus") or 0)
+                            if actual_bytes != expected_bytes:
+                                policy_issues.append(
+                                    f"{container_name} live memory ceiling is {actual_bytes} bytes but effective Compose requires {expected_bytes} bytes; Resume / repair must reconcile Compose"
+                                )
+                            if actual_nano != expected_nano:
+                                policy_issues.append(
+                                    f"{container_name} live CPU ceiling is {actual_nano} NanoCPUs but effective Compose requires {expected_nano} NanoCPUs; Resume / repair must reconcile Compose"
+                                )
             except Exception:
                 policy_issues.append("adaptive resource fingerprint is unreadable")
 
@@ -840,6 +1065,40 @@ def main() -> int:
                     policy_issues.append("user-existing-mirrored networking metadata must record mirrored mode")
             except Exception:
                 policy_issues.append("native Windows Ollama relay metadata is unreadable")
+
+    # v14.5.1: Docker can keep a container running after the kernel OOM-kills one of
+    # its child Hermes/worker processes. Endpoint probes may recover quickly and used
+    # to let verify report HEALTHY despite an actively starved container. Treat an OOM
+    # recorded in the current running container lifecycle as runtime-policy degradation
+    # so Resume / repair can regenerate/reconcile policy v9.
+    if docker_available and not args.offline:
+        oom_candidates = [("Hermes", "hermes-agent")]
+        if selected("matrix"):
+            oom_candidates.extend([("Synapse DB", "hermes-synapse-db"), ("Synapse", "hermes-synapse")])
+        if selected("searxng"):
+            oom_candidates.extend([("SearXNG Valkey", "hermes-searxng-valkey"), ("SearXNG", "hermes-searxng")])
+        if selected("qmd"):
+            oom_candidates.extend([("QMD", "hermes-qmd"), ("QMD indexer", "hermes-qmd-indexer")])
+        if managed_ollama:
+            oom_candidates.append(("Ollama", "hermes-ollama"))
+        if selected("honcho"):
+            oom_candidates.extend([
+                ("Honcho DB", "hermes-honcho-db"),
+                ("Honcho Redis", "hermes-honcho-redis"),
+                ("Honcho API", "hermes-honcho-api"),
+                ("Honcho deriver", "hermes-honcho-deriver"),
+            ])
+        for label, container_name in oom_candidates:
+            live_state = runtime(container_name)
+            if live_state.get("running") and live_state.get("oomKilled"):
+                if limits_selected:
+                    remedy = "Resume / repair will recalculate/reconcile the adaptive resource policy"
+                else:
+                    remedy = "LatticeVale ceilings are disabled; inspect user Compose overrides or global WSL/container memory pressure"
+                policy_issues.append(
+                    f"{label} container recorded an OOM kill in its current lifecycle; "
+                    f"a configured memory limit or workload pressure exhausted its cgroup; {remedy}"
+                )
 
     if policy_issues:
         c["runtimePolicy"] = {"status": "PARTIAL", "detail": "; ".join(policy_issues)}
