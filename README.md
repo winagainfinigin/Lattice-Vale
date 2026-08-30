@@ -1,9 +1,15 @@
-# LatticeVale v14.5.1
+# LatticeVale v14.5.2
 
-> For an existing LatticeVale installation, launch the **full v14.5.1 release** and choose **Resume / repair installation** first. v14.5.1 is a resource-policy/OOM-detection patch over v14.5.0; the proven installer reconciliation path remains the only mutating repair engine.
-- v14.5.1 also hardens bounded slow-start gateway recovery discovered on a real Resume / repair: exact s6 readiness tolerates transient status-probe failures for up to 60 seconds, requires stable consecutive `up` observations, retries only the proven gateway service slot once, and fixes the exact-gateway diagnostic `printf` path. `./manage.sh audit` remains a snapshot while `./manage.sh verify` is the bounded convergence check.
+> For an existing LatticeVale installation, launch the **full v14.5.2 release** and choose **Resume / repair installation** first. v14.5.2 is an additive storage-maintenance release over the already-published v14.5.1 runtime/resource-policy release; the proven installer reconciliation path remains the only mutating repair engine.
+- v14.5.2 adds **Option 7 — Cleanup / reclaim disk space** as an isolated, user-selected maintenance path. It can be reached by a recognized managed install even below the ordinary repair free-space floor, while Options 1–6 retain their existing behavior and storage gates. v14.5.1's policy-v9/OOM and bounded slow-start gateway fixes remain inherited unchanged.
 
 > The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
+
+### v14.5.2 — cleanup / reclaim disk space maintenance release
+
+v14.5.2 adds a seventh existing-install maintenance option without broadening normal repair/update behavior. The user explicitly chooses one, several, or all bounded cleanup categories and confirms before deletion. Cleanup is limited to LatticeVale-owned Option 6 pre-update backups proven by exact metadata, stale LatticeVale staging residue, APT package-download cache, Docker dangling images, Docker dangling default-builder cache, and WSL root TRIM. It does not stop/remove containers, prune networks or volumes, delete tagged images/configured models, touch persistent Hermes/Matrix/Honcho/QMD/vault/workspace/credential state, or manipulate the WSL VHDX.
+
+A recognized managed stack may enter **Option 3 — Verify installation only** or **Option 7 — Cleanup / reclaim disk space** when the host partition is below the ordinary managed-repair free-space floor. Mutating Options 1/2/4/5/6 remain blocked until the normal floor is restored, and fresh/unrecognized stacks do not inherit the exception.
 
 ### v14.5.1 — adaptive CPU/RAM/OOM reliability patch
 
@@ -303,7 +309,7 @@ Existing installer-managed Resume / repair:
   at least 10 GiB free
 ```
 
-The lower repair threshold is used only after LatticeVale has confirmed an existing installer-managed installation.
+The lower repair threshold is used only after LatticeVale has confirmed an existing installer-managed installation. A recognized managed stack that has fallen below the normal repair free-space floor may still enter **Option 3 — Verify installation only** or **Option 7 — Cleanup / reclaim disk space**. Mutating repair/update modes remain blocked until the normal managed-repair floor is restored; this exception never applies to a fresh or unrecognized stack.
 
 ---
 
@@ -322,6 +328,25 @@ Depending on the enabled components, this can include:
 Persistent application data and explicit user configuration remain preserved.
 
 Use Option 6 when an actual managed-software refresh is desired. It is not required merely because the LatticeVale bundle version changed.
+
+---
+
+## Cleanup / reclaim disk space
+
+**Option 7 — Cleanup / reclaim disk space** is an isolated, existing-install maintenance path. It asks which cleanup categories to run, supports selecting several or all of them, requires a final confirmation, then exits without entering normal install/repair/provider/update stages. It is also reachable for a recognized managed stack when the host partition is below the normal 10 GiB managed-repair free-space floor, so cleanup can recover enough physical storage for a subsequent repair.
+
+The offered categories are deliberately bounded:
+
+1. verified LatticeVale **Option 6 pre-update safety backups** for this exact stack;
+2. stale root-owned LatticeVale installer/audit staging and incomplete `.partial` pre-update residue;
+3. downloaded APT package archives (`apt-get clean` only);
+4. Docker **dangling images only** (`docker image prune -f`, never `-a`);
+5. Docker default-builder **dangling build cache only** (`docker builder prune -f`, never `--all`);
+6. WSL root-filesystem TRIM (`fstrim -v /`) to expose already-freed ext4 blocks to the virtual-disk layer where supported.
+
+Option 7 never removes/stops LatticeVale containers, Docker networks or volumes, tagged images, configured Ollama models, Hermes/Matrix/Honcho/QMD persistent state, databases, vault/workspace files, credentials, or user-created backups. It does not resize, move, mount, compact, or otherwise manipulate the WSL VHDX. Docker's engine may be shared with unrelated workloads, so LatticeVale intentionally does not expose `docker system prune`, container/network/volume prune, or `docker image prune -a` here. Build-cache cleanup can make a later rebuild slower but does not remove runtime state.
+
+Deleting data inside WSL and running TRIM may not immediately reduce the Windows-visible VHDX file length on every WSL/storage configuration. VHDX compaction is therefore kept outside Option 7 rather than making a Windows storage mutation part of an install-preserving cleanup path.
 
 ---
 
@@ -448,7 +473,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.4.84** | Release / Hotfix 1 | WSL lifecycle transport repair plus Matrix gateway startup-readiness hotfix |
 | **v14.4.85** | Release | Startup-aware reconcile/post-gateway readiness, self-repairing pre-update backup, and explicit read-only verification output |
 | **v14.5.0** | Release | Read-only WSL-native repair planning/config-state foundation and free/local-path audit |
-| **v14.5.1** | **Current install release** | Adaptive resource policy v9, OOM-aware health, low-RAM viability guards, and live Docker CPU/RAM convergence for clean/repair |
+| **v14.5.1** | Release | Adaptive resource policy v9, OOM-aware health, low-RAM viability guards, and live Docker CPU/RAM convergence for clean/repair |
+| **v14.5.2** | **Current install release** | Install-preserving Option 7 cleanup/reclaim path plus low-space Verify/Cleanup recovery gate; v14.5.1 runtime policy inherited unchanged |
 
 ### v14.4.1
 

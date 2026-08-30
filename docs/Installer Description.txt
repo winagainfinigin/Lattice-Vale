@@ -1,6 +1,6 @@
-LATTICEVALE v14.5.1 — INSTALLER DESCRIPTION
+LATTICEVALE v14.5.2 — INSTALLER DESCRIPTION
 
-CURRENT RELEASE: v14.5.1 is the direct first-install release. It retains the v14.5.0 read-only WSL-side planning/config-state layer and adds resource policy v9 plus OOM-aware audit/repair detection and live CPU/RAM convergence. The existing installer remains the only mutating repair engine; the planner cannot overwrite user configuration.
+CURRENT RELEASE: v14.5.2 is the direct first-install release. It adds Option 7 cleanup/reclaim and a low-space Verify/Cleanup recovery gate while retaining v14.5.1 resource policy v9, OOM-aware audit/repair detection, live CPU/RAM convergence, and the v14.5.0 read-only WSL-side planning/config-state layer. The existing installer remains the only mutating repair engine; the planner cannot overwrite user configuration.
 
 V14.5.0 READ-ONLY PLANNING: The installer stages `latticevale_readonly.py`, `repair-plan.py`, `audit-free.py`, and `checkpoint-metadata.json` into `~/hermes-stack`. `./manage.sh repair --plan` reports stale/incomplete checkpoint revisions and state-audit findings but never applies changes. `compose.override.yaml` remains user-owned/opaque.
 

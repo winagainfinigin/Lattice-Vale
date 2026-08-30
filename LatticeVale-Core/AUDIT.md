@@ -1,4 +1,14 @@
-# LatticeVale v14.5.1 audit
+# LatticeVale v14.5.2 audit
+
+## v14.5.2 Option 7 cleanup safety audit
+
+Live-run hardening requires Option 7 to capture protected identities before any cleanup action and compare them afterward. A successful run must report `Cleanup safety verification: PASS`; any missing/changed protected identity must return nonzero with `LATTICEVALE_CLEANUP_INTEGRITY_FAILED`. TRIM output must state that the reported discard quantity is logical filesystem extent space, not Windows host free space. The `ext2/ext3` statfs compatibility label must be displayed as Linux-native ext-family rather than as a literal ext2/3 claim.
+
+- Option 7 is additive to the existing six managed-stack modes and terminates after cleanup; no existing repair/change/reconfigure/recovery/update mode is routed through cleanup.
+- Cleanup is fail-closed to a valid current managed stack. Pre-update backup deletion requires strict LatticeVale ownership metadata for the exact stack; backup-like or user-created directories without that proof are preserved.
+- Docker cleanup is restricted to default dangling-image pruning and default-builder dangling-cache pruning. Broad/system/container/network/volume pruning, `image prune -a`, builder `--all`, direct Docker storage deletion, tagged-image deletion, configured-model deletion, and persistent state deletion are regression-forbidden.
+- Low-space recovery permits only Verify or Cleanup for a recognized managed install below the ordinary repair floor; existing mutating modes retain the storage gate and a selected fresh/unrecognized Linux user is rechecked against normal fresh-install storage requirements.
+- WSL root TRIM is optional/nonfatal and does not resize/move/compact the VHDX. This preserves the boundary between filesystem discard and Windows virtual-disk management.
 
 ## v14.5.1 adaptive resource-policy / OOM audit
 

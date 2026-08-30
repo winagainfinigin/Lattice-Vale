@@ -1,4 +1,18 @@
-# Current v14.5.1 patch notes
+# Current v14.5.2 patch notes
+
+## v14.5.2 — cleanup / reclaim disk space maintenance release
+
+- Adds an explicit **Cleanup / reclaim disk space** seventh existing-stack installer choice. Existing Options 1–6 retain their prior behavior.
+- Cleanup presents a multi-select menu plus final confirmation and exits after maintenance instead of continuing into install/repair/update stages.
+- Safe scopes are exact-metadata Option 6 pre-update backups, stale root-owned installer/audit staging, APT download cache, Docker dangling images, Docker dangling default-builder cache, and WSL root TRIM.
+- The bundle-owned cleanup helper fail-closes unless current managed-state files validate. Backup cleanup additionally requires the exact LatticeVale backup header, strict `pre-update-<UTC>-<pid>` directory shape, and matching current-stack metadata.
+- Docker cleanup deliberately avoids `-a`/`--all`, `docker system prune`, container/network/volume pruning, and any direct deletion under Docker storage. Tagged images are preserved even when no current container references them, covering freshly built LatticeVale tags awaiting recreation.
+- Persistent Hermes/Matrix/Honcho/QMD/Ollama state, databases, configured models, vault/workspace files, credentials, user-created/unverified backups, and the WSL VHDX are out of scope.
+- A recognized low-space managed stack can reach Verify or Cleanup below the ordinary repair floor; existing mutating modes stay gated and fresh/unrecognized stacks retain the full fresh-install storage requirements.
+- Option 7 now snapshots protected installation identities before cleanup and performs a mandatory post-cleanup comparison before reporting success. It verifies installer/config hashes, persistent LatticeVale roots, user/unverified backup identities, pre-existing Ollama model manifests, Docker container identities, volumes, networks, and tagged-image identities. Mutable database/log contents are intentionally not hashed so a running stack can continue ordinary I/O without false cleanup failures.
+- Root TRIM output is explicitly labeled as a **logical discard range**, not Windows host-partition space reclaimed. This avoids the misleading appearance of reclaiming hundreds of GiB when WSL's logical ext4/VHDX capacity exceeds the physical Windows partition.
+- The Linux-home filesystem display normalizes the kernel/statfs historical `ext2/ext3` label to `ext-family (Linux-native; statfs reports ext2/ext3)` rather than implying that a normal WSL ext-family home is literally ext2/3. The underlying Linux-native filesystem safety check is unchanged.
+
 
 ## v14.5.1 — adaptive resource policy v9 / model-aware Ollama + adaptive Honcho timeout
 

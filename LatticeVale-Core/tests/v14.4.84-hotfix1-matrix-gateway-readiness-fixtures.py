@@ -7,7 +7,7 @@ manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.84','14.4.85','14.5.0','14.5.1'}, 'Hotfix 1 behavior must remain inherited by v14.4.85'
+assert version in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}, 'Hotfix 1 behavior must remain inherited by v14.4.85'
 
 # The observed regression was: Synapse unavailable/Docker DNS not ready, gateway process
 # stays alive, audit reports RUNNING, Element loses communication. Probe from the actual

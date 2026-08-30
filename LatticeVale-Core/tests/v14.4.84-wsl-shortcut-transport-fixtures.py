@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.4.85','14.5.0','14.5.1'}, version
+assert version in {'14.4.85','14.5.0','14.5.1','14.5.2'}, version
 
 launcher = (ROOT / 'windows' / 'LatticeVale-Shortcut.ps1').read_text(encoding='ascii')
 installer = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
@@ -59,8 +59,8 @@ assert 'wsl.exe --terminate' not in repair
 
 # Root public guidance must direct existing installs to the full current release
 # and keep the source-only overwrite patch separate from live-stack repair.
-assert '# LatticeVale v14.5.1' in root_readme
-assert 'For an existing LatticeVale installation, launch the **full v14.5.1 release**' in root_readme
+assert ('# LatticeVale v14.5.2' in root_readme) if version == '14.5.2' else ('# LatticeVale v14.5.1' in root_readme)
+assert ('For an existing LatticeVale installation, launch the **full v14.5.2 release**' in root_readme) if version == '14.5.2' else ('For an existing LatticeVale installation, launch the **full v14.5.1 release**' in root_readme)
 assert 'choose **Resume / repair installation** first' in root_readme
 assert 'The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.' in root_readme
 

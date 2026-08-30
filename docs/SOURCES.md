@@ -1,5 +1,9 @@
 # Runtime Sources and Supply-Chain Policy
 
+## v14.5.2 source-policy note
+
+v14.5.2 adds only first-party installer/storage-cleanup logic, regression tests, and documentation. It adds no runtime package, image, hosted service, model, paid API dependency, or third-party pin; v14.5.1 managed software/source pins remain unchanged.
+
 ## v14.5.1 source-policy note
 
 v14.5.1 changes only first-party resource-allocation, audit, tests, and documentation source. It adds no runtime package, image, hosted service, model, or paid API dependency; all third-party pins remain unchanged.

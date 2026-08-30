@@ -8,7 +8,7 @@ cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text(encoding='ascii').strip()=='14.5.1'
+assert (ROOT/'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2'}
 
 for marker in (
     'POLICY_VERSION=9', 'ollama_model_manifest_mib() {', 'resource_ollama_model_metrics() {',

@@ -1,6 +1,6 @@
-# LatticeVale v14.5.1 — Complete Features and Install Options Reference
+# LatticeVale v14.5.2 — Complete Features and Install Options Reference
 
-> **v14.5.1:** retains the v14.5.0 read-only WSL-native planner/config-state foundation and adds adaptive resource policy v9, live CPU/RAM convergence, low-memory viability guards, and running-container OOM detection. The mutating reconciliation architecture is otherwise unchanged.
+> **v14.5.2:** adds the isolated Option 7 cleanup/reclaim maintenance path and low-space Verify/Cleanup recovery gate while retaining v14.5.1 adaptive resource policy v9, live CPU/RAM convergence, low-memory viability guards, and running-container OOM detection unchanged. The normal mutating reconciliation architecture remains unchanged.
 
 > **v14.4.85:** retains the v14.4.84 WSL lifecycle repair and adds startup-aware reconcile/post-gateway readiness, a bundle-owned Option 6 pre-update safety backup with root-scoped archive access for container-owned state, and an explicit Option 3 read-only verification report.
 
@@ -18,9 +18,9 @@
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.5.1 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.5.2 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.5.1 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.5.2 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -642,11 +642,11 @@ These prompts are intended to prevent LatticeVale from silently taking ownership
 
 ---
 
-# 5. Existing-install menu — all six modes
+# 5. Existing-install menu — all seven modes
 
 Lifecycle shortcuts in v14.4.84 invoke `./manage.sh start|stop` directly with WSL `--cd`; repair treats older/broken shortcut runtime contracts as drift and rewrites them. Before using **Resume / repair installation** or **Update / repair installer-managed software**, use **Shut Down LatticeVale** to stop the managed stack if the shortcut is available. Do not use targeted `wsl --terminate`. If v14.4.84 detects the installer-owned legacy targeted-termination helper, the repair run performs its own bounded global WSL shutdown + `WslService` transport reset before replacing the helper.
 
-When a recognized installer-managed stack exists, LatticeVale offers six top-level modes.
+When a recognized installer-managed stack exists, LatticeVale offers seven top-level modes.
 
 ## 5.1 Resume / repair installation
 
@@ -755,6 +755,28 @@ Preserved:
 - explicit custom image/source overrides
 - separately owned native Windows Ollama
 
+
+## 5.7 Cleanup / reclaim disk space
+
+Install-preserving, user-selected storage maintenance for a recognized managed stack. Cleanup is intentionally **not** part of automatic Resume / repair and exits immediately after the selected cleanup work.
+
+The user may choose one, several, or **ALL** of these bounded categories before a final confirmation:
+
+1. verified Option 6 `pre-update-*` backups whose metadata proves they belong to the current stack;
+2. stale root-owned LatticeVale installer/audit staging plus incomplete pre-update `.partial` residue;
+3. downloaded APT package archives only (`apt-get clean`);
+4. Docker dangling images only (`docker image prune -f`; no `-a`);
+5. Docker dangling default-builder cache only (`docker builder prune -f`; no `-a`/`--all`);
+6. WSL root-filesystem TRIM (`fstrim -v /`) where supported.
+
+Safety invariants are enforced both by the installer and the bundle-owned cleanup helper. The helper revalidates the managed stack before deletion. Option 7 does **not** stop/remove containers, prune networks/volumes, remove tagged images, remove configured models, touch Hermes/Matrix/Honcho/QMD databases/state, delete vault/workspace/credentials, delete unverified/user-created backups, or manipulate the WSL VHDX. The Docker daemon may be shared, so broad engine-global pruning commands such as `docker system prune` remain excluded.
+
+Before any cleanup command runs, the helper snapshots protected installation identities. After cleanup it requires those pre-existing identities to remain present before reporting success: installer/config hashes, persistent LatticeVale roots, user/unverified backup entries, pre-existing Ollama model manifests, and—when Docker was available before cleanup—container, volume, network, and tagged-image identities. Mutable database/log contents are not hashed, so ordinary runtime writes do not create false failures.
+
+A recognized managed installation that is below the ordinary managed-repair free-space requirement may still enter Option 3 Verify or Option 7 Cleanup. Options 1/2/4/5/6 remain storage-gated until enough host-partition space is available. A fresh or unrecognized stack cannot use that exception.
+
+TRIM advertises already-freed filesystem blocks to the virtual-disk layer but is not treated as a promise that the Windows-visible VHDX file length will shrink immediately. The reported TRIM quantity is labeled as a logical discard range, not Windows host-partition space reclaimed. Windows-side VHDX compaction/move/resize remains outside Option 7.
+
 ---
 
 # 6. Advanced management after installation
@@ -810,7 +832,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.5.1
+# 8. Current managed software/source pins documented by v14.5.2
 
 The release's declared managed references include:
 

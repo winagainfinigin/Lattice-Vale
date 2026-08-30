@@ -5,7 +5,7 @@ import subprocess, sys
 
 ROOT = Path(__file__).resolve().parents[1]
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
-assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() == '14.5.1'
+assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2'}
 assert 'POLICY_VERSION=9' in cfg
 
 # CPU policy is based on CPUs actually visible to WSL, never Windows host guesses.

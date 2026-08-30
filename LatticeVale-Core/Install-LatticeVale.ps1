@@ -1423,6 +1423,14 @@ function Assert-LinuxNativeHomeFilesystem([string]$Name, [string]$User) {
     return $fsType
 }
 
+function Format-LinuxNativeFilesystemLabel([string]$FsType) {
+    if ([string]::IsNullOrWhiteSpace($FsType)) { return 'unknown Linux-native filesystem' }
+    # Linux statfs reports ext4 with the historical magic-name string "ext2/ext3" on many
+    # systems. Do not display that raw label as if the WSL distro were actually using ext2/3.
+    if ($FsType -eq 'ext2/ext3') { return 'ext-family (Linux-native; statfs reports ext2/ext3)' }
+    return $FsType
+}
+
 function Convert-LinuxPathToWslUnc([string]$Name, [string]$LinuxPath, [switch]$Legacy) {
     if ([string]::IsNullOrWhiteSpace($LinuxPath) -or -not $LinuxPath.StartsWith('/')) { return $null }
     $relative = $LinuxPath.TrimStart('/').Replace('/', '\')
@@ -2878,6 +2886,77 @@ function Copy-LocalFileToWslRoot([string]$Name, [string]$SourcePath, [string]$De
     }
 }
 
+function Invoke-LatticeValeCleanupMaintenance(
+    [string]$Name,
+    [string]$StackPath,
+    [string[]]$Scopes,
+    [string]$DistroStoragePath
+) {
+    if ([string]::IsNullOrWhiteSpace($Name) -or [string]::IsNullOrWhiteSpace($StackPath) -or $Scopes.Count -eq 0) {
+        throw 'Cleanup maintenance requires a selected distro, managed stack path, and at least one explicit cleanup scope.'
+    }
+    $allowed = @('preupdate-backups','staging','apt-cache','docker-dangling','docker-build-cache','trim-root')
+    foreach ($scope in $Scopes) {
+        if ($allowed -notcontains $scope) { throw "Unsupported cleanup scope '$scope'." }
+    }
+    $cleanupScript = Join-Path $PSScriptRoot 'linux\cleanup-storage.sh'
+    if (-not (Test-Path -LiteralPath $cleanupScript -PathType Leaf)) {
+        throw "Bundle cleanup helper is missing: $cleanupScript"
+    }
+
+    $beforeVolume = Get-StorageVolumeForPath $DistroStoragePath
+    $vhdCandidates = @()
+    try {
+        if (Test-Path -LiteralPath $DistroStoragePath -PathType Leaf) {
+            if ([IO.Path]::GetExtension($DistroStoragePath) -ieq '.vhdx') { $vhdCandidates = @(Get-Item -LiteralPath $DistroStoragePath -ErrorAction Stop) }
+        } elseif (Test-Path -LiteralPath $DistroStoragePath -PathType Container) {
+            $vhdCandidates = @(Get-ChildItem -LiteralPath $DistroStoragePath -File -Filter '*.vhdx' -ErrorAction Stop | Sort-Object Length -Descending)
+        }
+    } catch { $vhdCandidates = @() }
+    $beforeVhdBytes = if ($vhdCandidates.Count -gt 0) { [int64]$vhdCandidates[0].Length } else { -1 }
+
+    Write-Host "`nLATTICEVALE CLEANUP / RECLAIM DISK SPACE" -ForegroundColor Cyan
+    Write-Info "Cleanup scopes: $($Scopes -join ', ')"
+    if ($null -ne $beforeVolume) {
+        Write-Info "Host partition before cleanup: $($beforeVolume.Drive) / $([math]::Round($beforeVolume.Free / 1GB,2)) GB free of $([math]::Round($beforeVolume.Size / 1GB,2)) GB."
+    }
+    if ($beforeVhdBytes -ge 0) {
+        Write-Info "WSL VHDX physical file before cleanup: $([math]::Round($beforeVhdBytes / 1GB,2)) GB ($($vhdCandidates[0].FullName))."
+    }
+    Write-Info 'Option 7 never stops/removes LatticeVale containers, removes Docker volumes/networks/tagged images, deletes configured models/application data, or modifies/moves/resizes the WSL VHDX.'
+
+    $scopeCsv = ($Scopes -join ',')
+    $wslArgs = @('-d', $Name, '-u', 'root', '--', 'bash', '-s', '--', $StackPath, $scopeCsv)
+    # Stream the bundle-owned helper over stdin instead of copying it into the nearly-full
+    # distro. This lets Cleanup remain reachable specifically when host-backed VHDX space is
+    # critically constrained and avoids creating installer staging before reclamation.
+    $probe = Invoke-NativeProcessCapture 'wsl.exe' $wslArgs 1800 $cleanupScript
+    if ($probe.StdOut) { Write-Host $probe.StdOut }
+    if ($probe.StdErr) { Write-Host $probe.StdErr -ForegroundColor Yellow }
+    if (-not $probe.Success) {
+        $detail = Get-SafeDiagnosticExcerpt $probe.Text 900
+        if (-not $detail) { $detail = "wsl.exe exit code $($probe.ExitCode)" }
+        throw "LatticeVale cleanup stopped without continuing into normal repair/install work: $detail"
+    }
+
+    $afterVolume = Get-StorageVolumeForPath $DistroStoragePath
+    $afterVhdBytes = -1
+    if ($vhdCandidates.Count -gt 0) {
+        try { $afterVhdBytes = [int64](Get-Item -LiteralPath $vhdCandidates[0].FullName -ErrorAction Stop).Length } catch { }
+    }
+    if ($null -ne $afterVolume) {
+        Write-Info "Host partition after cleanup: $($afterVolume.Drive) / $([math]::Round($afterVolume.Free / 1GB,2)) GB free of $([math]::Round($afterVolume.Size / 1GB,2)) GB."
+        if ($null -ne $beforeVolume) {
+            $delta = [int64]$afterVolume.Free - [int64]$beforeVolume.Free
+            Write-Info "Host free-space change observed during this run: $([math]::Round($delta / 1GB,2)) GB."
+        }
+    }
+    if ($afterVhdBytes -ge 0) {
+        Write-Info "WSL VHDX physical file after cleanup: $([math]::Round($afterVhdBytes / 1GB,2)) GB."
+    }
+    Write-Info 'If Linux files were deleted but Windows free space did not rise equivalently, the dynamic VHDX retained allocated blocks. The TRIM amount shown by Linux is a logical discard range, not Windows space reclaimed. Option 7 intentionally leaves host-side VHDX compaction/resizing outside the installer cleanup boundary.'
+}
+
 function ConvertFrom-OsReleaseText([string]$Text) {
     $values = @{}
     if ([string]::IsNullOrWhiteSpace($Text)) { return $values }
@@ -3277,7 +3356,7 @@ function Get-StorageVolumeForPath([string]$Path) {
     return @(Get-LocalFixedVolumes | Where-Object { $_.Drive -eq $drive } | Select-Object -First 1)[0]
 }
 
-function Assert-LatticeValeStorageVolume([string]$Path, [switch]$AllowManagedRepair) {
+function Assert-LatticeValeStorageVolume([string]$Path, [switch]$AllowManagedRepair, [switch]$AllowManagedCleanup) {
     $volume = Get-StorageVolumeForPath $Path
     if ($null -eq $volume) {
         throw 'The selected WSL storage must be on a resolvable local fixed Windows volume; network and removable locations are not supported.'
@@ -3291,11 +3370,17 @@ function Assert-LatticeValeStorageVolume([string]$Path, [switch]$AllowManagedRep
     # smaller safety floor while preserving the original fresh-install policy.
     $managedRepairMinimumFree = [int64]$compat.MinManagedRepairFreeGiB * 1GB
     if ($volume.Size -le $minimumTotal) {
-        throw "Partition $($volume.Drive) is only $([math]::Round($volume.Size / 1GB, 1)) GB. The partition hosting the selected Ubuntu WSL2 distro must be OVER $($compat.MinHostPartitionTotalGiBExclusive) GB total capacity."
+        if ($AllowManagedCleanup) {
+            Write-Warning "Partition $($volume.Drive) is only $([math]::Round($volume.Size / 1GB, 1)) GB total, below the supported fresh-install capacity. A recognized managed stack may still enter Verify or Cleanup so space can be inspected/reclaimed without mutating the live installation."
+        } else {
+            throw "Partition $($volume.Drive) is only $([math]::Round($volume.Size / 1GB, 1)) GB. The partition hosting the selected Ubuntu WSL2 distro must be OVER $($compat.MinHostPartitionTotalGiBExclusive) GB total capacity."
+        }
     }
     if ($volume.Free -lt $minimumFree) {
         if ($AllowManagedRepair -and $volume.Free -ge $managedRepairMinimumFree) {
             Write-Warning "Partition $($volume.Drive) has $([math]::Round($volume.Free / 1GB, 1)) GB free, below the $($compat.MinHostPartitionFreeGiB) GB fresh-install reserve. An existing installer-managed LatticeVale stack was detected, so Resume / repair is allowed with at least $($compat.MinManagedRepairFreeGiB) GB free."
+        } elseif ($AllowManagedCleanup) {
+            Write-Warning "Partition $($volume.Drive) has only $([math]::Round($volume.Free / 1GB, 1)) GB free, below the $($compat.MinManagedRepairFreeGiB) GB managed-repair floor. Verify and Cleanup remain available; mutating repair/update modes stay blocked until cleanup restores the repair reserve."
         } else {
             $suffix = if ($AllowManagedRepair) { " Managed repair requires at least $($compat.MinManagedRepairFreeGiB) GB free." } else { '' }
             throw "Partition $($volume.Drive) has only $([math]::Round($volume.Free / 1GB, 1)) GB free. A fresh install requires at least $($compat.MinHostPartitionFreeGiB) GB free.$suffix"
@@ -3340,6 +3425,7 @@ function Get-UbuntuDistroInfo([string]$Name) {
         Warnings = @()
         ManagedStackOwners = @()
         ManagedRepairEligible = $false
+        ManagedCleanupEligible = $false
         LegacyInstallerArtifact = ($Name -like 'Hermes-Ubuntu-*')
     }
 
@@ -3495,21 +3581,40 @@ function Get-UbuntuDistroInfo([string]$Name) {
         $result.ManagedStackOwners = @($result.ManagedStackOwners | Select-Object -Unique)
     }
 
-    if ($result.ManagedStackOwners.Count -gt 0 -and $null -ne $result.StorageVolume -and
-        $result.BlockerCodes -contains 'STORAGE_FREE_LOW' -and
-        $result.StorageVolume.Free -ge ([int64]$compat.MinManagedRepairFreeGiB * 1GB)) {
-        $newCodes = @()
-        $newBlockers = @()
-        for ($i = 0; $i -lt $result.BlockerCodes.Count; $i++) {
-            if ($result.BlockerCodes[$i] -eq 'STORAGE_FREE_LOW') { continue }
-            $newCodes += $result.BlockerCodes[$i]
-            $newBlockers += $result.Blockers[$i]
+    if ($result.ManagedStackOwners.Count -gt 0 -and $null -ne $result.StorageVolume) {
+        $storageCleanupBlockers = @('STORAGE_FREE_LOW','STORAGE_TOTAL_LOW')
+        $hasCleanupStorageBlocker = @($result.BlockerCodes | Where-Object { $storageCleanupBlockers -contains $_ }).Count -gt 0
+        if ($hasCleanupStorageBlocker) {
+            # A recognized managed install must be able to reach read-only verification and
+            # explicit cleanup even when the Windows partition is already too full for a
+            # normal repair. Remove only capacity/free-space blockers; every other safety
+            # blocker (WSL launch, architecture, OS identity, storage location, etc.) remains.
+            $newCodes = @()
+            $newBlockers = @()
+            for ($i = 0; $i -lt $result.BlockerCodes.Count; $i++) {
+                if ($storageCleanupBlockers -contains $result.BlockerCodes[$i]) { continue }
+                $newCodes += $result.BlockerCodes[$i]
+                $newBlockers += $result.Blockers[$i]
+            }
+            $result.BlockerCodes = $newCodes
+            $result.Blockers = $newBlockers
+            $result.ManagedCleanupEligible = $true
+
+            $repairSpaceOk = $result.StorageVolume.Size -gt ([int64]$compat.MinHostPartitionTotalGiBExclusive * 1GB) -and
+                             $result.StorageVolume.Free -ge ([int64]$compat.MinManagedRepairFreeGiB * 1GB)
+            if ($repairSpaceOk) {
+                $result.ManagedRepairEligible = $true
+                if (-not ($result.BlockerCodes | Where-Object { $_ -like 'STORAGE_*' })) { $result.StorageStatus = 'REPAIR OK' }
+                Add-DistroWarning $result "Existing installer-managed LatticeVale stack detected for $($result.ManagedStackOwners -join ', '); Resume / repair may proceed with $([math]::Round($result.StorageVolume.Free / 1GB,1)) GB free. Fresh installs still require $($compat.MinHostPartitionFreeGiB) GB free."
+            } else {
+                $result.StorageStatus = 'CLEANUP ONLY'
+                Add-DistroWarning $result "Existing installer-managed LatticeVale stack detected for $($result.ManagedStackOwners -join ', '), but its host partition is below the supported managed-repair storage floor. Verify and Cleanup remain available so space can be reclaimed without changing the live stack; mutating repair/update modes remain blocked."
+            }
+        } elseif ($result.StorageVolume.Size -gt ([int64]$compat.MinHostPartitionTotalGiBExclusive * 1GB) -and
+                  $result.StorageVolume.Free -ge ([int64]$compat.MinManagedRepairFreeGiB * 1GB)) {
+            $result.ManagedRepairEligible = $true
+            $result.ManagedCleanupEligible = $true
         }
-        $result.BlockerCodes = $newCodes
-        $result.Blockers = $newBlockers
-        $result.ManagedRepairEligible = $true
-        if (-not ($result.BlockerCodes | Where-Object { $_ -like 'STORAGE_*' })) { $result.StorageStatus = 'REPAIR OK' }
-        Add-DistroWarning $result "Existing installer-managed LatticeVale stack detected for $($result.ManagedStackOwners -join ', '); Resume / repair may proceed with $([math]::Round($result.StorageVolume.Free / 1GB,1)) GB free. Fresh installs still require $($compat.MinHostPartitionFreeGiB) GB free."
     }
 
     $result.Eligible = ($result.Blockers.Count -eq 0)
@@ -5317,6 +5422,7 @@ $requiredBundleFiles = @(
     'VERSION.txt',
     'compatibility.conf',
     'linux\bootstrap.sh',
+    'linux\cleanup-storage.sh',
     'stack\compose.yaml',
     'stack\Dockerfile.qmd',
     'stack\patch-qmd-bind.py',
@@ -5351,7 +5457,7 @@ if ($DistroName.Length -gt 128 -or $DistroName -match '[\x00-\x1F"]') { throw "S
 $registration = $selectedDistro.Registration
 
 Write-Step 'Checking selected distro storage'
-$existingVolume = Assert-LatticeValeStorageVolume $registration.BasePath -AllowManagedRepair:$selectedDistro.ManagedRepairEligible
+$existingVolume = Assert-LatticeValeStorageVolume $registration.BasePath -AllowManagedRepair:$selectedDistro.ManagedRepairEligible -AllowManagedCleanup:$selectedDistro.ManagedCleanupEligible
 $DistroStoragePath = $registration.BasePath
 Write-Info "Selected '$DistroName' is stored on $($existingVolume.Drive): $([math]::Round($existingVolume.Size / 1GB,1)) GB total, $([math]::Round($existingVolume.Free / 1GB,1)) GB free."
 Write-Info "Registered WSL storage path: $DistroStoragePath"
@@ -5367,9 +5473,20 @@ if ([string]::IsNullOrWhiteSpace($stackLinuxPath) -or -not $stackLinuxPath.Start
     throw "Could not derive a safe managed stack path from Linux home '$linuxHome'."
 }
 $linuxHomeFs = Assert-LinuxNativeHomeFilesystem $DistroName $linuxUser
-Write-Info "Linux home filesystem: $linuxHomeFs - OK"
+$linuxHomeFsDisplay = Format-LinuxNativeFilesystemLabel $linuxHomeFs
+Write-Info "Linux home filesystem: $linuxHomeFsDisplay - OK"
 
 $stackState = Get-LatticeValeStackPathState $DistroName $linuxUser
+# Low-space cleanup eligibility is granted at distro inventory time if any normal user owns a
+# recognized managed stack. Reassert the ordinary fresh-install storage policy after the user is
+# selected so a different/non-managed user cannot accidentally inherit that cleanup-only bypass.
+if ($stackState -ne 'managed') {
+    $selectedCompat = Get-LatticeValeCompatibility
+    if ($existingVolume.Size -le ([int64]$selectedCompat.MinHostPartitionTotalGiBExclusive * 1GB) -or
+        $existingVolume.Free -lt ([int64]$selectedCompat.MinHostPartitionFreeGiB * 1GB)) {
+        throw "The selected Linux user does not own a recognized installer-managed LatticeVale stack, so the cleanup-only storage exception does not apply. Fresh/unrecognized installs still require a host partition over $($selectedCompat.MinHostPartitionTotalGiBExclusive) GB total with at least $($selectedCompat.MinHostPartitionFreeGiB) GB free."
+    }
+}
 $existingOptions = $null
 $installMode = 'fresh'
 $resetCheckpoints = $false
@@ -5404,7 +5521,8 @@ switch ($stackState) {
             'Verify installation only - read-only audit; make no changes',
             'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',
             'Advanced recovery - reset checkpoints or explicitly rebuild installer-owned identities',
-            'Update / repair installer-managed software - force this bundle''s declared component versions/channels and managed package/image/source layer now, then run normal repair'
+            'Update / repair installer-managed software - force this bundle''s declared component versions/channels and managed package/image/source layer now, then run normal repair',
+            'Cleanup / reclaim disk space - choose safe cleanup categories without changing the current LatticeVale runtime/data configuration'
         )
         switch ($modeChoice) {
             1 { $installMode = 'resume' }
@@ -5491,6 +5609,56 @@ switch ($stackState) {
                 Write-Info 'This mode preserves saved component choices and persistent application data, creates a pre-update managed-stack backup, then forces this LatticeVale bundle''s managed package/image/source refresh instead of waiting for the periodic refresh window.'
                 Write-Info 'It applies installer-managed component references only to versions/channels declared by this bundle. It does not chase arbitrary upstream latest/main versions, overwrite explicit user-owned image/source overrides, or update separately owned native Windows Ollama.'
             }
+            7 {
+                $installMode = 'cleanup'
+                Write-Host "`nCLEANUP / RECLAIM DISK SPACE" -ForegroundColor Cyan
+                Write-Info 'Cleanup is an isolated maintenance mode. It exits after cleanup and does not continue into component reconciliation, provider setup, managed software refresh, or normal install stages.'
+                Write-Info 'Every offered category is bounded so selecting one or ALL cannot delete the live LatticeVale containers, Docker volumes/networks/tagged images, Hermes/Matrix/Honcho/QMD/Ollama persistent state, configured models, vault/workspace files, credentials, or user-created backups.'
+                $cleanupScopes = @()
+                $cleanupDone = $false
+                while (-not $cleanupDone) {
+                    $cleanupChoice = Read-MenuExplicit 'Select a cleanup category; you may select several before running:' @(
+                        'LatticeVale Option 6 pre-update safety backups - delete only backups with exact bundle ownership metadata for this current stack',
+                        'Disposable LatticeVale staging residue - stale root-owned installer/audit temp directories and incomplete pre-update .partial directories only',
+                        'APT downloaded-package cache - clears downloaded package archives only; installed packages are unchanged',
+                        'Docker dangling images only - untagged images not referenced by any container; never uses image prune -a',
+                        'Docker dangling build cache only - default builder prune without --all; runtime images/containers/volumes/networks are unchanged',
+                        'TRIM unused blocks on the WSL root filesystem - exposes freed ext4 blocks to the virtual-disk layer; does not resize/move/compact the VHDX',
+                        'Select ALL safe cleanup categories above',
+                        'Finish selecting categories and run cleanup',
+                        'Cancel cleanup and exit without changes'
+                    )
+                    switch ($cleanupChoice) {
+                        1 { if ($cleanupScopes -notcontains 'preupdate-backups') { $cleanupScopes += 'preupdate-backups' } }
+                        2 { if ($cleanupScopes -notcontains 'staging') { $cleanupScopes += 'staging' } }
+                        3 { if ($cleanupScopes -notcontains 'apt-cache') { $cleanupScopes += 'apt-cache' } }
+                        4 { if ($cleanupScopes -notcontains 'docker-dangling') { $cleanupScopes += 'docker-dangling' } }
+                        5 { if ($cleanupScopes -notcontains 'docker-build-cache') { $cleanupScopes += 'docker-build-cache' } }
+                        6 { if ($cleanupScopes -notcontains 'trim-root') { $cleanupScopes += 'trim-root' } }
+                        7 { $cleanupScopes = @('preupdate-backups','staging','apt-cache','docker-dangling','docker-build-cache','trim-root') }
+                        8 {
+                            if ($cleanupScopes.Count -eq 0) {
+                                Write-Host 'Select at least one cleanup category, or choose Cancel cleanup.' -ForegroundColor Yellow
+                            } else { $cleanupDone = $true }
+                        }
+                        9 {
+                            Write-Info 'Cleanup cancelled. No cleanup action was executed.'
+                            exit 0
+                        }
+                    }
+                    if ($cleanupChoice -lt 8) { Write-Info "Selected cleanup categories: $($cleanupScopes -join ', ')" }
+                }
+                if (-not (Read-ChoiceExplicit 'Run the selected cleanup now?' "Selected categories: $($cleanupScopes -join ', '). The cleanup helper validates current managed state before deleting anything." 'Exit without cleanup.' $false $false)) {
+                    Write-Info 'Cleanup cancelled. No cleanup action was executed.'
+                    exit 0
+                }
+                Invoke-LatticeValeCleanupMaintenance $DistroName $stackLinuxPath $cleanupScopes $DistroStoragePath
+                Write-Host "`nCleanup maintenance complete. Protected-state verification passed; normal installer/repair stages were not run." -ForegroundColor Green
+                exit 0
+            }
+        }
+        if (-not $selectedDistro.ManagedRepairEligible -and $installMode -in @('resume','change','reconfigure','advanced','update')) {
+            throw "The selected LatticeVale host partition is below the supported managed-repair storage floor. Rerun the installer and choose Cleanup / reclaim disk space (Option 7), or Verify installation only (Option 3). No mutating repair/update work was started."
         }
     }
     'absent' { }

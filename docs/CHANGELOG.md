@@ -1,5 +1,14 @@
 # Changelog
 
+## 14.5.2 - 2026-08-29
+
+- Adds **Option 7 — Cleanup / reclaim disk space** as an isolated existing-install maintenance path without changing Options 1–6. The user can select one/several/all bounded categories: exact-metadata Option 6 pre-update backups, stale root-owned installer staging, APT download cache, Docker dangling images, Docker dangling default-builder cache, and WSL root TRIM. The helper explicitly excludes containers, networks, volumes, tagged images, configured models, persistent application/database/vault/workspace/credential state, unverified backups, and all VHDX manipulation.
+- Makes cleanup reachable for a recognized installer-managed stack even when host-partition free space has fallen below the normal 10 GiB repair gate; Verify remains available, while all existing mutating repair/update modes stay blocked until the normal floor is restored. Fresh/unrecognized stacks cannot inherit this cleanup-only exception.
+- Hardens Option 7 after live low-space validation: successful cleanup now requires a before/after protected-state identity comparison covering installer/config identity, persistent roots, preserved backups, pre-existing Ollama model manifests, containers, volumes, networks, and tagged images. A missing/changed protected identity makes cleanup return failure instead of printing success.
+- Clarifies WSL root TRIM output as logical discard extent space rather than Windows free-space reclaimed, and normalizes the confusing `statfs` `ext2/ext3` home-filesystem display to an explicit Linux-native ext-family label.
+- Adds dedicated v14.5.2 Option 7 safety regression coverage and keeps broad Docker pruning out of automatic repair: no `docker system prune`, no container/network/volume prune, no `docker image prune -a`, and no builder `--all`.
+- Keeps all v14.5.1 adaptive-resource, OOM-detection, gateway-reconcile, third-party pin, persistent-state, and user-owned override behavior unchanged.
+
 ## 14.5.1 - 2026-08-29
 
 - Advances adaptive container resource policy to **v9**. It preserves the Hermes fix motivated by policy-v4 544 MiB cgroup OOMs and additionally addresses a measured policy-v6 CPU-backed Ollama run that sat near 98% of a 4128 MiB hard ceiling and recorded >15,000 `memory.max` events.

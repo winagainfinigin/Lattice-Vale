@@ -5,7 +5,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1'}, VERSION
+assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}, VERSION
 
 boot = (ROOT / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 compat = (ROOT / 'compatibility.conf').read_text(encoding='utf-8')

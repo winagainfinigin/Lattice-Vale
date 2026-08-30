@@ -5,7 +5,7 @@ from itertools import product
 import subprocess, sys
 
 ROOT = Path(__file__).resolve().parents[1]
-assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() == '14.5.1'
+assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2'}
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
 boot = (ROOT / 'linux/bootstrap.sh').read_text(encoding='utf-8')

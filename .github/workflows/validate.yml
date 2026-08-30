@@ -40,12 +40,12 @@ jobs:
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |
-          grep -q '^14.5.1$' LatticeVale-Core/VERSION.txt
-          grep -q '^# LatticeVale v14.5.1' README.md
-          grep -q '^LATTICEVALE v14.5.1' docs/Instructions.txt
-          grep -q '^LATTICEVALE v14.5.1' 'docs/Installer Description.txt'
-          grep -q '^## 14.5.1 ' docs/CHANGELOG.md
-          grep -q 'placeholder: 14.5.1' .github/ISSUE_TEMPLATE/bug_report.yml
+          grep -q '^14.5.2$' LatticeVale-Core/VERSION.txt
+          grep -q '^# LatticeVale v14.5.2' README.md
+          grep -q '^LATTICEVALE v14.5.2' docs/Instructions.txt
+          grep -q '^LATTICEVALE v14.5.2' 'docs/Installer Description.txt'
+          grep -q '^## 14.5.2 ' docs/CHANGELOG.md
+          grep -q 'placeholder: 14.5.2' .github/ISSUE_TEMPLATE/bug_report.yml
           grep -q 'read-only planner/config-state code must never write' .github/PULL_REQUEST_TEMPLATE.md
           grep -q 'PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md docs/SUPPORT.md docs/RELEASE.md
           grep -q 'PATCH-NOTES.md' README.md LatticeVale-Core/README.md
