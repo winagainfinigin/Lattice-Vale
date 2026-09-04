@@ -1741,6 +1741,19 @@ function Get-LinuxHomeFilesystemType([string]$Name, [string]$User) {
     return $fsType
 }
 
+function Format-LinuxNativeFilesystemLabel([string]$FsType) {
+    if ([string]::IsNullOrWhiteSpace($FsType)) { return 'unknown Linux-native filesystem' }
+    $normalized = $FsType.Trim().ToLowerInvariant()
+    switch ($normalized) {
+        'ext2/ext3' { return 'ext2/ext3/ext4-compatible Linux-native filesystem' }
+        'ext2/ext3/ext4' { return 'ext2/ext3/ext4-compatible Linux-native filesystem' }
+        'ext4' { return 'ext4 Linux-native filesystem' }
+        'btrfs' { return 'btrfs Linux-native filesystem' }
+        'xfs' { return 'xfs Linux-native filesystem' }
+        default { return "$normalized Linux-native filesystem" }
+    }
+}
+
 function Assert-LinuxNativeHomeFilesystem([string]$Name, [string]$User) {
     $fsType = Get-LinuxHomeFilesystemType $Name $User
     if (-not $fsType) {
@@ -5894,7 +5907,7 @@ if ([string]::IsNullOrWhiteSpace($stackLinuxPath) -or -not $stackLinuxPath.Start
     throw "Could not derive a safe managed stack path from Linux home '$linuxHome'."
 }
 $linuxHomeFs = Assert-LinuxNativeHomeFilesystem $DistroName $linuxUser
-Write-Info "Linux home filesystem: $linuxHomeFs - OK"
+Write-Info "Linux home filesystem: $(Format-LinuxNativeFilesystemLabel $linuxHomeFs) - OK"
 
 $stackState = Get-LatticeValeStackPathState $DistroName $linuxUser
 # Low-space cleanup eligibility is granted at distro inventory time if any normal user owns a

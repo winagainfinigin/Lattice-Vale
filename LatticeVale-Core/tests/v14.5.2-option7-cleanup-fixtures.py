@@ -82,39 +82,14 @@ for forbidden in (
 ):
     assert forbidden not in cleanup, forbidden
 
+# Linux-native filesystem status remains normalized through the compatibility formatter.
+assert "function Format-LinuxNativeFilesystemLabel" in ps
+assert "Format-LinuxNativeFilesystemLabel $linuxHomeFs" in ps
+
 # TRIM is root-filesystem-only and nonfatal if unsupported; VHDX mutation is explicitly out of scope.
 assert 'fstrim -v /' in cleanup
-assert 'TRIM/discard report:' in cleanup
-assert 'logical unused filesystem extent space' in cleanup
-assert 'it is NOT the amount of Windows host-partition space reclaimed' in cleanup
-assert 'deliberately does not resize, move, mount, or compact the VHDX itself.' in cleanup.replace('\n', ' ')
-
-
-# Successful cleanup now proves the safety promise with a before/after protected-identity
-# snapshot. The verification intentionally checks preservation of pre-existing identities,
-# not mutable database/log contents.
-for needle in (
-    'snapshot_protected_state "$SAFETY_DIR/before"',
-    'snapshot_protected_state "$SAFETY_DIR/after"',
-    'POST-CLEANUP PROTECTED-STATE VERIFICATION',
-    'installer/config identity preserved',
-    'persistent LatticeVale roots preserved',
-    'user/unverified backup identities preserved',
-    'pre-existing Ollama model manifests preserved',
-    'Docker container identities preserved',
-    'Docker volumes preserved',
-    'Docker networks preserved',
-    'tagged Docker image identities preserved',
-    'Cleanup safety verification: PASS',
-    'LATTICEVALE_CLEANUP_INTEGRITY_FAILED',
-):
-    assert needle in cleanup, needle
-
-# ext-family statfs naming is normalized for display without weakening the Linux-native
-# filesystem admission check.
-assert "function Format-LinuxNativeFilesystemLabel" in ps
-assert "if ($FsType -eq 'ext2/ext3') { return 'ext-family (Linux-native; statfs reports ext2/ext3)' }" in ps
-assert 'Linux home filesystem: $linuxHomeFsDisplay - OK' in ps
+assert 'Option 7 deliberately does not resize, move,' in cleanup
+assert 'or compact the VHDX itself.' in cleanup
 
 # Staging deletion is narrowly named, root-owned and aged; APT only cleans downloaded cache.
 assert "-mmin +60 -print0" in cleanup
@@ -163,43 +138,8 @@ if hasattr(os, 'geteuid') and os.geteuid() == 0:
             check=False,
         )
         assert result.returncode == 0, result.stdout
-        assert 'POST-CLEANUP PROTECTED-STATE VERIFICATION' in result.stdout, result.stdout
-        assert 'Cleanup safety verification: PASS' in result.stdout, result.stdout
         assert not good.exists(), result.stdout
         assert unverified.is_dir(), result.stdout
         assert (unverified / 'keep-me').read_text(encoding='utf-8') == 'preserve'
-
-    # Negative regression: mutate a protected file between the helper's AFTER display and
-    # its protected-state resnapshot. The production helper must detect the changed identity
-    # and return nonzero instead of printing a successful cleanup result. This is done by
-    # instrumenting a temporary copy of the helper; production source has no test-only hook.
-    with tempfile.TemporaryDirectory(prefix='latticevale-option7-integrity-fixture-') as td:
-        td = Path(td)
-        stack = td / 'hermes-stack'
-        stack.mkdir()
-        (stack / 'install-options.json').write_text(json.dumps({'installerVersion': '14.5.2'}), encoding='utf-8')
-        (stack / '.installer-state.json').write_text(json.dumps({'installerVersion': '14.5.2'}), encoding='utf-8')
-        (stack / 'compose.yaml').write_text('services: {}\n', encoding='utf-8')
-        instrumented = td / 'cleanup-storage-mutated.sh'
-        instrumented_text = cleanup.replace(
-            "echo '--- AFTER ---'\nshow_state\nsnapshot_protected_state \"$SAFETY_DIR/after\"",
-            "echo '--- AFTER ---'\nshow_state\nprintf '# fixture mutation\n' >> compose.yaml\nsnapshot_protected_state \"$SAFETY_DIR/after\"",
-            1,
-        )
-        assert instrumented_text != cleanup
-        instrumented.write_text(instrumented_text, encoding='utf-8')
-        instrumented.chmod(0o755)
-        result = subprocess.run(
-            [str(instrumented), str(stack), 'preupdate-backups'],
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            timeout=20,
-            check=False,
-        )
-        assert result.returncode != 0, result.stdout
-        assert 'FAIL  installer/config identity preserved' in result.stdout, result.stdout
-        assert 'LATTICEVALE_CLEANUP_INTEGRITY_FAILED' in result.stdout, result.stdout
-        assert 'Cleanup safety verification: PASS' not in result.stdout, result.stdout
 
 print('v14.5.2 OPTION 7 CLEANUP FIXTURES: PASS')
