@@ -25,7 +25,7 @@ for svc in ('honcho-api','honcho-deriver'):
 assert 'OpenAI API key for Honcho' not in configure
 assert 'LLM_OPENAI_API_KEY ollama-local' in configure
 assert 'OLLAMA_NO_CLOUD' in compose_text
-assert 'ollama_openai_base_url' in configure and "f'base_url = {q(ollama_base)}'" in configure
+assert 'ollama_openai_base_url' in configure and 'local_text_openai_base_url' in configure and "f'base_url = {q(embedding_base)}'" in configure and "f'base_url = {q(text_base)}'" in configure
 assert 'verify_honcho_embedding_model' in configure
 assert "'dimensions':1536" in configure
 assert "base+'/embeddings'" in configure
@@ -40,7 +40,7 @@ for section in (
 ):
     assert section in configure, section
 
-assert 'Use Ollama as the default Hermes AI provider?' in ps1
+assert 'Use a LatticeVale local AI backend as the default Hermes AI provider?' in ps1
 assert 'LatticeVale-managed WSL/Docker Ollama can be installed automatically' in ps1
 assert 'Native Windows Ollama can be detected while stopped, but it must be running before LatticeVale can use and link its local API' in ps1
 assert 'native Windows Ollama is usable only after both its Windows-local API and safe WSL relay path are verified' in ps1
@@ -65,7 +65,7 @@ assert 'Windows Tailscale' in readme and 'Ubuntu Pro' in readme and 'no longer o
 assert 'SearXNG itself is local' in readme or 'SearXNG + Valkey' in readme
 
 print('SELF-HOSTING FIXTURES: PASS')
-print('- Honcho inference and embeddings route to the selected managed/native Ollama backend')
+print('- Honcho text inference routes to the selected local text backend; embeddings retain the selected managed/native Ollama backend')
 print('- Ollama cloud features disabled and no host port exposed')
-print('- fresh Hermes installs default to local Ollama; legacy resumes preserve provider')
+print('- fresh Hermes installs default to local AI; legacy resumes preserve provider and default to Ollama unless DirectML is explicitly selected')
 print('- pre-v12/uncertain Honcho data receives backup-first embedding migration')

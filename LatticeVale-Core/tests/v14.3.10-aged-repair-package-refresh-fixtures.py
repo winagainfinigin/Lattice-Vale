@@ -4,7 +4,7 @@ import re
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text().strip()
-assert version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}, version
+assert version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
@@ -14,7 +14,7 @@ compat=(ROOT/'compatibility.conf').read_text(encoding='utf-8')
 # version change as a bounded managed-refresh trigger. v14.4.6 supersedes that behavior:
 # the explicit policy revision is the immediate convergence signal and VERSION is provenance.
 assert 'MANAGED_REPAIR_REFRESH_DAYS=30' in compat
-assert ('MANAGED_REPAIR_REFRESH_REVISION=2' in compat) if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'} else ('MANAGED_REPAIR_REFRESH_REVISION=1' in compat)
+assert ('MANAGED_REPAIR_REFRESH_REVISION=2' in compat) if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'} else ('MANAGED_REPAIR_REFRESH_REVISION=1' in compat)
 assert "MANAGED_REPAIR_REFRESH_DAYS'" in ps and 'ManagedRepairRefreshDays' in ps
 assert "MANAGED_REPAIR_REFRESH_REVISION'" in ps and 'ManagedRepairRefreshRevision' in ps
 assert '.repair-package-refresh' in boot and '.repair-package-refresh-pending' in boot
@@ -22,11 +22,11 @@ assert 'installer-config.tar.gz' in boot and '.repair-package-refresh .repair-pa
 assert 'legacy installs without a refresh marker refresh once' in boot
 assert 'now_epoch - last_refresh_epoch >= repair_refresh_interval_seconds' in boot
 assert 'last_refresh_revision' in boot and 'last_refresh_revision" != "$repair_refresh_revision' in boot
-if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}:
+if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
     assert r"printf 'POLICY_REVISION=%s\nINSTALLER_VERSION=%s\n'" in boot
     assert 'last_refresh_installer_version' in boot
     assert 'pending_refresh_installer_version' in boot
-    if version in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}:
+    if version in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
         assert '[[ "$last_refresh_installer_version" != "$installer_version" ]]' not in boot
         assert '[[ "$pending_refresh_revision" == "$repair_refresh_revision" ]]' in boot
 else:

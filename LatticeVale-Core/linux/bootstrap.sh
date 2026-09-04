@@ -41,7 +41,7 @@ ollama_acceleration=cpu
 # Before Python is guaranteed available, determine only the package-maintenance mode
 # from installer-owned filesystem state. Do not regex-parse JSON control flags: valid
 # JSON strings can contain text that looks like another key/value pair.
-if [[ -f "$stack_dir/install-options.json" || -f "$stack_dir/.installer-state.json" ]]; then repair_run=true; fi
+if [[ -f "$stack_dir/install-options.json" || -f "$stack_dir/.installer-state.json" || -s "$stack_dir/.install-info" || -f "$stack_dir/.configured" ]]; then repair_run=true; fi
 if [[ "$force_managed_update" == true && "$repair_run" != true ]]; then
   echo 'Update / repair is valid only for an existing installer-managed LatticeVale stack.' >&2
   exit 2
@@ -57,7 +57,7 @@ fi
 # An existing managed stack can reach this bootstrap with very little logical WSL free
 # space. Reclaim only root-owned disposable package/staging residue BEFORE creating the
 # pre-repair configuration snapshot. This deliberately never touches application data.
-if [[ -f "$stack_dir/install-options.json" || -f "$stack_dir/.installer-state.json" ]]; then
+if [[ -f "$stack_dir/install-options.json" || -f "$stack_dir/.installer-state.json" || -s "$stack_dir/.install-info" || -f "$stack_dir/.configured" ]]; then
   echo 'Repair pre-maintenance: clearing disposable APT cache and stale LatticeVale staging directories.'
   apt-get clean >/dev/null 2>&1 || true
   find /tmp -mindepth 1 -maxdepth 1 -type d \( -name 'latticevale-installer-*' -o -name 'latticevale-audit-*' -o -name 'hermes-installer-*' -o -name 'hermes-audit-*' \) -mmin +60 -exec rm -rf -- {} + 2>/dev/null || true
@@ -78,7 +78,7 @@ if [[ -d "$stack_dir" ]]; then
   backup_dir="$stack_dir/backups/pre-$installer_version-$stamp"
   install -d -m 0700 -o "$linux_uid" -g "$linux_gid" "$backup_dir"
   backup_items=()
-  for item in compose.yaml compose.latticevale.yaml compose.override.yaml configure-stack.sh manage.sh state-audit.py latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json install-options.json .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
+  for item in compose.yaml compose.latticevale.yaml compose.override.yaml configure-stack.sh manage.sh state-audit.py latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
     [[ -e "$stack_dir/$item" ]] && backup_items+=("$item")
   done
   # Logs are diagnostic, not application state. Preserve them in the configuration
@@ -208,6 +208,9 @@ def flag(name):
 accel=d.get('ollamaAcceleration','cpu')
 if accel not in ('auto','cpu','nvidia','amd'):
     raise SystemExit('Invalid install options: ollamaAcceleration must be auto, cpu, nvidia, or amd.')
+text_backend=d.get('localTextBackend','ollama')
+if text_backend not in ('ollama','directml'):
+    raise SystemExit('Invalid install options: localTextBackend must be ollama or directml.')
 backend=d.get('ollamaBackend','managed')
 if backend not in ('managed','windows-native'):
     raise SystemExit('Invalid install options: ollamaBackend must be managed or windows-native.')
@@ -221,14 +224,32 @@ for key in ('honcho','hermesLocalAI','searxng'):
     if key in d and not isinstance(d[key],bool):
         raise SystemExit(f'Invalid install options: {key} must be true or false.')
 redis_like = d.get('searxng',False) is True or d.get('honcho',False) is True
-print('\t'.join((flag('repairMaintenance'),flag('obsidian'),'true' if local_ai else 'false','true' if redis_like else 'false',accel,backend,transport)))
+print('\t'.join((flag('repairMaintenance'),flag('obsidian'),'true' if local_ai else 'false','true' if redis_like else 'false',accel,backend,transport,text_backend,flag('autoStart'))))
 PY_BOOTSTRAP_OPTIONS
 )"
-IFS=$'\t' read -r requested_repair obsidian_selected local_ai_requested redis_like_required ollama_acceleration ollama_backend ollama_transport <<< "$parsed_bootstrap_options"
+IFS=$'\t' read -r requested_repair obsidian_selected local_ai_requested redis_like_required ollama_acceleration ollama_backend ollama_transport local_text_backend auto_start_requested <<< "$parsed_bootstrap_options"
 # Existing installer-owned state remains sufficient to select repair-safe package
 # behavior even if a reconfigure run intentionally records repairMaintenance=false.
 [[ "$requested_repair" == true ]] && repair_run=true
 unset parsed_bootstrap_options requested_repair
+
+# PyTorch DirectML is isolated in its own user-owned venv, but its WSL runtime needs
+# a small set of Ubuntu libraries. Install them only when the user explicitly selected
+# DirectML; ordinary Ollama repairs do not acquire extra Python/BLAS packages.
+if [[ "$local_ai_requested" == true && "$local_text_backend" == directml ]]; then
+  directml_packages=(python3-venv libblas3 libomp5 liblapack3)
+  missing_directml_packages=()
+  for pkg in "${directml_packages[@]}"; do
+    dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'ok installed' || missing_directml_packages+=("$pkg")
+  done
+  if ((${#missing_directml_packages[@]})); then
+    echo "Installing missing DirectML WSL prerequisites: ${missing_directml_packages[*]}"
+    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${missing_directml_packages[@]}"
+  else
+    echo 'DirectML WSL prerequisite packages are already installed; reusing them.'
+  fi
+  unset directml_packages missing_directml_packages
+fi
 
 # LatticeVale-managed Redis/Valkey services require Linux memory overcommit for
 # reliable fork/background-save behavior. This is a narrow, idempotent kernel sysctl
@@ -338,7 +359,10 @@ nvidia_runtime_ready() {
 }
 
 install_nvidia_container_toolkit_if_needed() {
-  if nvidia_runtime_ready && [[ "$repair_root_refresh_needed" != true ]]; then return 0; fi
+  if nvidia_runtime_ready && [[ "$repair_root_refresh_needed" != true ]]; then
+    echo 'NVIDIA Container Toolkit and Docker GPU runtime are already verified; reusing them.'
+    return 0
+  fi
   local smi repo_stamp daemon_backup='' daemon_existed=false configured=false
   smi="$(nvidia_smi_path 2>/dev/null || true)"
   [[ -n "$smi" ]] || return 1
@@ -464,6 +488,8 @@ install_nvidia_container_toolkit_if_needed() {
 if [[ "$local_ai_requested" == true && "$ollama_backend" == managed && "$ollama_acceleration" != cpu ]]; then
   if [[ "$ollama_acceleration" == nvidia ]]; then
     install_nvidia_container_toolkit_if_needed || { echo 'NVIDIA acceleration was explicitly selected but the NVIDIA Container Toolkit could not be configured/verified. No Linux NVIDIA display driver was installed. Fix Windows/WSL GPU support or rerun with Auto/CPU.' >&2; exit 5; }
+  elif [[ "$ollama_acceleration" == amd ]]; then
+    echo 'AMD/ROCm managed Ollama selected. Reusing the WSL-provided /dev/kfd + /dev/dri device path and the pinned Ollama ROCm container image; LatticeVale does not install or replace the Windows/host display driver.'
   elif [[ "$ollama_acceleration" == auto ]]; then
     if nvidia_smi_path >/dev/null 2>&1; then
       install_nvidia_container_toolkit_if_needed || echo 'WARNING: NVIDIA GPU was detected, but the Docker NVIDIA runtime could not be configured. Auto mode will fall back to another supported accelerator or CPU.' >&2
@@ -509,7 +535,7 @@ if [[ -s "\$stack_dir/.latticevale-resource-state" ]]; then
   saved_mem="\$(sed -n 's/^MEM_MIB=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
 fi
 # Ask the stack-owned policy verifier to refresh on every startup path. The refresh
-# subcommand is itself a no-op when policy v9 fingerprints already match, but it can
+# subcommand is itself a no-op when policy v11 fingerprints already match, but it can
 # detect hardware, profile/Kanban topology, installed Ollama artifact/context, and
 # policy-revision changes without duplicating allocator logic in this root helper.
 resource_limits_enabled="\$(python3 - "\$stack_dir/install-options.json" <<'PY_RESOURCE_ENABLED'
@@ -597,6 +623,23 @@ for attempt in 1 2 3; do
   sleep 5
 done
 [[ "\$started" == true ]] || { echo 'LatticeVale stack could not be started after three attempts.' >&2; exit 1; }
+directml_selected="\$(python3 - "\$stack_dir/install-options.json" <<'PY_DIRECTML_AUTOSTART'
+import json,sys
+try:
+    d=json.load(open(sys.argv[1],encoding='utf-8'))
+    active=(d.get('honcho') is True or d.get('hermesLocalAI') is True) and d.get('localTextBackend','ollama')=='directml'
+    print('true' if active else 'false')
+except Exception:
+    print('false')
+PY_DIRECTML_AUTOSTART
+)"
+if [[ "\$directml_selected" == true && -x "\$stack_dir/directml-gateway.sh" ]]; then
+  if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1 && systemctl cat latticevale-directml-gateway.service >/dev/null 2>&1; then
+    systemctl restart latticevale-directml-gateway.service >/dev/null 2>&1 || true
+  fi
+  runuser -u "\$stack_user" -- env HOME="\$stack_home" USER="\$stack_user" DOCKER_HOST=unix:///var/run/docker.sock \
+    bash -c 'cd "\$1" && ./directml-gateway.sh start >/dev/null' bash "\$stack_dir" || { echo 'Could not start the LatticeVale DirectML text gateway.' >&2; exit 1; }
+fi
 EOF
 chmod 0755 /usr/local/sbin/hermes-stack-start
 
@@ -633,6 +676,45 @@ EOF_RELAY_UNIT
 elif [[ -f "$relay_unit" ]] && grep -Fq "$stack_dir/native-ollama-relay.sh" "$relay_unit" 2>/dev/null; then
   systemctl disable --now latticevale-native-ollama-relay.service >/dev/null 2>&1 || true
   rm -f "$relay_unit"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+fi
+
+# DirectML is a WSL-host process because DirectML exposes the Windows DX12 device to
+# Linux user space rather than to the Docker Ollama path. Install an exact-owned systemd
+# unit when systemd exists; enable it only when LatticeVale auto-start was requested.
+directml_unit=/etc/systemd/system/latticevale-directml-gateway.service
+if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1 && [[ "$local_ai_requested" == true && "$local_text_backend" == directml ]]; then
+  cat > "$directml_unit" <<EOF_DIRECTML_UNIT
+[Unit]
+Description=LatticeVale PyTorch DirectML text gateway supervisor
+After=docker.service network.target
+Wants=docker.service
+StartLimitIntervalSec=60
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=$linux_user
+WorkingDirectory=$stack_dir
+Environment=HOME=$user_home
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
+ExecStart=/bin/bash $stack_dir/directml-gateway.sh supervise
+Restart=on-failure
+RestartSec=3s
+
+[Install]
+WantedBy=multi-user.target
+EOF_DIRECTML_UNIT
+  chmod 0644 "$directml_unit"
+  systemctl daemon-reload >/dev/null 2>&1 || true
+  if [[ "$auto_start_requested" == true ]]; then
+    systemctl enable latticevale-directml-gateway.service >/dev/null 2>&1 || true
+  else
+    systemctl disable latticevale-directml-gateway.service >/dev/null 2>&1 || true
+  fi
+elif [[ -f "$directml_unit" ]] && grep -Fq "$stack_dir/directml-gateway.sh" "$directml_unit" 2>/dev/null; then
+  systemctl disable --now latticevale-directml-gateway.service >/dev/null 2>&1 || true
+  rm -f "$directml_unit"
   systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 
@@ -765,7 +847,7 @@ done
 unset managed_parent managed_path
 install -d -m 0750 -o "$linux_uid" -g "$linux_gid" "$stack_dir/data"
 
-for rel in backups secrets logs vendor data/hermes data/qmd data/synapse data/searxng-valkey data/honcho-redis; do
+for rel in backups secrets logs vendor data/hermes data/qmd data/directml data/synapse data/searxng-valkey data/honcho-redis; do
   repair_user_tree "$rel"
 done
 # User content is part of the selected stack and Hermes writes it as STACK_UID/GID.
@@ -780,6 +862,7 @@ fi
 # additional container-owned helper files, so normalize only the directory and settings.yml.
 repair_user_tree config/honcho
 install -d -m 0755 -o "$linux_uid" -g "$linux_gid" "$stack_dir/config" "$stack_dir/config/searxng"
+install -d -m 0750 -o "$linux_uid" -g "$linux_gid" "$stack_dir/data/directml"
 if [[ -f "$stack_dir/config/searxng/settings.yml" && ! -L "$stack_dir/config/searxng/settings.yml" ]]; then
   chown "$linux_uid:$linux_gid" "$stack_dir/config/searxng/settings.yml"
   chmod u+rw "$stack_dir/config/searxng/settings.yml"
@@ -819,7 +902,7 @@ unset rel path
 installer_owned_files=(
   compose.yaml Dockerfile.qmd patch-qmd-bind.py configure-stack.sh manage.sh state-audit.py
   latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json
-  qmd-index-cycle.sh native-ollama-relay.py native-ollama-relay.sh install-options.json
+  qmd-index-cycle.sh native-ollama-relay.py native-ollama-relay.sh directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json
 )
 for rel in "${installer_owned_files[@]}"; do
   if [[ -L "$stack_dir/$rel" ]]; then
@@ -855,6 +938,12 @@ install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/native-ollama-relay.py" "$stack_dir/native-ollama-relay.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/native-ollama-relay.sh" "$stack_dir/native-ollama-relay.sh"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/directml-gateway.py" "$stack_dir/directml-gateway.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/directml-gateway.sh" "$stack_dir/directml-gateway.sh"
+install -m 0644 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/directml-requirements.txt" "$stack_dir/directml-requirements.txt"
 install -m 0600 -o "$linux_uid" -g "$linux_gid" "$tmp_options" "$stack_dir/install-options.json"
 rm -f "$tmp_options"
 trap - EXIT
@@ -865,7 +954,7 @@ trap - EXIT
 verify_write_dirs=(
   "$stack_dir" "$stack_dir/data" "$stack_dir/config" "$stack_dir/config/searxng"
   "$stack_dir/backups" "$stack_dir/secrets" "$stack_dir/logs" "$stack_dir/vendor"
-  "$stack_dir/workspace" "$stack_dir/data/hermes" "$stack_dir/data/qmd"
+  "$stack_dir/workspace" "$stack_dir/data/hermes" "$stack_dir/data/qmd" "$stack_dir/data/directml"
   "$stack_dir/data/qmd/config" "$stack_dir/data/qmd/cache" "$stack_dir/data/synapse"
   "$stack_dir/data/searxng-valkey" "$stack_dir/data/honcho-redis"
 )
@@ -874,7 +963,7 @@ verify_write_files=(
   "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/patch-qmd-bind.py"
   "$stack_dir/configure-stack.sh" "$stack_dir/manage.sh" "$stack_dir/state-audit.py"
   "$stack_dir/latticevale_readonly.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
-  "$stack_dir/qmd-index-cycle.sh" "$stack_dir/native-ollama-relay.py" "$stack_dir/native-ollama-relay.sh" "$stack_dir/install-options.json" "$stack_dir/.env"
+  "$stack_dir/qmd-index-cycle.sh" "$stack_dir/native-ollama-relay.py" "$stack_dir/native-ollama-relay.sh" "$stack_dir/directml-gateway.py" "$stack_dir/directml-gateway.sh" "$stack_dir/directml-requirements.txt" "$stack_dir/install-options.json" "$stack_dir/.env"
   "$stack_dir/.repair-package-refresh" "$stack_dir/.repair-package-refresh-pending"
   "$stack_dir/.installer-state.json" "$stack_dir/.install-info" "$stack_dir/.configured"
   "$stack_dir/.matrix-info" "$stack_dir/.matrix-configured" "$stack_dir/.tailscale-info" "$stack_dir/.windows-native-info"

@@ -69,14 +69,14 @@ function Get-WslDistros {
 function Get-WslRegistrationSnapshot {
     $root='HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss'
     if (-not (Test-Path $root)) { return @() }
-    $items=New-Object System.Collections.Generic.List[object]
+    $items=[System.Collections.Generic.List[object]]::new()
     foreach ($key in Get-ChildItem $root -ErrorAction SilentlyContinue) {
         try {
             $p=Get-ItemProperty $key.PSPath
             $items.Add([pscustomobject]@{Name=[string]$p.DistributionName;BasePath=[string]$p.BasePath;Key=$key.PSPath})
         } catch {}
     }
-    return @($items)
+    return $items.ToArray()
 }
 function Get-OwnedWindowsRoots {
     return @(
@@ -101,7 +101,7 @@ function Get-OptionalPropertyString([object]$Object,[string]$Name) {
 }
 function Get-ScheduledTaskActionText([object]$Action) {
     if ($null -eq $Action) { return '' }
-    $parts=New-Object System.Collections.Generic.List[string]
+    $parts=[System.Collections.Generic.List[string]]::new()
     # Task Scheduler supports heterogeneous action types (Exec, COM handler,
     # and legacy action forms). Read only properties that actually exist so
     # StrictMode and unrelated non-Exec tasks cannot break a clean-host audit.
@@ -166,8 +166,8 @@ function Get-ShortcutRoots {
 }
 function Remove-OwnedShortcuts {
     $shell=New-Object -ComObject WScript.Shell
-    $files=New-Object System.Collections.Generic.List[object]
-    $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $files=[System.Collections.Generic.List[object]]::new()
+    $seen=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach ($root in Get-ShortcutRoots) {
         foreach ($file in @(Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -Force -ErrorAction SilentlyContinue)) {
             if ($seen.Add($file.FullName)) { $files.Add($file) }
@@ -202,8 +202,8 @@ function Remove-LegacyHermesPathEntries {
     $legacyFoundry=(Join-Path (Join-Path $env:LOCALAPPDATA 'Hermes') 'Foundry').TrimEnd('\')
     $latticeRoot=(Join-Path $env:LOCALAPPDATA 'LatticeVale').TrimEnd('\')
     $parts=@($path -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $kept=New-Object System.Collections.Generic.List[string]
-    $removed=New-Object System.Collections.Generic.List[string]
+    $kept=[System.Collections.Generic.List[string]]::new()
+    $removed=[System.Collections.Generic.List[string]]::new()
     foreach ($part in $parts) {
         $trim=$part.Trim().TrimEnd('\')
         $owned=$trim.Equals($legacyBin,[StringComparison]::OrdinalIgnoreCase) -or $trim.StartsWith($legacyFoundry+'\',[StringComparison]::OrdinalIgnoreCase) -or $trim.Equals($legacyFoundry,[StringComparison]::OrdinalIgnoreCase) -or $trim.StartsWith($latticeRoot+'\',[StringComparison]::OrdinalIgnoreCase) -or $trim.Equals($latticeRoot,[StringComparison]::OrdinalIgnoreCase)
@@ -246,8 +246,8 @@ function Get-TailscaleExe {
     return ''
 }
 function Get-LatticeValeTailscalePairs {
-    $pairs=New-Object System.Collections.Generic.List[object]
-    $seen=New-Object 'System.Collections.Generic.HashSet[string]' ([StringComparer]::OrdinalIgnoreCase)
+    $pairs=[System.Collections.Generic.List[object]]::new()
+    $seen=[System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     function Add-Pair([int]$Https,[int]$Backend,[string]$Label) {
         if ($Https -le 0 -or $Backend -le 0) { return }
         $key="$Https/$Backend"
@@ -272,7 +272,7 @@ function Get-LatticeValeTailscalePairs {
             }
         }
     }
-    return @($pairs)
+    return $pairs.ToArray()
 }
 function Remove-KnownLatticeValeTailscaleServe {
     $exe=Get-TailscaleExe

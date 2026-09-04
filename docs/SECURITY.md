@@ -1,3 +1,30 @@
+## v14.5.46 GPU-onboarding security boundary
+
+Hardware/vendor inventory is advisory only and never authorizes GPU-sized resource policy by itself. DirectML still requires direct WSL bridge/runtime proof; managed NVIDIA still requires working WSL `nvidia-smi` and a verified Docker runtime; managed AMD ROCm still requires `/dev/kfd` + `/dev/dri` and measured topology. LatticeVale installs only selected installer-owned WSL prerequisites and never installs/replaces Windows/vendor display drivers. A missing host GPU device is not fabricated or bypassed.
+
+## v14.5.45 PowerShell compatibility boundary
+
+v14.5.45 changes only collection construction/coercion in installer-owned PowerShell code. It does not broaden privilege, execution-policy, network, secret, or persistent-data ownership boundaries. Direct constructor syntax replaces a PowerShell engine-bug trigger; no external code or binary is introduced.
+
+## v14.5.44 DirectML preflight security boundary
+
+DirectML preflight is read-only. It uses bounded WSL `test` path probes, permits only the installer-owned existing DirectML Python interpreter for the optional tensor check, does not copy/replace WSL GPU libraries, does not alter Windows drivers, and does not infer managed-Ollama ROCm/CUDA readiness from `/dev/dxg`. Root retry is limited to read-only path existence/executability checks.
+
+## v14.5.43 repair-migration security boundary
+
+Universal repair does not mean universal directory adoption. v14.5.43 must prove an installer-managed stack before reading it as a migration target; unrecognized/corrupt ownership fails closed. A cumulative migration refuses downgrade from newer metadata/future schemas and requires a verified rollback backup before managed software refresh. Persistent user/application data and user-owned overrides remain outside destructive migration ownership.
+
+## v14.5.42 resource-boundary security / reliability note
+
+`resource-policy-report.txt` is intentionally credential-free: it must never serialize API keys, Matrix secrets, Tailscale credentials, provider tokens, prompts, or backup contents. Its hardware/policy fingerprints are integrity diagnostics, not authentication. Canonical policy generation does not expand ownership: global WSL memory/reclaim settings, user `compose.override.yaml`, native Windows Ollama global variables, persistent user/application data, and unsupported GPU runtimes remain outside automatic resource-policy mutation.
+
+GPU capability detection is not treated as authorization to size the stack as GPU-backed. Managed Ollama must prove actual accelerator participation from a bounded live PROCESSOR check. Explicitly forced GPU modes fail closed on CPU execution or unprovable offload. Auto fallback records only non-secret hardware/runtime fingerprint material and can be retried after the fingerprint changes. Shared-vendor DirectML/Ollama VRAM budgets are coordinated to reduce denial-of-service risk from memory overcommit, and DirectML never exceeds a policy-selected percentage merely to satisfy its internal minimum.
+
+
+## DirectML gateway boundary (v14.5.3)
+
+The optional DirectML process runs as the selected Linux user on the WSL host, not privileged and not inside the Docker containers. It binds to Docker's WSL host-gateway address on the configured port and Compose reaches it through the `directml.host` host-gateway alias; LatticeVale does not intentionally expose this gateway to the LAN or Tailscale. The gateway accepts no independent authentication because it is intended as a private local transport. Do not manually broaden its listener/firewall reachability. Model IDs are restricted to safe Hugging Face owner/model syntax and `trust_remote_code=False` is enforced.
+
 # Security Policy
 
 ## v14.4.82 WSL helper return-channel boundary

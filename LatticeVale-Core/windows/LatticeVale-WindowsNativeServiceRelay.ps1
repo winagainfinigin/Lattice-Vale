@@ -129,7 +129,7 @@ function Test-Ipv4SubnetMatch([string]$AddressA, [string]$AddressB, [int]$Prefix
 function Get-WslDefaultIpv4GatewayCandidates([string]$DistroName) {
     $probe = Invoke-WslDistro $DistroName '' 'ip' @('-4','route','show','default') 15
     if (-not $probe.Success) { return @() }
-    $result = New-Object System.Collections.Generic.List[string]
+    $result = [System.Collections.Generic.List[string]]::new()
     foreach ($line in @($probe.StdOut -split "`r?`n")) {
         $tokens = @((([string]$line).Trim()) -split '\s+')
         if ($tokens.Count -lt 3 -or $tokens[0] -ne 'default') { continue }

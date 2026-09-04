@@ -27,16 +27,17 @@ def build_report(snapshot: StackSnapshot) -> dict:
     if opts.hermes_local_ai and opts.ollama_backend == "windows-native":
         external_optional.append("Windows-native Ollama bridge (optional free/local host integration; not part of the WSL-only core runtime path)")
 
-    # A free/local default Hermes model path is guaranteed by configuration only when the
-    # installer-selected local Ollama provider is enabled.  Other Hermes provider choices are
-    # user-owned and may be free or paid; this audit does not guess from credential names.
-    local_default = opts.hermes_local_ai and opts.ollama_backend in {"managed", "windows-native"}
+    # A free/local default Hermes model path is guaranteed when the installer-selected
+    # local AI path is enabled.  v14.5.3 can route text through the WSL-host DirectML
+    # gateway while retaining Ollama as automatic text fallback and Honcho embedding
+    # authority.  Other Hermes provider choices are user-owned and may be free or paid.
+    local_default = opts.hermes_local_ai and opts.ollama_backend in {"managed", "windows-native"} and opts.local_text_backend in {"ollama", "directml"}
     wsl_native_default = opts.hermes_local_ai and opts.ollama_backend == "managed"
     honcho_local = (not opts.honcho) or opts.local_ai_enabled
     blockers: list[str] = []
     if not local_default:
         blockers.append(
-            "Default Hermes provider is not installer-declared local Ollama; the user-selected provider may require an external account or paid API."
+            "Default Hermes provider is not an installer-declared local AI path; the user-selected provider may require an external account or paid API."
         )
     if not honcho_local:
         blockers.append("Honcho is selected without a local AI backend declaration.")
@@ -48,6 +49,8 @@ def build_report(snapshot: StackSnapshot) -> dict:
         "currentConfigurationFreeOnly": not blockers,
         "localDefaultHermesAI": local_default,
         "wslNativeCoreAIPath": wsl_native_default,
+        "localTextBackend": opts.local_text_backend if opts.local_ai_enabled else "not-selected",
+        "directmlTextModel": opts.directml_text_model if opts.local_ai_enabled and opts.local_text_backend == "directml" else None,
         "ollamaBackend": opts.ollama_backend if opts.local_ai_enabled else "not-selected",
         "selectedComponents": list(opts.selected_components()),
         "optionalExternalIntegrations": external_optional,
@@ -55,7 +58,8 @@ def build_report(snapshot: StackSnapshot) -> dict:
         "notes": [
             "This audit does not promise that a third-party free tier will remain free in the future.",
             "Optional paid/external providers do not violate the project invariant; they only make the current profile non-free-only if selected as its required provider.",
-            "The managed Ollama backend is the WSL-native free/local baseline; Windows-native Ollama is reported as an optional host integration even though it can also be free/local.",
+            "The managed Ollama backend is the WSL-native compatibility baseline; DirectML text acceleration remains local and keeps Ollama available for fallback and Honcho embeddings.",
+            "Windows-native Ollama is reported as an optional host integration even though it can also be free/local.",
         ],
     }
 
@@ -74,7 +78,10 @@ def main() -> int:
         print(f"Current configuration: {'FREE-ONLY CAPABLE' if report['currentConfigurationFreeOnly'] else 'USES/DEPENDS ON USER-SELECTED NONLOCAL PROVIDER PATH'}")
         print(f"Default Hermes local AI: {'yes' if report['localDefaultHermesAI'] else 'no/unknown'}")
         print(f"WSL-native core AI path: {'yes' if report['wslNativeCoreAIPath'] else 'no'}")
-        print(f"Ollama backend: {report['ollamaBackend']}")
+        print(f"Local text backend: {report['localTextBackend']}")
+        if report.get("directmlTextModel"):
+            print(f"DirectML text model: {report['directmlTextModel']}")
+        print(f"Ollama fallback/embedding backend: {report['ollamaBackend']}")
         if report["blockers"]:
             print("Current free-only blockers/unknowns:")
             for item in report["blockers"]:

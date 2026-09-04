@@ -27,30 +27,33 @@ jobs:
       - name: Install simulation prerequisites
         run: sudo apt-get update && sudo apt-get install -y jq
       - name: Bash syntax
-        run: bash -n linux/bootstrap.sh stack/configure-stack.sh stack/manage.sh stack/qmd-index-cycle.sh stack/native-ollama-relay.sh
+        run: bash -n linux/bootstrap.sh stack/configure-stack.sh stack/manage.sh stack/qmd-index-cycle.sh stack/native-ollama-relay.sh stack/directml-gateway.sh
       - name: Python compile
         run: |
-          python -m py_compile stack/state-audit.py stack/latticevale_readonly.py stack/repair-plan.py stack/audit-free.py stack/patch-qmd-bind.py stack/native-ollama-relay.py tests/*.py
+          python -m py_compile stack/state-audit.py stack/latticevale_readonly.py stack/repair-plan.py stack/audit-free.py stack/patch-qmd-bind.py stack/native-ollama-relay.py stack/directml-gateway.py tests/*.py
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
       - name: Static audit
         run: python tests/static-audit.py
-      - name: Auto-discovered deterministic regression fixtures
-        run: python tests/run-regressions.py
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |
-          grep -q '^14.5.2$' LatticeVale-Core/VERSION.txt
-          grep -q '^# LatticeVale v14.5.2' README.md
-          grep -q '^LATTICEVALE v14.5.2' docs/Instructions.txt
-          grep -q '^LATTICEVALE v14.5.2' 'docs/Installer Description.txt'
-          grep -q '^## 14.5.2 ' docs/CHANGELOG.md
-          grep -q 'placeholder: 14.5.2' .github/ISSUE_TEMPLATE/bug_report.yml
+          grep -q '^14.5.46$' LatticeVale-Core/VERSION.txt
+          grep -q '^# LatticeVale v14.5.46' README.md
+          grep -q '^LATTICEVALE v14.5.46' docs/Instructions.txt
+          grep -q '^LATTICEVALE v14.5.46' 'docs/Installer Description.txt'
+          grep -q '^## 14.5.46 ' docs/CHANGELOG.md
+          grep -q 'placeholder: 14.5.46' .github/ISSUE_TEMPLATE/bug_report.yml
           grep -q 'read-only planner/config-state code must never write' .github/PULL_REQUEST_TEMPLATE.md
           grep -q 'PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md docs/SUPPORT.md docs/RELEASE.md
           grep -q 'PATCH-NOTES.md' README.md LatticeVale-Core/README.md
           grep -q 'repair --plan' README.md LatticeVale-Core/README.md docs/FEATURES.md
           grep -q 'compose.override.yaml.*opaque' docs/FEATURES.md
+          grep -q 'resource-policy-report.txt' README.md LatticeVale-Core/README.md LatticeVale-Core/AUDIT.md docs/README.md docs/FEATURES.md docs/RELEASE.md docs/SUPPORT.md
+          grep -q 'EXPECTED_FIXTURE_COUNT = 139' LatticeVale-Core/tests/run-regressions.py
+          grep -q '("06-release", 121, 139)' LatticeVale-Core/tests/run-regressions.py
+          grep -q 'Policy fingerprint' LatticeVale-Core/stack/configure-stack.sh LatticeVale-Core/stack/state-audit.py
+          ! grep -RInE --include='*.ps1' 'New-Object[[:space:]]+[\"'"']?System\.Collections\.Generic\.' . | grep .
       - name: Mocked resume simulations
         run: |
           python tests/minimal-resume-simulation.py
@@ -60,6 +63,34 @@ jobs:
           ! find .. -type f \( -name '*.pyc' -o -name '*.pyo' -o -name '*.exe' -o -name '*.msi' -o -name '*.dll' -o -name '*.deb' -o -name '*.rpm' -o -name '*.tar' -o -name '*.tgz' -o -name '*.tar.gz' -o -name '*.zip' -o -name '*.7z' -o -name '*.bin' -o -name '*.jar' \) -print | grep .
           ! grep -RInE --exclude-dir=.git --exclude-dir=tests --exclude='validate.yml' --exclude='*.md' --exclude='*.txt' --exclude='SOURCE-SHA256SUMS.txt' \
             'EncodedCommand|FromBase64String|Invoke-Expression|(^|[^A-Za-z])iex([^A-Za-z]|$)|curl[^|]*\|[[:space:]]*(ba)?sh' ..
+
+  regression-shards:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [01-core, 02-installer, 03-repair-update, 04-resource-policy, 05-gpu-directml, 06-release]
+    defaults:
+      run:
+        working-directory: LatticeVale-Core
+    steps:
+      - uses: actions/checkout@v4
+      - name: Finalize overwrite-patch cleanup
+        working-directory: ${{ github.workspace }}
+        shell: pwsh
+        run: .\tools\Finalize-LatticeVale-OverwritePatch.ps1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install fixture prerequisites
+        run: |
+          python -m pip install --disable-pip-version-check PyYAML
+          sudo apt-get update
+          sudo apt-get install -y jq
+      - name: Run deterministic regression shard
+        env:
+          PYTHONDONTWRITEBYTECODE: '1'
+        run: python tests/run-regressions.py --shard ${{ matrix.shard }}
 
   powershell-parse-and-manifest:
     runs-on: windows-latest

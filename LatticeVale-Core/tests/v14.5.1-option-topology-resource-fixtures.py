@@ -1,30 +1,32 @@
 #!/usr/bin/env python3
-"""v14.5.1 policy-v9 public option/topology adaptive-resource regression fixtures."""
+"""v14.5.1-derived policy-v11 public option/topology adaptive-resource regression fixtures."""
 from pathlib import Path
 from itertools import product
 import subprocess, sys
 
 ROOT = Path(__file__).resolve().parents[1]
-assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2'}
+assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
 boot = (ROOT / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 audit = (ROOT / 'stack/state-audit.py').read_text(encoding='utf-8')
 
 for marker in (
-    'POLICY_VERSION=9',
+    'POLICY_VERSION=11',
     'resource_matrix_profile_gateways() {',
     'resource_kanban_concurrency() {',
     'resource_hermes_floor_mib() {',
-    'MATRIX_PROFILE_GATEWAYS=%s',
-    'KANBAN_CONCURRENCY=%s',
-    'HERMES_MIN_MIB=%s',
+    '[MATRIX_PROFILE_GATEWAYS]="$matrix_profile_gateways"',
+    '[KANBAN_CONCURRENCY]="$kanban_concurrency"',
+    '[HERMES_MIN_MIB]="$hermes_floor_mib"',
+    'HARDWARE_FINGERPRINT',
+    'POLICY_FINGERPRINT',
     'topology_cpu_pressure=',
     'Hermes topology floor=',
 ):
     assert marker in cfg, marker
 
-# Policy-v9 topology floor: preserve the real-world-proven common case, then scale
+# Policy-v11 topology floor: preserve the real-world-proven common case, then scale
 # for additional persistent Matrix profile gateways and high Kanban concurrency.
 def hermes_floor(matrix_gateways: int, kanban: int) -> int:
     return min(4096, 1024 + max(0, matrix_gateways - 1) * 192 + max(0, kanban - 3) * 96)
@@ -89,7 +91,7 @@ for accel in ('cpu','nvidia'):
         assert p.returncode == 0, (accel,shape,p.stderr)
         assert 'ollama' in alloc and 'hermes' in alloc, (accel,shape,alloc)
 
-# The audited full-stack/common topology remains the same under v9 before downloaded-model sizing adds any required Ollama floor.
+# The audited full-stack/common topology remains the same under policy v11 before downloaded-model sizing adds any required Ollama floor.
 p,common = run_plan(8952, True,True,True,True,True,'cpu', hermes_floor(1,3))
 assert p.returncode == 0, p.stderr
 assert common['hermes'] == 1040 and common['ollama'] == 5152 and common['honcho-api'] == 528, common
@@ -110,7 +112,7 @@ assert sum(profile_only.values()) <= 2868, (p.stderr, profile_only)
 
 # State/start surfaces must treat topology as part of the adaptive fingerprint.
 for text, markers in (
-    (cfg, ('saved_matrix_gateways','saved_kanban_concurrency','saved_hermes_floor')),
+    (cfg, ('statev MATRIX_PROFILE_GATEWAYS','statev KANBAN_CONCURRENCY','statev HERMES_MIN_MIB')),
     (manage, ('./configure-stack.sh --refresh-resource-policy','Adaptive resource fingerprint changed')),
     (audit, ('MATRIX_PROFILE_GATEWAYS','KANBAN_CONCURRENCY','HERMES_MIN_MIB','Hermes profile/Kanban topology')),
 ):
@@ -122,7 +124,7 @@ for text, markers in (
 for marker in (
     'resource_limits_enabled="\\$(python3 - "\\$stack_dir/install-options.json"',
     './configure-stack.sh --refresh-resource-policy',
-    'policy v9 fingerprints already match',
+    'policy v11 fingerprints already match',
 ):
     assert marker in boot, marker
 

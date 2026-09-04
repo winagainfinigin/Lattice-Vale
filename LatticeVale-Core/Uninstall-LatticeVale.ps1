@@ -82,7 +82,7 @@ function Get-WslPasswdEntries([string]$Name) {
     # probe failure into a false "no stack found" result.
     $r=Invoke-Wsl $Name 'root' 'getent' @('passwd') 20
     if (-not $r.Success) { throw "Could not read Linux accounts from '$Name': $($r.Text)" }
-    $entries=New-Object System.Collections.Generic.List[object]
+    $entries=[System.Collections.Generic.List[object]]::new()
     foreach ($line in ($r.Text -split "`r?`n")) {
         if (-not $line) { continue }
         $parts=$line -split ':',7
@@ -99,14 +99,14 @@ function Get-WslPasswdEntries([string]$Name) {
         if ($uid -lt 1000 -or $uid -gt 65534) { continue }
         $entries.Add([pscustomobject]@{User=$user;Uid=$uid;Gid=$gid;Home=$homePath;Shell=$shell})
     }
-    return @($entries)
+    return $entries.ToArray()
 }
 function Test-WslPath([string]$Name,[string]$Path,[ValidateSet('e','d','f','L')] [string]$Kind='e') {
     $r=Invoke-Wsl $Name 'root' '/usr/bin/test' @("-$Kind",$Path) 15
     return [bool]$r.Success
 }
 function Get-LatticeValeUsers([string]$Name) {
-    $results=New-Object System.Collections.Generic.List[object]
+    $results=[System.Collections.Generic.List[object]]::new()
     foreach ($entry in @(Get-WslPasswdEntries $Name)) {
         $stack=$entry.Home.TrimEnd('/')+'/hermes-stack'
         if (-not (Test-WslPath $Name $stack 'd')) { continue }
@@ -114,7 +114,7 @@ function Get-LatticeValeUsers([string]$Name) {
             $results.Add([pscustomobject]@{User=$entry.User;Home=$entry.Home;Stack=$stack;Classification='unsafe-symlink';Evidence='stack-symlink'})
             continue
         }
-        $evidence=New-Object System.Collections.Generic.List[string]
+        $evidence=[System.Collections.Generic.List[string]]::new()
         $metadata=$false
         foreach ($marker in @('install-options.json','.installer-state.json','.install-info','.configured')) {
             if (Test-WslPath $Name ($stack+'/'+$marker) 'f') { $evidence.Add($marker); $metadata=$true }
@@ -140,15 +140,15 @@ function Get-LatticeValeUsers([string]$Name) {
             $results.Add([pscustomobject]@{User=$entry.User;Home=$entry.Home;Stack=$stack;Classification=$classification;Evidence=($evidence -join ',')})
         }
     }
-    return @($results)
+    return $results.ToArray()
 }
 function Get-HermesStackDiagnostics([string]$Name) {
-    $diagnostics=New-Object System.Collections.Generic.List[string]
+    $diagnostics=[System.Collections.Generic.List[string]]::new()
     try { $entries=@(Get-WslPasswdEntries $Name) } catch { return @("Discovery probe failed: $($_.Exception.Message)") }
     foreach ($entry in $entries) {
         $stack=$entry.Home.TrimEnd('/')+'/hermes-stack'
         if (-not (Test-WslPath $Name $stack 'e')) { continue }
-        $markers=New-Object System.Collections.Generic.List[string]
+        $markers=[System.Collections.Generic.List[string]]::new()
         foreach ($f in @('install-options.json','.installer-state.json','.install-info','.configured','compose.yaml','configure-stack.sh','manage.sh','state-audit.py','compose.latticevale.yaml')) {
             if (Test-WslPath $Name ($stack+'/'+$f) 'e') { $markers.Add($f) }
         }
@@ -166,7 +166,7 @@ function Get-HermesStackDiagnostics([string]$Name) {
             foreach ($path in ($scan.Text -split "`r?`n")) { if ($path.Trim()) { $diagnostics.Add("unmapped candidate: $($path.Trim())") } }
         }
     }
-    return @($diagnostics)
+    return $diagnostics.ToArray()
 }
 function Assert-SelectedStackTarget([string]$Name,[string]$User,[string]$Stack) {
     $script=@'
@@ -187,7 +187,7 @@ expected="${home%/}/hermes-stack"
 function Select-Distro {
     $distros=@(Get-WslDistros)
     if ($distros.Count -eq 0) { throw 'No WSL distributions are registered. There is no WSL LatticeVale stack to uninstall.' }
-    $candidates=New-Object System.Collections.Generic.List[string]
+    $candidates=[System.Collections.Generic.List[string]]::new()
     foreach ($d in $distros) { if (@(Get-LatticeValeUsers $d).Count -gt 0) { $candidates.Add($d) } }
     if ($candidates.Count -eq 1) { return $candidates[0] }
     # Keep the menu choices as an array even when the fallback contains exactly one distro.
@@ -371,7 +371,7 @@ function Get-KeyValue([string]$Text,[string]$Key) {
     return ''
 }
 function Find-TailscaleExe {
-    $candidates=New-Object System.Collections.Generic.List[string]
+    $candidates=[System.Collections.Generic.List[string]]::new()
     if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) { $candidates.Add((Join-Path $env:ProgramFiles 'Tailscale\tailscale.exe')) }
     $pf86=[Environment]::GetEnvironmentVariable('ProgramFiles(x86)')
     if (-not [string]::IsNullOrWhiteSpace($pf86)) { $candidates.Add((Join-Path $pf86 'Tailscale\tailscale.exe')) }
@@ -426,7 +426,7 @@ function Test-TailscaleBackendTarget([string]$Target,[int]$BackendPort) {
 }
 function Get-TailscaleServePortState([string]$Exe,[int]$Port,[int]$BackendPort) {
     $result=[ordered]@{Known=$false;InUse=$false;MatchesExpected=$false;Targets=@()}
-    $targets=New-Object System.Collections.Generic.List[string]; $inUse=$false
+    $targets=[System.Collections.Generic.List[string]]::new(); $inUse=$false
     foreach ($cmdArgs in @(@('serve','status','--json'),@('serve','get-config','--all'))) {
         try {
             $probe=Invoke-NativeCapture $Exe $cmdArgs 20
@@ -462,6 +462,7 @@ stack="$1"; purge="$2"
 if [ ! -d "$stack" ]; then exit 0; fi
 cd "$stack" || exit 2
 if [ -x ./manage.sh ] && [ -f .configured ]; then timeout --foreground --kill-after=10s 90s ./manage.sh stop >/dev/null 2>&1 || true; fi
+if [ -x ./directml-gateway.sh ]; then ./directml-gateway.sh stop >/dev/null 2>&1 || true; fi
 if [ -x ./native-ollama-relay.sh ]; then ./native-ollama-relay.sh stop >/dev/null 2>&1 || true; fi
 if [ -f compose.yaml ]; then
   runtime_may_exist=false
@@ -508,6 +509,12 @@ set -e
 stack="$1"; purge="$2"
 helper=/usr/local/sbin/hermes-stack-start
 if [ -f "$helper" ] && grep -Fq "$stack" "$helper" 2>/dev/null; then rm -f "$helper"; fi
+directml_unit=/etc/systemd/system/latticevale-directml-gateway.service
+if [ -f "$directml_unit" ] && grep -Fq "$stack/directml-gateway.sh" "$directml_unit" 2>/dev/null; then
+  if command -v systemctl >/dev/null 2>&1; then systemctl disable --now latticevale-directml-gateway.service >/dev/null 2>&1 || true; fi
+  rm -f "$directml_unit"
+  if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
+fi
 relay_unit=/etc/systemd/system/latticevale-native-ollama-relay.service
 if [ -f "$relay_unit" ] && grep -Fq "$stack/native-ollama-relay.sh" "$relay_unit" 2>/dev/null; then
   if command -v systemctl >/dev/null 2>&1; then systemctl disable --now latticevale-native-ollama-relay.service >/dev/null 2>&1 || true; fi

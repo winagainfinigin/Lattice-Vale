@@ -16,6 +16,8 @@ workspace/
 .matrix-profiles/
 .installer-*.json
 .install-options.json
+.latticevale-resource-state
+resource-policy-report.txt
 
 # OS/editor
 .DS_Store

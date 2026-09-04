@@ -2,7 +2,7 @@
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
-assert (ROOT/'VERSION.txt').read_text(encoding='ascii').strip() in {'14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}
+assert (ROOT/'VERSION.txt').read_text(encoding='ascii').strip() in {'14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='ascii')
 relay=(ROOT/'windows/LatticeVale-WindowsNativeServiceRelay.ps1').read_text(encoding='ascii')
 conf=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
@@ -42,9 +42,9 @@ adapter_idx=relay.index('Get-NetIPAddress -AddressFamily IPv4')
 assert route_idx < adapter_idx
 
 # Persist the verified host address so Linux lifecycle paths do not re-assume ip route.
-assert 'schema = 19' in ps
+assert 'schema = $compat.InstallOptionsSchema' in ps
 assert 'windowsOllamaHostAddress' in ps
-assert 'schema must be an integer from 1 through 19' in conf
+assert 'schema must be an integer from 1 through 20' in conf
 assert 'windowsOllamaHostAddress' in conf
 assert 'HOST_ADDRESS=%s' in conf
 assert 'native_info_field HOST_ADDRESS' in manage

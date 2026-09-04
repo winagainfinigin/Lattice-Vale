@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""v14.5.1 policy-v9 CPU/RAM adaptation matrix regression fixtures."""
+"""v14.5.1-derived policy-v11 CPU/RAM adaptation matrix regression fixtures."""
 from pathlib import Path
 import subprocess, sys
 
 ROOT = Path(__file__).resolve().parents[1]
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
-assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2'}
-assert 'POLICY_VERSION=9' in cfg
+assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
+assert 'POLICY_VERSION=11' in cfg
 
 # CPU policy is based on CPUs actually visible to WSL, never Windows host guesses.
 def cpu_plan(cpus: int):
@@ -39,7 +39,8 @@ for marker in (
     'heavy_cpu=$cpus',
     'medium_cpu=$(((cpus+1)/2))',
     'light_cpu=$(((cpus+3)/4))',
-    'CPU_%s_MILLI=%s000',
+    'resource_policy["CPU_${resource_state_key}_MILLI"]="${cpu_limits[$resource_state_svc]}000"',
+    'resource_policy[CPU_HERMES_MILLI]',
     '{{.HostConfig.NanoCpus}}',
     'effective Compose CPU limit',
 ):
@@ -91,7 +92,7 @@ for mem in (9946, 10240, 12288, 16384, 24576, 32768, 65536):
     assert alloc['hermes'] >= 1024 and alloc['honcho-api'] >= 512 and alloc['ollama'] >= 5120, (mem, alloc)
 
 # Non-CPU managed Ollama retains the less RAM-intensive protected-floor behavior;
-# it does not inherit the CPU-only 4608 MiB viability requirement.
+# it does not inherit the CPU-only 4096 MiB viability requirement.
 for mem in (8192, 9216, 12288):
     rc, alloc, reserve_mib, budget, err = run_plan(mem, accel='nvidia')
     assert rc == 0, (mem, reserve_mib, budget, err)

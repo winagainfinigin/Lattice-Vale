@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -198,56 +199,120 @@ def ollama_manifest_mib(root: Path, model: str) -> int:
     return 0
 
 
-def detected_gpu_vram_mib(accel: str) -> int:
+def detected_gpu_vram_metrics(accel: str) -> tuple[int, int, int, int]:
+    values: list[int] = []
     if accel == "nvidia":
         candidates = [shutil.which("nvidia-smi"), "/usr/lib/wsl/lib/nvidia-smi"]
         smi = next((x for x in candidates if x and Path(x).is_file()), None)
         if smi:
             rc, out = run([smi, "--query-gpu=memory.total", "--format=csv,noheader,nounits"], timeout=8)
             if rc == 0:
-                try: return sum(int(float(x.strip())) for x in out.splitlines() if x.strip())
-                except Exception: pass
+                for raw in out.splitlines():
+                    try:
+                        mib = int(float(raw.strip()))
+                    except Exception:
+                        continue
+                    if mib >= 256:
+                        values.append(mib)
     elif accel == "amd":
-        total = 0
         try:
             for f in Path("/sys/class/drm").glob("card*/device/mem_info_vram_total"):
+                try:
+                    vendor = (f.parent / "vendor").read_text(encoding="ascii", errors="ignore").strip()
+                except Exception:
+                    continue
+                if vendor != "0x1002":
+                    continue
                 raw = f.read_text(encoding="ascii", errors="ignore").strip()
-                if raw.isdigit(): total += int(raw) // 1048576
+                if raw.isdigit():
+                    mib = int(raw) // 1048576
+                    if mib >= 256:
+                        values.append(mib)
         except Exception:
             pass
-        return total
-    return 0
+    if not values:
+        return (0, 0, 0, 0)
+    return (len(values), min(values), max(values), sum(values))
+
+
+def ram_profile(mem_mib: int) -> str:
+    return "compact" if mem_mib <= 8192 else "balanced" if mem_mib <= 16384 else "large"
+
+
+def cpu_profile(cpus: int) -> str:
+    return "compact" if cpus <= 4 else "balanced" if cpus <= 8 else "high"
+
+
+def ram_context_recommendation(mem_mib: int) -> int:
+    return 4096 if mem_mib <= 8192 else 16384 if mem_mib <= 16384 else 32768 if mem_mib <= 32768 else 65536
+
+
+def gpu_context_recommendation(usable_max_mib: int) -> int:
+    return 4096 if usable_max_mib < 24576 else 32768 if usable_max_mib < 49152 else 65536
+
+
+def gpu_coordination(opts: dict[str, Any], accel: str, count: int, min_mib: int, max_mib: int) -> tuple[int, int, bool]:
+    directml = (opts.get("honcho") is True or opts.get("hermesLocalAI") is True) and str(opts.get("localTextBackend") or "ollama").lower() == "directml"
+    directml_vendor = str(opts.get("directmlGpuVendor") or "").lower()
+    if accel not in {"nvidia", "amd"} or not directml or directml_vendor != accel or count <= 0 or min_mib <= 0 or max_mib <= 0:
+        return (0, 75, False)
+    if max_mib * 2 <= min_mib * 3:
+        overhead = max_mib // 2
+        pct = 50
+    else:
+        overhead = min_mib * 3 // 4
+        pct = max(5, min(50, overhead * 100 // max_mib))
+    overhead = ((overhead + 255) // 256) * 256
+    if overhead >= min_mib:
+        overhead = ((min_mib * 3 // 4) // 256) * 256
+    overhead = max(256, overhead)
+    return (overhead, pct, True)
 
 
 def expected_ollama_policy_metrics(root: Path, opts: dict[str, Any], resolved_accel: str, mem_mib: int) -> tuple[int, int, int, int]:
     if not (opts.get("ollamaBackend") == "managed" and (opts.get("hermesLocalAI") is True or opts.get("honcho") is True)):
         return (0, 0, 0, 0)
+    hybrid = str(opts.get("localTextBackend") or "ollama").lower() == "directml"
     text_mib = ollama_manifest_mib(root, str(opts.get("localTextModel") or ""))
     embed_mib = ollama_manifest_mib(root, str(opts.get("localEmbeddingModel") or "")) if opts.get("honcho") is True else 0
+    count = min_vram = max_vram = total_vram = overhead = 0
+    if resolved_accel in {"nvidia", "amd"}:
+        count, min_vram, max_vram, total_vram = detected_gpu_vram_metrics(resolved_accel)
+        overhead, _pct, _shared = gpu_coordination(opts, resolved_accel, count, min_vram, max_vram)
     context_raw = env_value(root / ".env", "OLLAMA_CONTEXT_LENGTH")
     try:
         context = int(context_raw)
     except Exception:
-        context = 8192 if mem_mib < 10240 else 16384 if mem_mib < 18432 else 32768 if mem_mib < 34816 else 65536
+        if hybrid:
+            context = 4096
+        else:
+            context = ram_context_recommendation(mem_mib)
+            if resolved_accel in {"nvidia", "amd"} and max_vram > 0:
+                context = min(context, gpu_context_recommendation(max(0, max_vram - overhead)))
     artifact = max(text_mib, embed_mib)
     if resolved_accel == "cpu":
-        floor = 4608
+        floor = 3072 if hybrid else 4096
         if artifact > 0:
-            transient = max(1024, artifact // 4)
-            ctx = max(256, min(2048, (context + 15) // 16))
+            transient = max(512, artifact // 8) if hybrid else max(1024, artifact // 4)
+            ctx = max(128, min(768, (context + 31) // 32)) if hybrid else max(256, min(2048, (context + 15) // 16))
             floor = ((artifact + transient + ctx + 255) // 256) * 256
-            floor = max(4608, floor)
+            floor = max(3072 if hybrid else 4096, floor)
     else:
-        vram = detected_gpu_vram_mib(resolved_accel)
+        usable_max = max(0, max_vram - overhead)
+        usable_total = max(0, total_vram - overhead * count)
         host_model = artifact // 4
-        if artifact > 0 and vram > 0:
-            usable = vram * 80 // 100
-            host_model = artifact - usable if artifact > usable else artifact // 8
-        ctx = max(256, min(2048, (context + 31) // 32))
-        floor = ((2048 + host_model + ctx + 255) // 256) * 256
-        floor = max(2048, floor)
+        if artifact > 0 and max_vram > 0:
+            if artifact <= usable_max:
+                host_model = artifact // 8
+            elif artifact <= usable_total:
+                host_model = artifact // 8
+            else:
+                host_model = max(0, artifact - usable_total) + artifact // 8
+        ctx = max(128, min(768, (context + 63) // 64)) if hybrid else max(256, min(2048, (context + 31) // 32))
+        base = 1536 if hybrid else 2048
+        floor = ((base + host_model + ctx + 255) // 256) * 256
+        floor = max(base, floor)
     return (text_mib, embed_mib, context, floor)
-
 
 def yaml_model_name(path: Path) -> str:
     if not path.is_file() or path.stat().st_size == 0:
@@ -579,10 +644,10 @@ def main() -> int:
         root, root / "data", root / "config", root / "config/searxng", root / "backups",
         root / "secrets", root / "logs", root / "vendor", root / "vault", root / "workspace",
         root / "data/hermes", root / "data/qmd", root / "data/qmd/config", root / "data/qmd/cache",
-        root / "data/synapse", root / "data/searxng-valkey", root / "data/honcho-redis",
+        root / "data/synapse", root / "data/directml", root / "data/searxng-valkey", root / "data/honcho-redis",
     ]
     writable_files = [
-        root / "compose.yaml", root / "configure-stack.sh", root / "manage.sh", root / "state-audit.py",
+        root / "compose.yaml", root / "configure-stack.sh", root / "manage.sh", root / "state-audit.py", root / "directml-gateway.py", root / "directml-gateway.sh", root / "directml-requirements.txt",
         root / "latticevale_readonly.py", root / "repair-plan.py", root / "audit-free.py", root / "checkpoint-metadata.json",
         root / "install-options.json", root / ".env", root / ".installer-state.json",
     ]
@@ -887,6 +952,15 @@ def main() -> int:
         c["profileMatrix"] = {"status": "UNKNOWN", "detail": "profile Matrix state could not be classified"}
 
     local_ai = selected("honcho") or selected("hermesLocalAI")
+    local_text_backend = str(opts.get("localTextBackend", "ollama")).strip().lower()
+    if local_text_backend not in {"ollama", "directml"}:
+        local_text_backend = "ollama"
+    directml_selected = local_ai and local_text_backend == "directml"
+    directml_model = str(opts.get("directmlTextModel") or "Qwen/Qwen2.5-1.5B-Instruct").strip()
+    try:
+        directml_port = int(opts.get("directmlPort", 11436) or 11436)
+    except Exception:
+        directml_port = 11436
     ollama_backend = str(opts.get("ollamaBackend", "managed")).strip().lower()
     if ollama_backend not in {"managed", "windows-native"}:
         ollama_backend = "managed"
@@ -920,6 +994,9 @@ def main() -> int:
         if "compose.latticevale.yaml" not in compose_selector.split(":"):
             policy_issues.append("COMPOSE_FILE does not include the adaptive resource overlay")
         resource_state = root / ".latticevale-resource-state"
+        resource_report = root / "resource-policy-report.txt"
+        if not resource_report.is_file():
+            policy_issues.append("resource-policy-report.txt is missing; Resume / repair will regenerate the secret-free policy diagnostic")
         if not resource_state.is_file():
             policy_issues.append("adaptive resource fingerprint is missing; start or repair LatticeVale to recalculate it")
         else:
@@ -943,12 +1020,47 @@ def main() -> int:
                 hermes_min_mib = min(4096, 1024 + max(0, matrix_profile_gateways - 1) * 192 + max(0, kanban_concurrency - 3) * 96)
                 audit_accel = env_value(root / ".env", "LATTICEVALE_OLLAMA_ACCELERATION").lower() or str(opts.get("ollamaAcceleration") or "cpu").lower()
                 text_mib, embed_mib, ollama_context, ollama_floor = expected_ollama_policy_metrics(root, opts, audit_accel, current_mem_mib)
-                if (values.get("POLICY_VERSION") != "9" or str(current_cpus) != values.get("CPUS") or str(current_mem_mib) != values.get("MEM_MIB") or
+                if directml_selected:
+                    directml_reserve_mib = 1536 if current_mem_mib <= 8192 else 1792 if current_mem_mib <= 12288 else 2048 if current_mem_mib <= 16384 else 2560 if current_mem_mib <= 24576 else 3072
+                else:
+                    directml_reserve_mib = 0
+                lowmem = 1 if current_mem_mib <= 12288 else 0
+                gpu_count = gpu_min = gpu_max = gpu_total = 0
+                if audit_accel in {"nvidia", "amd"}:
+                    gpu_count, gpu_min, gpu_max, gpu_total = detected_gpu_vram_metrics(audit_accel)
+                gpu_overhead, directml_vram_pct, gpu_shared = gpu_coordination(opts, audit_accel, gpu_count, gpu_min, gpu_max)
+                current_ram_profile = ram_profile(current_mem_mib)
+                current_cpu_profile = cpu_profile(current_cpus)
+                gpu_heterogeneous = gpu_count > 1 and gpu_min != gpu_max
+                directml_vendor = str(opts.get("directmlGpuVendor") or "").lower()
+                directml_adapter = str(opts.get("directmlAdapterName") or "")
+                hardware_material = (
+                    f"CPUS={current_cpus}|MEM_MIB={current_mem_mib}|OLLAMA_ACCELERATION={audit_accel}|"
+                    f"GPU_COUNT={gpu_count}|GPU_MIN_MIB={gpu_min}|GPU_MAX_MIB={gpu_max}|GPU_TOTAL_MIB={gpu_total}|"
+                    f"DIRECTML_SELECTED={str(directml_selected).lower()}|DIRECTML_GPU_VENDOR={directml_vendor}|"
+                    f"DIRECTML_ADAPTER_NAME={directml_adapter}"
+                )
+                hardware_fingerprint = hashlib.sha256(hardware_material.encode("utf-8")).hexdigest()
+                policy_material = "".join(
+                    f"{key}={values[key]}\n" for key in sorted(values) if key != "POLICY_FINGERPRINT"
+                )
+                policy_fingerprint = hashlib.sha256(policy_material.encode("utf-8")).hexdigest()
+                if values.get("POLICY_FINGERPRINT") != policy_fingerprint:
+                    policy_issues.append("adaptive resource policy fingerprint does not match the persisted canonical policy object")
+                if (values.get("POLICY_VERSION") != "11" or str(current_cpus) != values.get("CPUS") or current_cpu_profile != values.get("CPU_PROFILE") or
+                    str(current_mem_mib) != values.get("MEM_MIB") or current_ram_profile != values.get("RAM_PROFILE") or
+                    str(directml_reserve_mib) != values.get("DIRECTML_HOST_RESERVE_MIB") or str(lowmem) != values.get("LOW_MEMORY_PROFILE") or
                     str(matrix_profile_gateways) != values.get("MATRIX_PROFILE_GATEWAYS") or str(kanban_concurrency) != values.get("KANBAN_CONCURRENCY") or
-                    str(hermes_min_mib) != values.get("HERMES_MIN_MIB") or str(text_mib) != values.get("OLLAMA_TEXT_ARTIFACT_MIB") or
-                    str(embed_mib) != values.get("OLLAMA_EMBED_ARTIFACT_MIB") or str(ollama_context) != values.get("OLLAMA_CONTEXT_LENGTH") or
-                    str(ollama_floor) != values.get("OLLAMA_MODEL_FLOOR_MIB")):
-                    policy_issues.append("adaptive resource policy revision, WSL CPU/RAM allocation, Hermes profile/Kanban topology, or managed Ollama model/context fingerprint changed; next LatticeVale start or repair will recalculate the overlay")
+                    str(hermes_min_mib) != values.get("HERMES_MIN_MIB") or audit_accel != values.get("OLLAMA_ACCELERATION") or
+                    str(gpu_count) != values.get("GPU_COUNT") or str(gpu_min) != values.get("GPU_MIN_MIB") or str(gpu_max) != values.get("GPU_MAX_MIB") or
+                    str(gpu_total) != values.get("GPU_TOTAL_MIB") or str(gpu_heterogeneous).lower() != values.get("GPU_HETEROGENEOUS") or
+                    str(gpu_overhead) != values.get("OLLAMA_GPU_OVERHEAD_MIB") or
+                    str(directml_vram_pct) != values.get("DIRECTML_VRAM_LIMIT_PCT") or str(gpu_shared).lower() != values.get("GPU_SHARED_WITH_DIRECTML") or
+                    str(directml_selected).lower() != values.get("DIRECTML_SELECTED") or directml_vendor != values.get("DIRECTML_GPU_VENDOR") or
+                    directml_adapter != values.get("DIRECTML_ADAPTER_NAME") or hardware_fingerprint != values.get("HARDWARE_FINGERPRINT") or
+                    str(text_mib) != values.get("OLLAMA_TEXT_ARTIFACT_MIB") or str(embed_mib) != values.get("OLLAMA_EMBED_ARTIFACT_MIB") or
+                    str(ollama_context) != values.get("OLLAMA_CONTEXT_LENGTH") or str(ollama_floor) != values.get("OLLAMA_MODEL_FLOOR_MIB")):
+                    policy_issues.append("adaptive resource policy revision, WSL CPU/RAM profile, GPU topology/offload envelope, Hermes profile/Kanban topology, or managed Ollama model/context fingerprint changed; next LatticeVale start or repair will recalculate the overlay")
                 # v14.5.1 repair correctness: desired policy files are not enough. Compare
                 # Docker's live hard ceiling with the EFFECTIVE Compose model after the
                 # user-owned compose.override.yaml layer, so user overrides stay authoritative.
@@ -1033,6 +1145,11 @@ def main() -> int:
                         policy_issues.append("AMD/ROCm acceleration overlay is incomplete")
                 except Exception:
                     policy_issues.append("GPU acceleration overlay is unreadable")
+            verified_offload = env_value(root / ".env", "LATTICEVALE_OLLAMA_GPU_OFFLOAD_VERIFIED").lower()
+            if verified_offload == "cpu":
+                policy_issues.append("managed Ollama is configured for GPU acceleration but the last bounded runtime verification reported CPU execution")
+            elif verified_offload not in {"", resolved_accel}:
+                policy_issues.append(f"managed Ollama GPU verification marker {verified_offload} does not match resolved acceleration {resolved_accel}")
 
     if native_ollama:
         if resolved_accel not in {"windows-native", ""}:
@@ -1110,7 +1227,13 @@ def main() -> int:
             image = env_value(root / ".env", "OLLAMA_IMAGE")
             auto_image = env_value(root / ".env", "LATTICEVALE_OLLAMA_IMAGE_AUTO")
             if resolved_accel in {"nvidia", "amd"}:
-                details.append("GPU container plumbing configured; model VRAM offload not independently measured")
+                verified_offload = env_value(root / ".env", "LATTICEVALE_OLLAMA_GPU_OFFLOAD_VERIFIED").lower()
+                if verified_offload == resolved_accel:
+                    details.append(f"GPU execution verified at runtime by ollama ps ({resolved_accel})")
+                elif verified_offload == "cpu":
+                    details.append("last managed Ollama offload verification reported CPU execution")
+                else:
+                    details.append("GPU container plumbing configured; model offload verification is pending until a managed model is loaded")
             if auto_image and image and image != auto_image:
                 details.append("custom Ollama image override preserved")
         elif native_ollama:
@@ -1184,6 +1307,48 @@ def main() -> int:
         detail = (("local-only inference selected; container is still starting" if ollama_status == "STARTING" else ("local-only inference selected; container is stopped" if ollama_status == "STOPPED" else "local-only inference selected; cloud features disabled")) if local_ai else "not selected")
     c["ollama"] = {"status": ollama_status, "detail": detail}
 
+    if not directml_selected:
+        directml_status = "DISABLED"
+        directml_detail = "not selected; local text inference uses Ollama"
+    else:
+        directml_files_ok = all((root / name).is_file() for name in ("directml-gateway.py", "directml-gateway.sh", "directml-requirements.txt"))
+        directml_configured = directml_files_ok and bool(directml_model) and 1 <= directml_port <= 65535
+        if not directml_configured:
+            directml_status = "PARTIAL"
+            directml_detail = "DirectML selected but gateway files/model/port configuration is incomplete"
+        elif args.offline:
+            directml_status = "CONFIGURED"
+            directml_detail = f"experimental DirectML text gateway configured for {directml_model}; VRAM admission policy is enforced at runtime; runtime probe skipped offline"
+        elif (root / ".directml-gateway.disabled").exists():
+            directml_status = "STOPPED"
+            directml_detail = f"DirectML text gateway configured for {directml_model} but intentionally stopped"
+        else:
+            rc, directml_out = run(["bash", str(root / "directml-gateway.sh"), "health"], cwd=root, timeout=12)
+            if rc == 0:
+                try:
+                    dmh = json.loads(directml_out)
+                except Exception:
+                    dmh = {}
+                dml_ready = dmh.get("directml_ready") is True
+                fb_ready = dmh.get("fallback_ready") is True
+                if dml_ready or fb_ready:
+                    directml_status = "RUNNING"
+                    last_backend = ""
+                    try:
+                        last_backend = (root / "data/directml/last-backend").read_text(encoding="utf-8", errors="replace").strip()
+                    except Exception:
+                        pass
+                    directml_detail = f"gateway healthy; model={directml_model}; DirectML={'ready' if dml_ready else 'degraded'}; Ollama fallback={'ready' if fb_ready else 'unavailable'}"
+                    if last_backend:
+                        directml_detail += f"; last inference={last_backend}"
+                else:
+                    directml_status = "BROKEN"
+                    directml_detail = "gateway responds but neither DirectML nor its Ollama fallback is ready"
+            else:
+                directml_status = "BROKEN"
+                directml_detail = "DirectML gateway is selected but its health endpoint is unreachable"
+    c["directml"] = {"status": directml_status, "detail": directml_detail}
+
     service_defs = [
         ("searxng", "searxng", "hermes-searxng", f"http://127.0.0.1:{searxng_port}/", root / "config/searxng/settings.yml"),
         # QMD deliberately has no host-published port in v13. Its audit probe must
@@ -1199,7 +1364,8 @@ def main() -> int:
             try:
                 hcfg = (root / "config/honcho/config.toml").read_text(encoding="utf-8")
                 expected_ollama_base = (f'http://windows.host:{native_ollama_port}/v1' if native_ollama else 'http://ollama:11434/v1')
-                configured = configured and f'base_url = "{expected_ollama_base}"' in hcfg
+                expected_text_base = (f'http://directml.host:{directml_port}/v1' if directml_selected else expected_ollama_base)
+                configured = configured and f'base_url = "{expected_ollama_base}"' in hcfg and f'base_url = "{expected_text_base}"' in hcfg and 'VECTOR_DIMENSIONS = 1536' in hcfg
             except Exception:
                 configured = False
         if args.offline:
@@ -1245,7 +1411,7 @@ def main() -> int:
         elif status == "STOPPED":
             detail += "; container/dependencies are stopped"
         if key == "honcho" and enabled:
-            detail = ("fully local Honcho + pgvector/Redis; inference/embeddings routed to " + ("native Windows Ollama" if native_ollama else "local WSL/Docker Ollama")) + ("; containers are still starting" if status == "STARTING" else ("; containers are stopped" if status == "STOPPED" else ""))
+            detail = ("fully local Honcho + pgvector/Redis; text routed to " + ("DirectML gateway with Ollama fallback" if directml_selected else ("native Windows Ollama" if native_ollama else "local WSL/Docker Ollama")) + "; embeddings routed to " + ("native Windows Ollama" if native_ollama else "local WSL/Docker Ollama")) + ("; containers are still starting" if status == "STARTING" else ("; containers are stopped" if status == "STOPPED" else ""))
         c[key] = {"status": status, "detail": detail}
 
     kanban_ok = False
@@ -1393,7 +1559,7 @@ def main() -> int:
         print(json.dumps(report, indent=2))
     else:
         print("== Existing installation audit ==")
-        order = ["stack", "permissions", "storage", "docker", "runtimePolicy", "ollama", "hermes", "api", "dashboard", "profiles", "gatewayTopology", "matrix", "searxng", "qmd", "honcho", "kanban", "tailscale"]
+        order = ["stack", "permissions", "storage", "docker", "runtimePolicy", "ollama", "directml", "hermes", "api", "dashboard", "profiles", "gatewayTopology", "matrix", "searxng", "qmd", "honcho", "kanban", "tailscale"]
         for name in order:
             item = c.get(name)
             if item:

@@ -177,8 +177,8 @@ function Start-HermesStack([string]$DistroName) {
 }
 
 function Get-WslIpv4Candidates([string]$DistroName) {
-    $result = New-Object System.Collections.Generic.List[string]
-    $diagnostics = New-Object System.Collections.Generic.List[string]
+    $result = [System.Collections.Generic.List[string]]::new()
+    $diagnostics = [System.Collections.Generic.List[string]]::new()
     $probes = @(
         [pscustomobject]@{ Label='eth0'; Result=(Invoke-WslDistroCommand $DistroName '' 'ip' @('-4','-o','addr','show','dev','eth0','scope','global') 15) },
         [pscustomobject]@{ Label='hostname'; Result=(Invoke-WslDistroCommand $DistroName '' 'hostname' @('-I') 15) }
@@ -202,7 +202,7 @@ function Get-WslIpv4Candidates([string]$DistroName) {
         }
     }
     $script:LastWslIpProbeDiagnostic = ($diagnostics -join ' | ')
-    return @($result)
+    return $result.ToArray()
 }
 
 function Test-WslIpForServices([string]$Ip, [object[]]$Services) {

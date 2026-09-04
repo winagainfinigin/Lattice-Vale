@@ -1,9 +1,66 @@
-# LatticeVale v14.5.2
+# LatticeVale v14.5.46
 
-> For an existing LatticeVale installation, launch the **full v14.5.2 release** and choose **Resume / repair installation** first. v14.5.2 is an additive storage-maintenance release over the already-published v14.5.1 runtime/resource-policy release; the proven installer reconciliation path remains the only mutating repair engine.
-- v14.5.2 adds **Option 7 — Cleanup / reclaim disk space** as an isolated, user-selected maintenance path. It can be reached by a recognized managed install even below the ordinary repair free-space floor, while Options 1–6 retain their existing behavior and storage gates. v14.5.1's policy-v9/OOM and bounded slow-start gateway fixes remain inherited unchanged.
+> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.5.46 release** and choose **Resume / repair installation**. v14.5.46 adds GPU-aware onboarding and prerequisite reuse/provisioning while inheriting v14.5.45 PowerShell compatibility, v14.5.44 DirectML preflight, v14.5.43 cumulative migration, and policy v11. No intermediate LatticeVale release is required.
 
-> The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.
+> This is a repair-installer migration feature, not a universal Git diff. An unrecognized/corrupt stack is preserved and rejected rather than guessed as a fresh install; repair downgrades from a newer installed release are refused. The separate patch ZIP remains for source checkouts only.
+
+### v14.5.46 — GPU-aware onboarding and prerequisite provisioning
+
+v14.5.46 makes GPU acceleration part of the normal installer questionnaire instead of assuming users already know which WSL runtime path fits their hardware. The installer inventories recognized Windows AMD/NVIDIA/Intel/Qualcomm adapters, directly checks WSL DirectML and managed-Ollama GPU prerequisites, reports which installer-owned WSL components already exist, and marks the recommended local text backend/managed-Ollama acceleration option without removing explicit user choice.
+
+For NVIDIA systems with working WSL `nvidia-smi`, managed Ollama NVIDIA acceleration is recommended and LatticeVale reuses or installs/configures the tested NVIDIA Container Toolkit. For AMD systems with real `/dev/kfd` + `/dev/dri`, managed Ollama ROCm is recommended and uses the pinned ROCm image. AMD/Intel/Qualcomm DirectX 12 systems with a healthy `/dev/dxg` + D3D12/DXCore bridge but no verified vendor-specific managed-Ollama path are steered toward DirectML; DirectML reuses its installer-owned venv when healthy or installs the missing Ubuntu base packages and rebuilds the pinned isolated environment. If no GPU path is verified, Ollama CPU-safe fallback remains the recommendation.
+
+LatticeVale does not install or replace Windows/vendor display drivers and does not fabricate missing ROCm device nodes. Hardware detection is recommendation only; the existing runtime probes, DirectML tensor verification, model admission, policy-v11 VRAM budgeting, and `ollama ps` offload proof remain authoritative.
+
+### v14.5.45 — PowerShell 7.6 generic-collection compatibility hotfix
+
+v14.5.45 fixes a Windows installer crash that could occur after a successful DirectML preflight on affected PowerShell 7.6 builds: `Argument types do not match`. LatticeVale no longer constructs .NET generic collections through `New-Object`; installer, uninstall, repair/reset, and Windows relay paths use direct `.NET ::new()` constructors instead. Public helpers that return generic lists convert them explicitly with `.ToArray()` where appropriate, avoiding the problematic binder/coercion path.
+
+This is a LatticeVale compatibility fix, not a user workaround. Users do not need to edit PowerShell source or downgrade PowerShell. v14.5.44's dedicated `/dev/dxg`/D3D12/DXCore DirectML preflight, v14.5.43 cumulative Resume / repair migration, policy v11, and all existing preservation/fallback rules are inherited unchanged.
+
+### v14.5.44 — DirectML WSL preflight false-negative hotfix
+
+v14.5.44 decouples DirectML selection from the managed-Ollama GPU prerequisite parser. The questionnaire now probes `/dev/dxg` with a direct read-only WSL `test -e`, retries as root after any normal-user miss/failure, and separately reports the WSL-projected `libd3d12.so`, `libd3d12core.so`, and `libdxcore.so` bridge libraries. A failed probe is explicitly distinguished from a confirmed missing GPU bridge, so a transient or user-context probe cannot be mislabeled as "DirectML unsupported."
+
+On Resume / repair, when the installer-owned DirectML virtual environment already exists, v14.5.44 also performs a real `torch_directml.device()` tensor addition as an additional execution signal. Fresh installs are not blocked merely because that venv has not been created yet. AMD, NVIDIA, Intel, and Qualcomm DirectX 12 adapters remain eligible; Ollama fallback, policy v11, v14.5.43 universal repair migration, and v14.5.4 VRAM admission remain unchanged.
+
+### v14.5.43 — cumulative universal Resume / repair migration
+
+v14.5.43 turns the current full installer into the cumulative migration engine for prior recognized LatticeVale-managed stacks. Managed-stack ownership must first be proven by current or retained historical installer markers. Resume / repair then compares saved installer version/schema with the bundle, rejects newer-than-bundle downgrade attempts or unsupported future schemas, and treats older/versionless recognized formats as migration candidates. A migration forces the same bundle-owned verified rollback backup used by controlled Update / repair before installer-managed software is refreshed.
+
+The migration installs the current bundle-owned management layer, replays stale checkpoint revisions through the existing preservation-first verifiers, refreshes the current declared package/image/source layer, and performs the uncheckpointed resource-policy-v11 reconciliation. Existing Hermes profiles/provider settings, Matrix identities/rooms, Honcho databases/memories, QMD/SearXNG data, Ollama models, DirectML selections, vault/workspace content, user overrides, and recoverable installer choices remain preservation-first. Historical managed Ollama state that predates an acceleration field is normalized to explicit CPU ownership during migration rather than silently opting the installation into GPU execution; GPU Auto/forced modes remain an explicit later choice.
+
+Same-version Resume / repair remains local-first: v14.5.43 does **not** turn every routine repair into an image/source refresh. Migration provenance fields are excluded from checkpoint fingerprints so a completed one-time migration does not replay solely because it remembers its origin.
+
+### v14.5.42 — hardware-aware resource policy v11
+
+v14.5.42 completes the hardware-resource work that followed v14.5.4. Managed Ollama now profiles WSL RAM as compact (<=8 GiB), balanced (>8-16 GiB), or large (>16 GiB), and CPU capacity as compact (<=4), balanced (5-8), or high (>8). Compact CPU-backed Ollama uses a 4096-token automatic context and a 4096 MiB provisional floor; downloaded model size and context remain authoritative and can raise the floor or reject an impossible topology.
+
+NVIDIA CUDA and supported AMD/ROCm managed-Ollama paths now inventory individual GPUs (count, smallest, largest, and aggregate VRAM) instead of treating all VRAM as one interchangeable pool. The planner accounts for Ollama's single-GPU-first / multi-GPU-spread behavior, uses the smaller RAM/usable-VRAM context recommendation, reduces managed Ollama CPU quota when GPU-backed, and persists GPU topology in the adaptive fingerprint so repair/start can recalculate after hardware changes.
+
+When DirectML and managed Ollama target the same GPU vendor, v14.5.42 coordinates their VRAM envelopes instead of allowing both backends to assume most of the same adapter. `OLLAMA_GPU_OVERHEAD` is generated as an installer-owned per-GPU reserve and `DIRECTML_VRAM_LIMIT_PCT` is reduced when required, including heterogeneous multi-GPU layouts. DirectML no longer silently raises a low policy-selected percentage to a 1 GiB budget: if the resulting envelope is below its safe minimum, DirectML admission fails closed and Ollama remains available.
+
+GPU device presence is not accepted as proof of acceleration. After the selected managed Ollama text model is loaded, LatticeVale performs a bounded `ollama ps` PROCESSOR check. Auto-selected GPU acceleration that actually executes on CPU is fingerprinted and re-budgeted as CPU; explicitly forced NVIDIA/AMD acceleration that executes on CPU fails installation rather than retaining GPU-sized assumptions. A changed driver/kernel/VRAM fingerprint allows Auto to retry acceleration later.
+
+Native Windows Ollama remains externally owned. LatticeVale recommends one loaded model, one parallel request, conservative keep-alive, and documents `OLLAMA_GPU_OVERHEAD`, but does not silently change global Windows Ollama settings. Intel/Vulkan is not introduced as a managed WSL Ollama acceleration mode in this patch; DirectML remains the broader optional DX12 path.
+
+### v14.5.42 — canonical policy + release integrity
+
+Resource policy v11 is finalized once into a canonical installer-owned policy object. Generated Compose CPU/RAM limits, `.latticevale-resource-state`, audit expectations, and the human-readable `resource-policy-report.txt` consume that same finalized object instead of independently recalculating ceilings. The state records separate hardware and policy SHA-256 fingerprints, so audit/repair can distinguish a hardware/topology change from policy/configuration drift. The report contains no credentials and records the RAM/CPU profile, acceleration/offload status, GPU topology, DirectML/Ollama coordination, context/model floor, and generated service ceilings.
+
+Release qualification is deterministic and contamination-checked. The authoritative suite contains exactly 135 fixtures in six numbered shards; bytecode/cache/temp artifacts are rejected before and after test execution. Packaging is accepted only after the exact v14.5.4 parent can reproduce the qualified v14.5.42 tree through its patch, the reconstructed v14.5.2 parent can reproduce the same tree through the combined patch, and a freshly extracted release ZIP matches the qualified source tree and source manifest byte-for-byte.
+
+### v14.5.4 — DirectML VRAM guard + 16 GB-class RAM efficiency
+
+v14.5.4 makes DirectML GPU-memory safety a LatticeVale responsibility rather than an end-user tuning task. `torch-directml` does not expose a stable allocator-level VRAM quota, so LatticeVale enforces the strongest portable boundary available: before any model is moved to the DirectML device, the gateway requires measurable dedicated VRAM and proves that exact fp16 parameter bytes plus a conservative activation/runtime reserve and KV-cache estimate fit inside 75% of the detected adapter memory. The effective context is automatically reduced in 256-token steps when needed; if even a 1024-token context cannot fit, DirectML is rejected and the request goes through Ollama instead. Runtime OOM/operator failures retain the same automatic fallback.
+
+The release also targets ordinary 16 GB Windows PCs. On WSL allocations up to 12 GiB, resource policy v10 keeps the real-world-proven 1 GiB Hermes floor but tightens supporting database/cache/indexer minima and useful ceilings. DirectML's host-memory requirement now acts as a floor on the existing non-container reserve instead of being added on top of it, eliminating several GiB of double-counted headroom on common 8-12 GiB WSL VMs. DirectML model loading uses Transformers' low-CPU-memory path; managed Ollama uses a 4096-token emergency-fallback context and `0s` keep-alive while DirectML is primary, so the fallback/embedding model does not remain resident unnecessarily. Model-aware post-download checks still raise the Ollama floor or refuse the plan when an actually selected model cannot fit.
+
+### v14.5.3 — experimental DirectML hybrid local-AI backend
+
+v14.5.3 adds a shared OpenAI-compatible text gateway on the WSL host for PyTorch DirectML. Hermes and every Honcho text-generation section use that gateway only when the user explicitly selects DirectML; Honcho embeddings continue to use Ollama directly so the existing 1536-dimensional pgvector store remains compatible. The gateway performs a real DirectML tensor probe, uses a conservative default `Qwen/Qwen2.5-1.5B-Instruct` model, serializes generation to bound memory spikes, and automatically retries failed text requests through the configured managed-WSL or native-Windows Ollama backend. Existing v14.5.2 installs default to `localTextBackend=ollama` during repair unless the user deliberately changes the backend.
+
+The DirectML environment is kept outside the Hermes/Honcho Python environments and uses pinned compatibility dependencies. Startup, repair, update, verification, backup, state audit, Windows autostart, and safe uninstall all understand the new host-side gateway. DirectML never replaces Ollama entirely: Ollama remains required for Honcho embeddings and provides the failure fallback.
 
 ### v14.5.2 — cleanup / reclaim disk space maintenance release
 
@@ -13,7 +70,7 @@ A recognized managed stack may enter **Option 3 — Verify installation only** o
 
 ### v14.5.1 — adaptive CPU/RAM/OOM reliability patch
 
-v14.5.1 corrects adaptive resource-policy failures found by real full-stack WSL audits. Policy v4 could protect managed Ollama so aggressively that the central `hermes-agent` container received only 544 MiB on a roughly 9.7 GiB WSL VM, causing repeated cgroup OOM kills even while WSL still had multiple GiB available. The initial v14.5.1 policy-v6 balance fixed Hermes but left CPU-backed managed Ollama at only 4128 MiB; a subsequent live run held Ollama at ~98% of that hard ceiling and recorded more than 15,000 cgroup `memory.max` pressure events. Current resource policy **v9** keeps the bounded aggregate-budget model and user-owned `compose.override.yaml`, preserves the 1024 MiB Hermes and 512 MiB Honcho API preferred floors, and gives CPU-backed managed Ollama a real **4608 MiB viability floor**. On >6-12 GiB WSL allocations with CPU-backed managed Ollama selected, v9 uses a 10% non-container reserve; other >6-24 GiB shapes retain 20%, <=6 GiB remains 30%, and >24 GiB remains 15%. Policy v9 is topology-aware for public multi-profile setups: its 1024 MiB Hermes baseline covers the default gateway plus up to one secondary Matrix gateway and Kanban concurrency up to 3; each additional persistent secondary Matrix gateway adds 192 MiB to the Hermes minimum and each Kanban slot above 3 adds 96 MiB, capped at a 4096 MiB topology floor. Hermes CPU keeps the ordinary ~75% ceiling for common topology but can rise toward 100% of WSL-visible CPUs under additional gateway/worker pressure.
+v14.5.1 corrects adaptive resource-policy failures found by real full-stack WSL audits. Policy v4 could protect managed Ollama so aggressively that the central `hermes-agent` container received only 544 MiB on a roughly 9.7 GiB WSL VM, causing repeated cgroup OOM kills even while WSL still had multiple GiB available. The initial v14.5.1 policy-v6 balance fixed Hermes but left CPU-backed managed Ollama at only 4128 MiB; a subsequent live run held Ollama at ~98% of that hard ceiling and recorded more than 15,000 cgroup `memory.max` pressure events. That release's final resource policy **v9** kept the bounded aggregate-budget model and user-owned `compose.override.yaml`, preserves the 1024 MiB Hermes and 512 MiB Honcho API preferred floors, and gives CPU-backed managed Ollama a real **4608 MiB viability floor**. On >6-12 GiB WSL allocations with CPU-backed managed Ollama selected, v9 uses a 10% non-container reserve; other >6-24 GiB shapes retain 20%, <=6 GiB remains 30%, and >24 GiB remains 15%. Policy v9 is topology-aware for public multi-profile setups: its 1024 MiB Hermes baseline covers the default gateway plus up to one secondary Matrix gateway and Kanban concurrency up to 3; each additional persistent secondary Matrix gateway adds 192 MiB to the Hermes minimum and each Kanban slot above 3 adds 96 MiB, capped at a 4096 MiB topology floor. Hermes CPU keeps the ordinary ~75% ceiling for common topology but can rise toward 100% of WSL-visible CPUs under additional gateway/worker pressure.
 
 `state-audit.py`, `./manage.sh verify`, and the v14.5 read-only planner now treat a running selected container with Docker `OOMKilled=true` as a repairable runtime-policy problem instead of allowing recovered endpoints to produce a false `HEALTHY` result. Existing policy-v2/v3/v4/v5/v6/v7/v8 fingerprints automatically become stale and are regenerated/reconciled by normal Resume / repair or the existing start-time resource refresh. The policy fingerprint also persists each generated service ceiling, and final reconciliation compares those values with Docker's live `HostConfig.Memory`; an existing v14.5.0 container that still has the old 544 MiB Hermes cgroup cannot be accepted merely because the current YAML/state files were rewritten. LatticeVale still does not write global WSL `memory` or `autoMemoryReclaim` settings.
 
@@ -385,7 +442,7 @@ wsl -d $Distro -u $LinuxUser -- bash -lc 'cd "$HOME/hermes-stack" && ./manage.sh
 
 ## Adaptive RAM and resource policy
 
-LatticeVale resource policy **v9** keeps hard per-container ceilings and a bounded aggregate managed-container budget. It preserves the v6 Hermes/Honcho correction for the policy-v4 544 MiB Hermes starvation failure, and additionally fixes audited CPU-backed Ollama pressure: the v6 ~4128 MiB Ollama ceiling reached ~98% utilization and more than 15,000 `memory.max` events without an OOM. On sufficiently sized hosts, v9 gives Hermes a 1024 MiB preferred minimum, Honcho API 512 MiB, and CPU-backed managed Ollama a **4608 MiB provisional floor** before model artifacts are measurable, then a model/context-aware floor after download. If the selected service set cannot fit its defined minimum ceilings inside the managed budget, v9 refuses to generate misleading tiny hard limits and tells the user to increase WSL RAM, deselect components, use native-Windows Ollama where appropriate, or disable LatticeVale ceilings.
+LatticeVale resource policy **v11** keeps hard per-container ceilings and a bounded aggregate managed-container budget. It preserves the policy-v9 Hermes/Honcho correction for the policy-v4 544 MiB Hermes starvation failure and the model-aware safeguards added after policy-v6 CPU-backed Ollama pressure. On sufficiently sized hosts, Hermes retains a 1024 MiB preferred minimum and Honcho API a 512 MiB floor; CPU-backed managed Ollama now starts from a **4096 MiB provisional floor** before model artifacts are measurable, then uses model/context-aware sizing after download. Policy v11 also classifies WSL RAM/CPU shape, inventories eligible NVIDIA/AMD GPU topology, coordinates same-vendor Ollama/DirectML VRAM with per-GPU `OLLAMA_GPU_OVERHEAD`, and verifies post-load GPU offload before keeping GPU-sized resource assumptions. If the selected service set cannot meet its defined RAM/VRAM safety floors inside the managed budget, v11 refuses the unsafe plan and tells the user to increase WSL RAM, choose a smaller model, deselect components, use native-Windows Ollama where appropriate, or disable LatticeVale ceilings.
 
 Depending on the enabled services, it can apply:
 
@@ -394,14 +451,17 @@ Depending on the enabled services, it can apply:
 - reduced glibc allocator arenas
 - Synapse cache tuning
 - reduced PostgreSQL fixed `shared_buffers`
-- protected managed-Ollama memory headroom within the aggregate WSL container budget, including a 4608 MiB CPU-backed viability floor
+- protected managed-Ollama memory headroom within the aggregate WSL container budget, including a 4096 MiB provisional CPU-backed viability floor and model-aware post-download sizing
+- RAM/CPU hardware profiles plus NVIDIA/AMD GPU topology metrics (count, minimum, maximum, aggregate VRAM)
+- per-GPU `OLLAMA_GPU_OVERHEAD` and same-vendor DirectML/Ollama VRAM coordination
+- bounded post-load `ollama ps` verification so Auto GPU fallback is re-budgeted as CPU and forced GPU modes fail closed when offload is not proven
 - controlled Ollama model residency
 - bounded Ollama parallelism
 - short Ollama model keep-alive behavior
 - OOM-aware runtime auditing for selected running containers
 - live Docker CPU/RAM-ceiling verification during reconciliation so stale quotas cannot survive clean/repair convergence
 
-Clean installs generate policy v9 before first container creation. Existing adaptive policy-v2/v3/v4/v5/v6/v7/v8 installs regenerate through normal Resume / repair or managed start-time resource reconciliation, and final reconciliation compares effective merged Compose `mem_limit`/`cpus` with Docker's live `HostConfig.Memory`/`HostConfig.NanoCpus`. Explicit user `compose.override.yaml` configuration remains authoritative and is applied after generated LatticeVale resource policy. LatticeVale does not write global WSL `memory` or `autoMemoryReclaim` settings. The adaptive fingerprint also includes Matrix-enabled secondary gateway count, Kanban concurrency, and the derived Hermes topology floor. Generated root/Windows-start helpers evaluate current CPU, RAM, enabled-limit state, profile topology, and Kanban concurrency when the helper runs rather than freezing install-time values.
+Clean installs generate policy v11 before first container creation. Existing adaptive policy-v2 through policy-v10 installs regenerate through normal Resume / repair or managed start-time resource reconciliation. Policy v11 fingerprints WSL-visible CPU/RAM profile, Matrix-enabled secondary gateway count, Kanban concurrency, the derived Hermes topology floor, selected Ollama acceleration, and managed-GPU topology/coordination values; hardware or runtime-fallback changes therefore invalidate stale generated ceilings instead of carrying them forward. Final reconciliation compares effective merged Compose `mem_limit`/`cpus` with Docker's live `HostConfig.Memory`/`HostConfig.NanoCpus`. Explicit user `compose.override.yaml` configuration remains authoritative and is applied after generated LatticeVale resource policy. LatticeVale does not write global WSL `memory` or `autoMemoryReclaim` settings. Generated root/Windows-start helpers evaluate current CPU, RAM, enabled-limit state, profile topology, Kanban concurrency, and acceleration state when the helper runs rather than freezing install-time values.
 
 ---
 
@@ -474,7 +534,14 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.4.85** | Release | Startup-aware reconcile/post-gateway readiness, self-repairing pre-update backup, and explicit read-only verification output |
 | **v14.5.0** | Release | Read-only WSL-native repair planning/config-state foundation and free/local-path audit |
 | **v14.5.1** | Release | Adaptive resource policy v9, OOM-aware health, low-RAM viability guards, and live Docker CPU/RAM convergence for clean/repair |
-| **v14.5.2** | **Current install release** | Install-preserving Option 7 cleanup/reclaim path plus low-space Verify/Cleanup recovery gate; v14.5.1 runtime policy inherited unchanged |
+| **v14.5.2** | Release | Install-preserving Option 7 cleanup/reclaim path plus low-space Verify/Cleanup recovery gate; v14.5.1 runtime policy inherited unchanged |
+| **v14.5.3** | Release | Experimental DirectML hybrid text backend with Ollama fallback/embeddings, host-RAM reserve, and lifecycle integration |
+| **v14.5.4** | Release | DirectML VRAM admission guard, low-CPU-memory loading, and <=12 GiB WSL resource-policy v10 |
+| **v14.5.42** | Release | Hardware-aware resource policy v11, multi-GPU/shared-VRAM coordination, and runtime managed-Ollama GPU-offload proof |
+| **v14.5.43** | Prior install release | Universal cumulative Resume / repair migration for recognized older managed installs; policy v11 retained |
+| **v14.5.44** | Prior install release | DirectML `/dev/dxg` preflight + root retry/library diagnostics; v14.5.43 universal repair and policy v11 retained |
+| **v14.5.45** | Prior install release | PowerShell 7.6 generic-collection compatibility hotfix; v14.5.44 DirectML preflight retained |
+| **v14.5.46** | **Current install release** | GPU-aware backend recommendation plus selected-path prerequisite reuse/provisioning; all v14.5.42-v14.5.45 safety and repair behavior retained |
 
 ### v14.4.1
 

@@ -1,3 +1,35 @@
+## v14.5.46 GPU-onboarding source-policy note
+
+v14.5.46 uses the existing DirectML/Ollama/NVIDIA package sources but makes their selection/reuse/provisioning explicit in the questionnaire. Current upstream references used for the capability policy include Microsoft PyTorch DirectML on WSL (`https://learn.microsoft.com/windows/ai/directml/pytorch-wsl`), NVIDIA CUDA on WSL (`https://docs.nvidia.com/cuda/wsl-user-guide/`), Ollama GPU support (`https://docs.ollama.com/gpu`), Ollama Linux installation (`https://docs.ollama.com/linux`), and Ollama Docker GPU setup (`https://docs.ollama.com/docker`). No third-party binary is newly redistributed by LatticeVale.
+
+## v14.5.45 PowerShell compatibility source-policy note
+
+v14.5.45 adds no dependency, binary, or network source. It replaces PowerShell generic-collection construction through `New-Object` with direct .NET constructors and explicit array conversion where appropriate. The change is entirely in repository-owned PowerShell source.
+
+## v14.5.44 DirectML preflight source-policy note
+
+v14.5.44 adds no new dependency or binary. The DirectML preflight follows Microsoft's WSL2 PyTorch DirectML model: DirectX 12-capable AMD/Intel/NVIDIA hardware, current vendor driver/WSL GPU integration, and a real `torch_directml.device()` tensor operation as execution proof. LatticeVale additionally checks the WSL-projected D3D12/DXCore bridge files for diagnostics. References: https://learn.microsoft.com/windows/ai/directml/pytorch-wsl and https://learn.microsoft.com/windows/ai/directml/gpu-accelerated-training .
+
+## v14.5.43 repair-migration source policy
+
+v14.5.43 adds no new external migration service or telemetry. Historical migration decisions use only local installer-managed files, retained finalization markers, recoverable LatticeVale backup metadata, saved installer version/schema state, current bundle compatibility metadata, and existing checkpoint/live-verification logic.
+
+## v14.5.42 managed Ollama resource-policy sources
+
+The generated `resource-policy-report.txt`, hardware fingerprint, and policy fingerprint are LatticeVale-owned diagnostic metadata derived only from local detected hardware, installer selections, model metrics, and generated limits; they add no external data source or telemetry. Release reproducibility additionally relies on Git patch application, SHA-256 hashing, ZIP extraction, and the repository source manifest.
+
+- Ollama environment/configuration source and documentation for `OLLAMA_GPU_OVERHEAD`, `OLLAMA_MAX_LOADED_MODELS`, `OLLAMA_NUM_PARALLEL`, and related runtime controls: https://github.com/ollama/ollama and https://docs.ollama.com/
+- Ollama context guidance and `ollama ps` PROCESSOR reporting are used only as runtime/resource evidence; LatticeVale still applies its own conservative admission policy and does not infer GPU offload from device presence alone.
+- Ollama's multi-GPU scheduler behavior (prefer one fitting GPU, spread when a model does not fit one device) informs v14.5.42 topology planning; exact runtime placement remains Ollama-owned and is verified after model load.
+
+## v14.5.4 DirectML/resource source-policy note
+
+v14.5.4 adds no new model provider, bundled binary, container image, or paid dependency. It retains the v14.5.3 DirectML package/model sources and adds pinned `accelerate==0.34.2` inside the isolated DirectML venv so Transformers can use its low-CPU-memory loading path. VRAM capacity is read from the installed `torch-directml` adapter API (`gpu_memory`) and is used only as a fail-closed admission signal; no third-party GPU monitor or privileged Windows service is added. Microsoft documents PyTorch DirectML for WSL2/DirectX 12 GPUs; the DirectML repository is in maintenance mode. References: https://learn.microsoft.com/windows/ai/directml/pytorch-wsl and https://github.com/microsoft/DirectML .
+
+## v14.5.3 DirectML source-policy note
+
+v14.5.3 adds optional runtime downloads only when DirectML is explicitly selected: Microsoft `torch-directml` from PyPI plus its pinned PyTorch/torchvision compatibility generation and Hugging Face Python/model dependencies. These are downloaded from their upstream package/model sources and are not redistributed inside LatticeVale. DirectML is documented upstream as supported on Windows/WSL2 with DirectX 12 hardware, while Microsoft now treats DirectML/framework integrations as maintenance/legacy technology. References: https://github.com/microsoft/DirectML and https://learn.microsoft.com/windows/ai/directml/pytorch-wsl .
+
 # Runtime Sources and Supply-Chain Policy
 
 ## v14.5.2 source-policy note
@@ -70,7 +102,7 @@ v14.3.41 adds no bundled binary dependency or new third-party source. Its runtim
 
 > **Audit patch 1:** the explicit WSL host repair helper uses only built-in Windows servicing/WSL commands. Its repair rationale was checked against Microsoft Learn WSL installation/troubleshooting and Windows-image repair documentation, plus current microsoft/WSL issue reports. No additional third-party binary is bundled or downloaded by the helper.
 
-LatticeVale v14.4.85 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
+LatticeVale v14.5.4 remains distributed as source/configuration only. It does **not** redistribute third-party application installers, package archives, model blobs, or saved container images. Selected dependencies are obtained online at install/update time.
 
 ## Windows software
 

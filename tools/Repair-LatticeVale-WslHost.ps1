@@ -179,7 +179,7 @@ function Set-WslNetworkingModeNat {
         $sourceLines = @()
     }
 
-    $output = New-Object System.Collections.Generic.List[string]
+    $output = [System.Collections.Generic.List[string]]::new()
     $inWsl2 = $false
     $sawWsl2 = $false
     $wroteMode = $false

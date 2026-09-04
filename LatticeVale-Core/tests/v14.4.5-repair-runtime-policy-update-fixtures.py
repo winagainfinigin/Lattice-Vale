@@ -6,7 +6,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}, version
+assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
 
 cfg = (root / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (root / 'stack/manage.sh').read_text(encoding='utf-8')
@@ -39,7 +39,7 @@ assert pos == sorted(pos), pos
 
 # Policy verification must require the current fingerprint and all v3 RAM controls.
 for token in (
-    'saved_version" == 9',
+    'statev POLICY_VERSION)" == 11',
     'MALLOC_ARENA_MAX:',
     'SYNAPSE_CACHE_FACTOR:',
     'shared_buffers=',
@@ -70,30 +70,59 @@ opt_bool() {
     *) printf false ;;
   esac
 }
+opt_text() { printf ''; }
 managed_ollama_enabled() { return 1; }
+resource_ram_profile() { local m="$1"; if (( m <= 8192 )); then printf compact; elif (( m <= 16384 )); then printf balanced; else printf large; fi; }
+resource_cpu_profile() { local c="$1"; if (( c <= 4 )); then printf compact; elif (( c <= 8 )); then printf balanced; else printf high; fi; }
+resource_directml_selected() { return 1; }
+resolve_ollama_acceleration() { printf cpu; }
 resource_matrix_profile_gateways() { printf '0'; }
 resource_kanban_concurrency() { printf '1'; }
 resource_hermes_floor_mib() { printf '1024'; }
 resource_ollama_model_metrics() { printf '0:0:0:0'; }
 state_mark() { printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >> state.log; }
 write_latticevale_compose_overlay() {
-  local cpus mem_mib
+  local cpus mem_mib lowmem
   cpus="$(nproc)"
   mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo)"
+  lowmem=0
+  (( mem_mib <= 12288 )) && lowmem=1
   cat > .latticevale-resource-state <<EOF
-POLICY_VERSION=9
+POLICY_VERSION=11
 CPUS=$cpus
+CPU_PROFILE=$(resource_cpu_profile "$cpus")
 MEM_MIB=$mem_mib
+RAM_PROFILE=$(resource_ram_profile "$mem_mib")
+LOW_MEMORY_PROFILE=$lowmem
 RESERVE_MIB=1024
+DIRECTML_HOST_RESERVE_MIB=0
 BUDGET_MIB=$((mem_mib-1024))
 MATRIX_PROFILE_GATEWAYS=0
 KANBAN_CONCURRENCY=1
 HERMES_MIN_MIB=1024
+OLLAMA_ACCELERATION=cpu
+GPU_COUNT=0
+GPU_MIN_MIB=0
+GPU_MAX_MIB=0
+GPU_TOTAL_MIB=0
+GPU_HETEROGENEOUS=false
+OLLAMA_GPU_OVERHEAD_MIB=0
+DIRECTML_VRAM_LIMIT_PCT=75
+GPU_SHARED_WITH_DIRECTML=false
+DIRECTML_SELECTED=false
+DIRECTML_GPU_VENDOR=
+DIRECTML_ADAPTER_NAME=
 OLLAMA_TEXT_ARTIFACT_MIB=0
 OLLAMA_EMBED_ARTIFACT_MIB=0
 OLLAMA_CONTEXT_LENGTH=0
 OLLAMA_MODEL_FLOOR_MIB=0
 EOF
+  hardware_material="CPUS=$cpus|MEM_MIB=$mem_mib|OLLAMA_ACCELERATION=cpu|GPU_COUNT=0|GPU_MIN_MIB=0|GPU_MAX_MIB=0|GPU_TOTAL_MIB=0|DIRECTML_SELECTED=false|DIRECTML_GPU_VENDOR=|DIRECTML_ADAPTER_NAME="
+  hardware_fingerprint="$(printf '%s' "$hardware_material" | sha256sum | awk '{print $1}')"
+  printf 'HARDWARE_FINGERPRINT=%s\n' "$hardware_fingerprint" >> .latticevale-resource-state
+  policy_fingerprint="$(LC_ALL=C sort .latticevale-resource-state | sha256sum | awk '{print $1}')"
+  printf 'POLICY_FINGERPRINT=%s\n' "$policy_fingerprint" >> .latticevale-resource-state
+  printf 'LatticeVale Resource Policy Report\nHardware fingerprint: %s\nPolicy fingerprint: %s\n' "$hardware_fingerprint" "$policy_fingerprint" > resource-policy-report.txt
   cat > compose.latticevale.yaml <<'EOF'
 services:
   hermes:
@@ -128,7 +157,7 @@ repair_runtime_policy_reconcile
 verify_adaptive_runtime_policy
 [[ "$(grep -c '^infrastructure|pending|' state.log)" == 1 ]]
 [[ "$(grep -c '^reconcile|pending|' state.log)" == 1 ]]
-[[ "$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state)" == 9 ]]
+[[ "$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state)" == 11 ]]
 grep -q '^COMPOSE_FILE=compose.yaml:compose.latticevale.yaml:compose.override.yaml$' .env
 before="$(wc -l < state.log)"
 repair_runtime_policy_reconcile

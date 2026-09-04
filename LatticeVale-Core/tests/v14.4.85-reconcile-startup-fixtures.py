@@ -5,7 +5,7 @@ import subprocess
 ROOT=Path(__file__).resolve().parents[1]
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.85','14.5.0','14.5.1','14.5.2'}, version
+assert version in {'14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
 
 # Regression observed on released Hotfix 1: docker compose reported all services up,
 # but hermes-ollama was only Running (healthcheck still starting). stage_reconcile then

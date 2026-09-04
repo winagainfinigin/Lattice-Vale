@@ -23,6 +23,9 @@ from typing import Any, Mapping
 _EPHEMERAL_OPTION_KEYS = {
     "installerVersion",
     "installerMode",
+    "repairOriginVersion",
+    "repairOriginSchema",
+    "universalRepairMigration",
     "resetCheckpoints",
     "forceProviderSetup",
     "forceProfileSetup",
@@ -115,6 +118,9 @@ class InstallOptions:
     honcho: bool
     hermes_local_ai: bool
     ollama_backend: str
+    local_text_backend: str
+    directml_text_model: str
+    directml_port: int
     container_resource_limits: bool
     obsidian: bool
     hermes_api_port: int
@@ -138,6 +144,12 @@ class InstallOptions:
         backend = _text(raw, "ollamaBackend", "managed")
         if backend not in {"managed", "windows-native"}:
             backend = "managed"
+        local_text_backend = _text(raw, "localTextBackend", "ollama")
+        if local_text_backend not in {"ollama", "directml"}:
+            local_text_backend = "ollama"
+        directml_text_model = _text(raw, "directmlTextModel", "Qwen/Qwen2.5-1.5B-Instruct")
+        if not directml_text_model:
+            directml_text_model = "Qwen/Qwen2.5-1.5B-Instruct"
         return cls(
             schema=schema,
             installer_version=_text(raw, "installerVersion"),
@@ -152,6 +164,9 @@ class InstallOptions:
             honcho=_bool(raw, "honcho"),
             hermes_local_ai=_bool(raw, "hermesLocalAI"),
             ollama_backend=backend,
+            local_text_backend=local_text_backend,
+            directml_text_model=directml_text_model,
+            directml_port=_port(raw, "directmlPort", 11436),
             container_resource_limits=_bool(raw, "containerResourceLimits"),
             obsidian=_bool(raw, "obsidian"),
             hermes_api_port=_port(raw, "hermesApiPort", 8642),
@@ -177,6 +192,7 @@ class InstallOptions:
             ("qmd", self.qmd),
             ("honcho", self.honcho),
             ("ollama", self.local_ai_enabled),
+            ("directml", self.local_ai_enabled and self.local_text_backend == "directml"),
             ("tailscale", self.tailscale),
             ("obsidian", self.obsidian),
         ):

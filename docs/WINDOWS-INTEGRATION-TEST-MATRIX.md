@@ -1,4 +1,56 @@
-> **v14.5.2 cleanup/low-space case:** on a recognized managed install, verify Option 7 presents bounded selectable cleanup categories plus final confirmation and exits without entering normal install/repair/update stages. Below the ordinary managed-repair host-partition free-space floor, only Option 3 Verify and Option 7 Cleanup may proceed; Options 1/2/4/5/6 remain blocked. Exercise exact-metadata pre-update backup cleanup, staging cleanup, APT cache cleanup, dangling-image cleanup, dangling default-builder cache cleanup, and root TRIM individually and through Select ALL. Confirm containers, networks, volumes, tagged images, configured models, persistent state, unverified backups, and VHDX files are untouched. Confirm successful cleanup prints the post-cleanup protected-state verification and `Cleanup safety verification: PASS`; deliberately perturbing a protected fixture identity must make the helper fail nonzero instead of reporting success. Confirm TRIM output explicitly calls its quantity a logical discard range rather than Windows free space reclaimed, and confirm the WSL home filesystem display describes `statfs` `ext2/ext3` as Linux-native ext-family.
+## v14.5.46 GPU-aware onboarding cases
+
+- NVIDIA Windows GPU + `/dev/dxg` + working WSL `nvidia-smi`: recommend Ollama/NVIDIA and report that NVIDIA Container Toolkit will be reused or provisioned.
+- AMD GPU + `/dev/kfd` + `/dev/dri`: recommend managed Ollama ROCm.
+- AMD GPU (including RX 6000-class) + healthy `/dev/dxg`/D3D12/DXCore but no verified ROCm container devices: recommend DirectML, not CPU-only and not forced ROCm.
+- Intel/Qualcomm recognized DX12 GPU + healthy DirectML bridge: recommend DirectML.
+- Recognized GPU with no verified WSL acceleration path: recommend stable Ollama with CPU fallback and explain the missing host condition.
+- Existing DirectML Ubuntu packages/venv: reuse rather than reinstall when healthy; missing installer-owned packages are installed only after DirectML selection.
+- Existing verified NVIDIA Container Toolkit/runtime: reuse; missing toolkit is installed only after NVIDIA selection and WSL NVIDIA proof.
+- GPU recommendation must never bypass DirectML tensor/model admission, ROCm device checks, NVIDIA runtime verification, policy-v11 budgeting, or `ollama ps` offload proof.
+
+## v14.5.45 PowerShell 7.6 generic-collection compatibility cases
+
+- Successful DirectML `/dev/dxg` + bridge-library preflight followed by Windows GPU enumeration: no `Argument types do not match` exception.
+- Repository scan: no PowerShell `New-Object System.Collections.Generic...` constructors remain.
+- GPU inventory returns an ordinary array from a constructor-created `List[object]`.
+- Repair/reset, uninstall, WSL-native relay, and Windows-native service-relay generic collections use direct constructors.
+- v14.5.44 DirectML preflight outcomes remain unchanged.
+
+## v14.5.44 DirectML WSL-preflight cases
+
+- `/dev/dxg` exists for the selected user: DirectML proceeds without the old false-negative warning.
+- Normal-user direct path probe misses/fails but root sees `/dev/dxg`: root retry wins and DirectML proceeds.
+- User + root direct probes conclusively return absent: report confirmed DXG absence and offer Ollama/keep-for-later choices.
+- Probe returns an unexpected error/timeout: report inconclusive probe, not "DXG missing."
+- DXG present with one or more D3D12/DXCore bridge libraries missing: report the library-specific warning while preserving the runtime probe as authority.
+- Existing installer-owned DirectML venv: execute a real tensor addition; success is reported, failure remains repairable with Ollama fallback.
+- Fresh install with no DirectML venv: do not block selection merely because the environment has not been created yet.
+
+## v14.5.43 universal Resume / repair migration cases
+
+- Full v14.5.43 installer against recognized historical/versionless managed state: choose Resume / repair and verify no intermediate installer is requested.
+- Historical current-core + `.install-info` and current-core + `.configured` recognition; arbitrary `~/hermes-stack` without proven core/metadata remains unrecognized.
+- Saved older installer version/schema: verified safety backup occurs before managed refresh; current files/pins/checkpoints converge; policy v11 and hardware fingerprint regenerate; persistent identities/data/overrides remain.
+- Newer-than-bundle metadata and future schema: fail closed without managed refresh.
+- Legacy managed Ollama missing acceleration: normalize to CPU; do not silently enable GPU.
+- Same-version v14.5.45 repair: remain local-first unless the ordinary age/revision/legacy refresh gates independently require refresh.
+
+## v14.5.42 hardware-resource cases
+
+In addition to the hardware cases below, release qualification must verify canonical-policy consistency (planner = persisted state = emitted Compose = audit/report expectation), hardware/policy fingerprint regeneration on real hardware/topology changes, preservation-first v14.5.4 and v14.5.2 upgrade/repair paths, and all six deterministic regression shards. Synthetic GPU coverage includes 4/8/12 GiB single GPU, 8+8, 12+8, 24+4, iGPU+dGPU-like heterogeneous memory, three GPUs, missing VRAM telemetry fail-closed, and simultaneous NVIDIA+AMD Auto selection without merging unlike devices.
+
+- Clean/repair on compact (<=8 GiB), balanced (>8-16 GiB), and large (>16 GiB) WSL RAM allocations; verify policy-v11 state and no persistent-state deletion.
+- Managed CPU Ollama on compact WSL; verify automatic 4096 context and 4096 MiB provisional floor, then verify measured model size can raise/reject the plan.
+- NVIDIA CUDA and supported AMD/ROCm managed Ollama; verify per-GPU topology and reduced CPU quota.
+- Homogeneous multi-GPU (12+8 GiB) and heterogeneous (24+4 GiB) same-vendor DirectML/Ollama cases; verify generated overhead/DirectML envelopes and no independent VRAM overcommit.
+- Auto GPU selection that `ollama ps` reports as CPU; verify same-run CPU re-budget plus fingerprinted retry behavior after a simulated hardware/runtime fingerprint change.
+- Forced NVIDIA/AMD that reports CPU; verify installation fails closed.
+- Native Windows Ollama; verify recommendations are displayed but global Windows Ollama variables are not silently changed.
+
+> **v14.5.3 DirectML case:** on a fresh/repair WSL2 install, verify Ollama remains the default unless DirectML is explicitly selected. With DirectML selected, verify the isolated tensor probe, host-gateway-only listener, Hermes + Honcho text routing, Ollama embedding routing, automatic Ollama fallback, serialized inference, idle unload, host-RAM reserve fingerprint, startup/restart/stop/autostart, backup preservation, and exact-owned uninstall cleanup. A failed DirectML model/operator path must not strand local text when the selected Ollama fallback is healthy.
+
+> **v14.5.2 cleanup/low-space case:** on a recognized managed install, verify Option 7 presents bounded selectable cleanup categories plus final confirmation and exits without entering normal install/repair/update stages. Below the ordinary managed-repair host-partition free-space floor, only Option 3 Verify and Option 7 Cleanup may proceed; Options 1/2/4/5/6 remain blocked. Exercise exact-metadata pre-update backup cleanup, staging cleanup, APT cache cleanup, dangling-image cleanup, dangling default-builder cache cleanup, and root TRIM individually and through Select ALL. Confirm containers, networks, volumes, tagged images, configured models, persistent state, unverified backups, and VHDX files are untouched.
 
 > **v14.5.1 resource-policy/OOM case:** on a full selected stack with ~9.7-10 GiB WSL-visible RAM and adaptive limits enabled, verify policy v9 gives Hermes >=1024 MiB, Honcho API >=512 MiB, and CPU-backed managed Ollama >=4608 MiB provisionally before model-aware sizing while aggregate generated ceilings remain <= the managed budget. Seed/observe Docker `OOMKilled=true` on a running selected container and verify `./manage.sh audit`, `verify`, and `repair --plan` no longer report the runtime as healthy/no-repair. Existing policy-v4 state must refresh through normal Resume / repair/start reconciliation without changing global WSL memory settings or user `compose.override.yaml`. For repair-path coverage, leave a pre-existing Hermes container at the v14.5.0 544 MiB limit while v9 desired files are present; the installer must not accept the checkpoint until Docker `HostConfig.Memory`/`HostConfig.NanoCpus` are reconciled to the generated/effective v9 values.
 

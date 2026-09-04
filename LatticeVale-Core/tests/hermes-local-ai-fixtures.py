@@ -3,7 +3,7 @@ from pathlib import Path
 import re, subprocess, tempfile, yaml
 ROOT=Path(__file__).resolve().parents[1]
 text=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
-m=re.search(r"python3 - data/hermes/config.yaml \"\$local_model\" \"\$local_context\" \"\$\(ollama_openai_base_url\)\" <<'PY_LOCAL_HERMES'\n(.*?)\nPY_LOCAL_HERMES", text, re.S)
+m=re.search(r"python3 - data/hermes/config.yaml \"\$local_model\" \"\$local_context\" \"\$\(local_text_openai_base_url\)\" <<'PY_LOCAL_HERMES'\n(.*?)\nPY_LOCAL_HERMES", text, re.S)
 assert m, 'Hermes local AI config generator not found'
 with tempfile.TemporaryDirectory() as td:
     root=Path(td); p=root/'data/hermes/config.yaml'; p.parent.mkdir(parents=True)
@@ -14,7 +14,7 @@ with tempfile.TemporaryDirectory() as td:
     assert cfg['model']=={'default':'qwen3.5:4b','provider':'custom','base_url':'http://ollama:11434/v1','context_length':8192}
     assert cfg['terminal']['cwd']=='/workspace' and cfg['other']['keep'] is True
 print('HERMES LOCAL AI FIXTURES: PASS')
-print('- local Ollama model block is correct')
+print('- selected local text backend model block is correct')
 print('- unrelated Hermes configuration is preserved')
 
 # Verifier must accept the memory-aware persisted context rather than requiring legacy 64K.

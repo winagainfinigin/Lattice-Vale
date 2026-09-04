@@ -12,7 +12,7 @@ body:
     id: version
     attributes:
       label: LatticeVale version
-      placeholder: 14.5.2
+      placeholder: 14.5.46
     validations:
       required: true
   - type: dropdown
@@ -75,3 +75,12 @@ body:
       description: For Kanban/skills include the relevant tool error plus task/profile context, but remove secrets, private room IDs/hostnames if sensitive, and private task content not required to reproduce the issue.
     validations:
       required: true
+
+  - type: textarea
+    id: resource_policy_report
+    attributes:
+      label: Resource policy report (if relevant)
+      description: Paste the secret-free resource-policy-report.txt for CPU/RAM/GPU/DirectML/Ollama resource issues. Do not paste .env, credentials, Matrix secrets, provider tokens, prompts, or backup contents.
+      render: text
+    validations:
+      required: false

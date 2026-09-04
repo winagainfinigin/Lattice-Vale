@@ -7,9 +7,9 @@ boot=(root/'linux/bootstrap.sh').read_text()
 audit=(root/'stack/state-audit.py').read_text()
 installer=(root/'Install-LatticeVale.ps1').read_text()
 
-assert "POLICY_VERSION=9" in cs
+assert "POLICY_VERSION=11" in cs
 assert './configure-stack.sh --refresh-resource-policy' in boot
-assert 'values.get("POLICY_VERSION") != "9"' in audit
+assert 'values.get("POLICY_VERSION") != "11"' in audit
 assert 'mem_mib <= 6144 )); then' in cs and 'reserve_pct=30' in cs
 assert 'mem_mib <= 12288 )) && [[ "$accel" == cpu ]] && managed_ollama_enabled' in cs
 assert 'reserve_pct=10' in cs

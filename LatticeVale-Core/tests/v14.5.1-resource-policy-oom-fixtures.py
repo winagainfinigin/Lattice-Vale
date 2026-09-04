@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v14.5.1 resource-policy v9 CPU/RAM and running-container OOM regression fixtures."""
+"""v14.5.1 resource-policy v11 CPU/RAM and running-container OOM regression fixtures."""
 from pathlib import Path
 import os
 import subprocess
@@ -9,7 +9,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
-assert version in {"14.5.1","14.5.2"}, version
+assert version in {"14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46'}, version
 
 cfg = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
 manage = (ROOT / "stack/manage.sh").read_text(encoding="utf-8")
@@ -18,13 +18,13 @@ audit = (ROOT / "stack/state-audit.py").read_text(encoding="utf-8")
 features = (REPO / "docs/FEATURES.md").read_text(encoding="utf-8")
 
 # v4 was proven to starve the central Hermes cgroup on a real ~9.7 GiB full stack.
-assert "POLICY_VERSION=9" in cfg
-assert 'saved_version" == 9' in cfg
+assert "POLICY_VERSION=11" in cfg
+assert 'statev POLICY_VERSION)" == 11' in cfg
 assert './configure-stack.sh --refresh-resource-policy' in manage
 assert './configure-stack.sh --refresh-resource-policy' in boot
-assert 'values.get("POLICY_VERSION") != "9"' in audit
+assert 'values.get("POLICY_VERSION") != "11"' in audit
 
-# Preserve the conservative <=6 GiB reserve. Policy v9 gives CPU-backed managed
+# Preserve the conservative <=6 GiB reserve. Policy v11 gives CPU-backed managed
 # Ollama extra hard-limit headroom on >6-12 GiB WSL VMs while retaining a bounded
 # host reserve; non-CPU Ollama and other >6-24 GiB shapes keep the 20% reserve.
 assert 'mem_mib <= 6144 )); then' in cfg and 'reserve_pct=30' in cfg
@@ -36,23 +36,23 @@ assert 'resource_hermes_floor_mib() {' in cfg
 assert "('honcho-api',4,512,3072)" in cfg
 assert 'requested_ollama_floor' in cfg
 assert 'resource_ollama_model_metrics() {' in cfg
-assert 'OLLAMA_MODEL_FLOOR_MIB=%s' in cfg
+assert '[OLLAMA_MODEL_FLOOR_MIB]="$ollama_floor_mib"' in cfg
 
 # Clean installs persist the exact generated service ceilings, while repair verification
 # compares those desired values with Docker HostConfig.Memory so a current YAML file
 # cannot hide an old live cgroup from a pre-v7 container.
 for marker in (
-    "LIMIT_%s_MIB=%s",
+    'resource_policy["LIMIT_${resource_state_key}_MIB"]="${mem_limits[$resource_state_svc]}"',
     "verify_live_resource_policy_limits() {",
     "{{.HostConfig.Memory}}",
     "docker compose config --format json",
     "live Docker CPU/RAM ceilings do not match the current adaptive resource policy",
-    "Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v9",
+    "Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v11",
 ):
     assert marker in cfg, marker
 
 # Execute the embedded allocator with the exact budget produced by the audited host:
-# 9946 MiB visible with CPU-backed managed Ollama: policy v9 uses a 10% reserve,
+# 9946 MiB visible with CPU-backed managed Ollama: policy v11 uses a 10% reserve,
 # giving 1491 MiB host headroom and an 8455 MiB managed-container budget.
 start = cfg.index("import sys\nbudget=int(sys.argv[1])", cfg.index("<<'PY_RESOURCE_PLAN'"))
 end = cfg.index("\nPY_RESOURCE_PLAN", start)
@@ -86,7 +86,7 @@ assert full["ollama"] == 5152, full
 # Regression target: v4 generated 544 MiB for Hermes; v6 left CPU Ollama too tight.
 assert full["hermes"] > 544 and full["ollama"] > 4128, full
 
-# Policy v9 makes the CPU-backed Ollama 4608 MiB floor a viability requirement.
+# Policy v11 makes the CPU-backed Ollama model floor a viability requirement.
 # A full selected stack therefore needs >=8320 MiB managed container budget.
 for budget in (768, 1280, 2868, 5735, 7958, 8831):
     r = plan_result(budget)
@@ -127,7 +127,7 @@ for marker in (
     assert marker in audit, marker
 
 # Execute the exact live-limit verifier with a fake Docker inspect. A v14.5.0-era
-# 544 MiB live Hermes cgroup must fail even when the desired v9 state says 1040 MiB;
+# 544 MiB live Hermes cgroup must fail even when the desired v11 state says 1040 MiB;
 # after Compose recreation to 1040 MiB it must pass. This is the repair-path regression
 # that the first v14.5.1 candidate did not cover.
 def between(text: str, start: str, end: str) -> str:
@@ -155,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix='lv151-live-limit-') as td_raw:
         encoding='utf-8',
     )
     docker.chmod(0o755)
-    (td / '.latticevale-resource-state').write_text('POLICY_VERSION=9\nMATRIX_PROFILE_GATEWAYS=0\nKANBAN_CONCURRENCY=1\nHERMES_MIN_MIB=1024\nLIMIT_HERMES_MIB=1040\nCPU_HERMES_MILLI=3000\n', encoding='utf-8')
+    (td / '.latticevale-resource-state').write_text('POLICY_VERSION=11\nMATRIX_PROFILE_GATEWAYS=0\nKANBAN_CONCURRENCY=1\nHERMES_MIN_MIB=1024\nLIMIT_HERMES_MIB=1040\nCPU_HERMES_MILLI=3000\n', encoding='utf-8')
     harness = td / 'harness.sh'
     harness.write_text(
         '#!/usr/bin/env bash\n'
@@ -193,5 +193,5 @@ with tempfile.TemporaryDirectory(prefix='lv151-live-limit-') as td_raw:
     overridden = subprocess.run(['bash', str(harness)], cwd=td, env=env, text=True, capture_output=True, timeout=10)
     assert overridden.returncode == 0, overridden.stdout + overridden.stderr
 
-assert "policy v9" in features.lower()
+assert "policy v11" in features.lower()
 print("v14.5.1 RESOURCE POLICY / OOM FIXTURES: PASS")

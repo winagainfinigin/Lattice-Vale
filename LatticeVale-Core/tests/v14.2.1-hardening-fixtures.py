@@ -13,10 +13,10 @@ install=(root/'installer/install.ps1').read_text(encoding='utf-8')
 verify=(root/'installer/verify-release.ps1').read_text(encoding='utf-8')
 shared=(root/'tools/ReleaseManifest.ps1').read_text(encoding='utf-8')
 generator=(root/'tools/New-SourceManifest.ps1').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}
-assert 'schema = 19' in ps
+assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
+assert 'schema = $compat.InstallOptionsSchema' in ps
 assert "ollamaAcceleration = $ollamaAcceleration" in ps
-assert "$options.Remove('ollamaAcceleration')" in ps and 'Legacy repair: preserving the existing Ollama image/runtime choice' in ps
+assert "$options.Remove('ollamaAcceleration')" in ps and 'Legacy same-line repair: preserving the existing Ollama image/runtime choice' in ps
 assert "containerResourceLimits = $containerResourceLimits" in ps
 assert "@('auto','cpu','nvidia','amd')" in ps
 assert 'install_nvidia_container_toolkit_if_needed' in boot
@@ -39,7 +39,7 @@ assert "grep -q '^SEARXNG_IMAGE=' .env || set_env" in conf
 assert 'ollama_accel_managed=false' in conf and "has(\"ollamaAcceleration\")" in conf
 assert 'LATTICEVALE_OLLAMA_IMAGE_AUTO' in conf and 'Preserving user-set OLLAMA_IMAGE=' in conf
 assert 'custom Ollama image override preserved' in audit
-assert 'model VRAM offload not independently measured' in audit
+assert 'GPU execution verified at runtime by ollama ps' in audit
 assert 'parsed_bootstrap_options=' in boot and 'PY_BOOTSTRAP_OPTIONS' in boot
 assert not any('grep -Eq' in line and 'honcho|hermesLocalAI' in line for line in boot.splitlines())
 assert 'containerResourceLimits' in conf
@@ -57,7 +57,7 @@ assert 'ReleaseManifest.ps1' in generator and 'Assert-LatticeValePortableRelease
 assert 'function Assert-PortableReleaseRelativePath' not in generator
 # Execute the generated resource-overlay function without Docker. This catches shell/YAML
 # generation regressions that static string checks cannot.
-start=conf.index('clamp_int() {')
+start=conf.index('resource_gpu_coordination() {')
 end=conf.index('\nchoose_ollama_context_length()', start)
 functions=conf[start:end].replace('/proc/meminfo', 'fake-meminfo')
 with tempfile.TemporaryDirectory() as td:
@@ -84,6 +84,7 @@ opt_text() { jq -r ".${1} // empty" install-options.json; }
 local_ai_enabled() { [[ "$(opt_bool honcho)" == true || "$(opt_bool hermesLocalAI)" == true ]]; }
 ollama_backend() { local value; value="$(opt_text ollamaBackend)"; [[ "$value" == managed || "$value" == windows-native ]] || value=managed; printf '%s' "$value"; }
 managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed ]]; }
+ollama_gpu_metrics() { printf '1:8192:8192:8192\n'; }
 ''' + functions + r'''
 cat > install-options.json <<'JSON_OPTIONS'
 {"matrix":true,"searxng":true,"qmd":true,"honcho":true,"hermesLocalAI":true,"ollamaBackend":"managed"}
@@ -131,6 +132,7 @@ opt_text() { jq -r ".${1} // empty" install-options.json; }
 local_ai_enabled() { [[ "$(opt_bool honcho)" == true || "$(opt_bool hermesLocalAI)" == true ]]; }
 ollama_backend() { local value; value="$(opt_text ollamaBackend)"; [[ "$value" == managed || "$value" == windows-native ]] || value=managed; printf '%s' "$value"; }
 managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed ]]; }
+ollama_gpu_metrics() { printf '1:8192:8192:8192\n'; }
 ''' + functions + r'''
 cat > install-options.json <<'JSON_OPTIONS'
 {"hermesLocalAI":true,"ollamaBackend":"managed"}

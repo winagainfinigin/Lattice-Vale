@@ -45,7 +45,11 @@ MATRIX_HOST_PORT="$(opt_port matrixLocalPort 8008)"
 SEARXNG_HOST_PORT="$(opt_port searxngLocalPort 8888)"
 HONCHO_HOST_PORT="$(opt_port honchoLocalPort 8000)"
 WINDOWS_OLLAMA_BRIDGE_PORT="$(opt_port windowsOllamaBridgePort 11435)"
+DIRECTML_PORT="$(opt_port directmlPort 11436)"
 local_ai_enabled() { [[ "$(opt_bool honcho)" == true || "$(opt_bool hermesLocalAI)" == true ]]; }
+local_text_backend() { local v; v="$(opt_text localTextBackend)"; [[ "$v" == ollama || "$v" == directml ]] || v=ollama; printf '%s' "$v"; }
+directml_text_enabled() { local_ai_enabled && [[ "$(local_text_backend)" == directml ]]; }
+directml_text_model() { local v; v="$(opt_text directmlTextModel)"; [[ -n "$v" ]] || v='Qwen/Qwen2.5-1.5B-Instruct'; printf '%s' "$v"; }
 
 ollama_backend() { local v; v="$(opt_text ollamaBackend)"; [[ "$v" == managed || "$v" == windows-native ]] || v=managed; printf '%s' "$v"; }
 managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed ]]; }
@@ -147,7 +151,7 @@ gpu_vram_mib() {
 
 ollama_model_artifact_mib() {
   local model="$1" pair size unit
-  pair="$(docker compose exec -T ollama ollama list 2>/dev/null | awk -v m="$model" 'NR>1 && $1==m {print $3, $4; exit}')"
+  pair="$(timeout --foreground --kill-after=2s 10s docker compose exec -T ollama ollama list 2>/dev/null | awk -v m="$model" 'NR>1 && $1==m {print $3, $4; exit}')"
   [[ -n "$pair" ]] || return 1
   read -r size unit <<<"$pair"
   [[ "$size" =~ ^[0-9]+([.][0-9]+)?$ ]] || return 1
@@ -168,12 +172,20 @@ show_hardware_summary() {
   echo "  WSL CPUs:              $cpus"
   [[ -n "$mem_mib" ]] && echo "  WSL RAM:               $((mem_mib/1024)) GiB (${mem_mib} MiB visible)"
   echo "  Resource policy:       $(if [[ "$(opt_bool containerResourceLimits)" == true ]]; then echo 'adaptive ceilings'; else echo 'LatticeVale ceilings disabled'; fi)"
-  local_ai_enabled || { echo '  Ollama:                not selected'; return 0; }
+  local_ai_enabled || { echo '  Local AI:              not selected'; return 0; }
+  echo "  Text backend:          $(local_text_backend)"
+  if directml_text_enabled; then
+    echo "  DirectML model:        $(directml_text_model)"
+    echo "  DirectML endpoint:     WSL-host Docker gateway:${DIRECTML_PORT} (container-only route)"
+    echo '  DirectML policy:       serial inference; 8192-token cap; 300s idle model unload'
+    if [[ -s data/directml/last-backend ]]; then echo "  Last text backend:     $(cat data/directml/last-backend 2>/dev/null || true)"; fi
+    echo "  Ollama fallback model: $(opt_text localTextModel)"
+  fi
   if windows_native_ollama_enabled; then
     local native_base native_version native_ps
     native_base="$(native_ollama_base_url 2>/dev/null || true)"
     echo '  Ollama backend:        native Windows Ollama via WSL-only relay'
-    echo "  Ollama model:          $(opt_text localTextModel)"
+    echo "  Ollama $(if directml_text_enabled; then printf fallback; else printf text; fi) model: $(opt_text localTextModel)"
     echo '  Acceleration config:   owned by native Windows Ollama (not modified by LatticeVale)'
     if [[ -n "$native_base" ]]; then
       native_version="$(curl -fsS --connect-timeout 2 --max-time 5 "$native_base/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)"
@@ -187,7 +199,7 @@ show_hardware_summary() {
   accel="$(env_value LATTICEVALE_OLLAMA_ACCELERATION "$(opt_text ollamaAcceleration)")"
   [[ -n "$accel" ]] || accel=cpu
   model="$(opt_text localTextModel)"
-  echo "  Ollama model:          ${model:-unknown}"
+  echo "  Ollama $(if directml_text_enabled; then printf fallback; else printf text; fi) model: ${model:-unknown}"
   echo "  Acceleration config:   $accel"
   if vram_mib="$(gpu_vram_mib "$accel" 2>/dev/null)"; then
     echo "  Detected GPU VRAM:     $((vram_mib/1024)) GiB (${vram_mib} MiB aggregate)"
@@ -202,7 +214,7 @@ show_hardware_summary() {
   elif [[ "$accel" == nvidia || "$accel" == amd ]]; then
     echo '  Detected GPU VRAM:     unavailable; GPU plumbing may still be configured.'
   fi
-  offload_line="$(docker compose exec -T ollama ollama ps 2>/dev/null | awk -v m="$model" 'NR>1 && $1==m {print; exit}')"
+  offload_line="$(timeout --foreground --kill-after=2s 10s docker compose exec -T ollama ollama ps 2>/dev/null | awk -v m="$model" 'NR>1 && $1==m {print; exit}' || true)"
   if [[ -n "$offload_line" ]]; then
     echo "  Loaded-model runtime:  $offload_line"
   else
@@ -381,6 +393,34 @@ control_windows_native_services() {
   esac
 }
 
+control_directml_gateway() {
+  local verb="$1"
+  directml_text_enabled || return 0
+  [[ -x ./directml-gateway.sh ]] || { echo 'DirectML is selected but directml-gateway.sh is missing. Rerun the Windows installer and choose Resume / repair.' >&2; return 1; }
+  case "$verb" in
+    start) timeout --foreground --kill-after=10s 120s ./directml-gateway.sh start >/dev/null ;;
+    stop) timeout --foreground --kill-after=5s 60s ./directml-gateway.sh stop >/dev/null 2>&1 || true ;;
+    restart) timeout --foreground --kill-after=10s 180s ./directml-gateway.sh restart >/dev/null ;;
+    install) timeout --foreground --kill-after=20s 3900s ./directml-gateway.sh install ;;
+    test) timeout --foreground --kill-after=20s 3600s ./directml-gateway.sh self-test ;;
+    *) echo "Unknown DirectML gateway control verb: $verb" >&2; return 2 ;;
+  esac
+}
+
+ensure_directml_fallback_ready() {
+  directml_text_enabled || return 0
+  if managed_ollama_enabled; then
+    timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --no-build ollama >/dev/null
+    for _ in $(seq 1 60); do
+      timeout --foreground --kill-after=3s 8s docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null | grep -qx healthy && return 0
+      sleep 1
+    done
+    echo 'Managed Ollama fallback did not become healthy before DirectML startup.' >&2
+    return 1
+  fi
+  control_windows_native_services start
+}
+
 pull_ollama_model() {
   local model="$1" base rc=0
   if windows_native_ollama_enabled; then
@@ -496,6 +536,17 @@ status() {
       printf '%-12s OK (%s; native Windows)\n' Ollama "$(opt_text localTextModel)"
     else
       printf '%-12s FAILED (native Windows relay/API unavailable)\n' Ollama
+    fi
+  fi
+  if directml_text_enabled; then
+    directml_health="$(timeout --foreground --kill-after=2s 8s ./directml-gateway.sh health 2>/dev/null || true)"
+    if [[ -n "$directml_health" ]] && jq -e . >/dev/null 2>&1 <<<"$directml_health"; then
+      directml_ready="$(jq -r '.directml_ready // false' <<<"$directml_health")"
+      fallback_ready="$(jq -r '.fallback_ready // false' <<<"$directml_health")"
+      last_backend="$(cat data/directml/last-backend 2>/dev/null || true)"
+      printf '%-12s OK (model=%s; DirectML=%s; fallback=%s%s)\n' DirectML "$(directml_text_model)" "$directml_ready" "$fallback_ready" "$(if [[ -n "$last_backend" ]]; then printf '; last=%s' "$last_backend"; fi)"
+    else
+      printf '%-12s FAILED (gateway unavailable)\n' DirectML
     fi
   fi
   [[ "$(opt_bool honcho)" == true ]] && check_http Honcho http://127.0.0.1:${HONCHO_HOST_PORT}/health hermes-honcho-api
@@ -1023,7 +1074,7 @@ backup() {
   fi
   local -a items=()
   for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-managed-profiles .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
-    compose.yaml config secrets logs data/hermes data/qmd data/synapse data/tailscale data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
+    compose.yaml directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
     [[ -e "$p" ]] && items+=("$p")
   done
   [[ "$matrix_dumped" == false && -e data/synapse-db ]] && items+=(data/synapse-db)
@@ -1076,6 +1127,8 @@ case "$cmd" in
     ensure_docker_for_user
     refresh_adaptive_resource_policy
     control_windows_native_services start
+    ensure_directml_fallback_ready
+    control_directml_gateway start
     if [[ "$(opt_bool matrix)" == true ]]; then ensure_matrix_server_online_manage; fi
     docker compose up -d --pull never --no-build
     start_selected_matrix_profile_gateways
@@ -1083,7 +1136,7 @@ case "$cmd" in
     control_windows_bridge start
     status
     ;;
-  stop) docker compose stop; control_windows_bridge stop; control_windows_native_services stop ;;
+  stop) control_directml_gateway stop; docker compose stop; control_windows_bridge stop; control_windows_native_services stop ;;
   logs)
     if [[ -n "${2:-}" ]]; then docker compose logs --tail=200 -f "$2"; else docker compose logs --tail=100 -f; fi ;;
   restart)
@@ -1094,6 +1147,10 @@ case "$cmd" in
       docker compose up -d --pull never --no-build
     fi
     if [[ -n "${2:-}" ]]; then docker compose restart "$2"; else docker compose restart; fi
+    if [[ -z "${2:-}" || "${2:-}" == ollama || "${2:-}" == hermes || "${2:-}" == honcho-api || "${2:-}" == honcho-deriver ]]; then
+      ensure_directml_fallback_ready
+      control_directml_gateway restart
+    fi
     if [[ -z "${2:-}" || "${2:-}" == hermes || "${2:-}" == synapse || "${2:-}" == synapse-db ]]; then
       start_selected_matrix_profile_gateways
       wait_hermes_gateway_surfaces_manage 'stack restart/gateway reconciliation'
@@ -1139,6 +1196,12 @@ case "$cmd" in
       fi
       pull_ollama_model "$(opt_text localTextModel)"
       if [[ "$(opt_bool honcho)" == true ]]; then pull_ollama_model "$(opt_text localEmbeddingModel)"; fi
+      if directml_text_enabled; then
+        control_directml_gateway install
+        ensure_directml_fallback_ready
+        control_directml_gateway restart
+        control_directml_gateway test || { echo 'DirectML update self-test failed and no fallback response was available.' >&2; exit 1; }
+      fi
     fi
     status ;;
   dashboard-info)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v14.5.1 policy-v9 model-aware Ollama / Honcho timeout / pressure diagnostics."""
+"""v14.5.1-derived policy-v11 model-aware Ollama / Honcho timeout / pressure diagnostics."""
 from pathlib import Path
 import json, re, subprocess, sys, tempfile
 
@@ -8,17 +8,17 @@ cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2'}
+assert (ROOT/'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
 
 for marker in (
-    'POLICY_VERSION=9', 'ollama_model_manifest_mib() {', 'resource_ollama_model_metrics() {',
-    'OLLAMA_TEXT_ARTIFACT_MIB=%s', 'OLLAMA_EMBED_ARTIFACT_MIB=%s', 'OLLAMA_CONTEXT_LENGTH=%s',
-    'OLLAMA_MODEL_FLOOR_MIB=%s', 'reconcile_model_aware_ollama_resources() {',
+    'POLICY_VERSION=11', 'ollama_model_manifest_mib() {', 'resource_ollama_model_metrics() {',
+    '[OLLAMA_TEXT_ARTIFACT_MIB]="$ollama_text_mib"', '[OLLAMA_EMBED_ARTIFACT_MIB]="$ollama_embed_mib"', '[OLLAMA_CONTEXT_LENGTH]="$ollama_context"',
+    '[OLLAMA_MODEL_FLOOR_MIB]="$ollama_floor_mib"', 'reconcile_model_aware_ollama_resources() {',
     'Managed Ollama model artifacts are now measurable', 'requested_ollama_floor',
 ):
     assert marker in cfg, marker
-assert 'saved_version" == 9' in cfg
-assert 'values.get("POLICY_VERSION") != "9"' in audit
+assert 'statev POLICY_VERSION)" == 11' in cfg
+assert 'values.get("POLICY_VERSION") != "11"' in audit
 assert './configure-stack.sh --refresh-resource-policy' in manage
 assert './configure-stack.sh --refresh-resource-policy' in boot
 
@@ -39,9 +39,9 @@ with tempfile.TemporaryDirectory(prefix='lv151-model-manifest-') as td:
     assert p.returncode==0,p.stderr
     mib=int(p.stdout.strip())
     assert 3400 <= mib <= 3600,mib
-    # Policy-v9 CPU formula: artifact + >=1GiB transient + context/16, round 256 MiB.
+    # Policy-v11 CPU formula: artifact + >=1GiB transient + context/16, round 256 MiB.
     ctx=8192; transient=max(1024,mib//4); ctx_over=max(256,min(2048,(ctx+15)//16))
-    floor=max(4608,((mib+transient+ctx_over+255)//256)*256)
+    floor=max(4096,((mib+transient+ctx_over+255)//256)*256)
     assert floor >= 5120,(mib,floor)
 
 # The post-download reconciliation must happen before embedding verification can load a model.

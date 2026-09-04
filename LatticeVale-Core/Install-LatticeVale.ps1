@@ -28,9 +28,11 @@ function Show-NativeOllamaResourceWarning {
     Write-Host 'Native Ollama can keep model weights and context memory loaded in GPU VRAM and system RAM after a request. Large or multiple loaded models can noticeably reduce memory available to games and other applications.' -ForegroundColor Yellow
     Write-Host 'To use conservative user-level limits, run these in Windows PowerShell:' -ForegroundColor White
     Write-Host '[Environment]::SetEnvironmentVariable("OLLAMA_MAX_LOADED_MODELS", "1", "User")' -ForegroundColor Cyan
+    Write-Host '[Environment]::SetEnvironmentVariable("OLLAMA_NUM_PARALLEL", "1", "User")' -ForegroundColor Cyan
     Write-Host '[Environment]::SetEnvironmentVariable("OLLAMA_KEEP_ALIVE", "2m", "User")' -ForegroundColor Cyan
     Write-Host 'Get-Process ollama* -ErrorAction SilentlyContinue | Stop-Process -Force' -ForegroundColor Cyan
-    Write-Host 'Then reopen Ollama from the Windows Start menu. The first setting limits concurrent loaded models to one; the second lets an idle model unload after about two minutes unless a request overrides keep_alive.' -ForegroundColor White
+    Write-Host 'Then reopen Ollama from the Windows Start menu. These settings keep one loaded model, one parallel request, and let an idle model unload after about two minutes unless a request overrides keep_alive.' -ForegroundColor White
+    Write-Host 'Ollama also supports OLLAMA_GPU_OVERHEAD (bytes reserved per GPU) when a native-GPU VRAM reserve is needed. LatticeVale explains this control but does not silently set a global Windows value because native Ollama remains user-owned.' -ForegroundColor White
     Write-Host 'These settings affect the separately installed Windows Ollama application, not LatticeVale-managed Docker Ollama.' -ForegroundColor DarkGray
     Write-Host '*** END NATIVE WINDOWS OLLAMA WARNING ***' -ForegroundColor Yellow
     Write-Host ''
@@ -309,6 +311,328 @@ function Write-OllamaGpuPrerequisiteSummary([object]$GpuState) {
     }
 }
 
+
+function Test-DirectMLWslPath(
+    [string]$Name,
+    [string]$User,
+    [string]$Path,
+    [string]$TestFlag = '-e'
+) {
+    # DirectML preflight intentionally uses a direct `test` invocation instead of the
+    # broader Ollama GPU prerequisite parser. A normal-user miss/failure is retried as
+    # root so a transient/user-context probe cannot become a false "DXG missing" result.
+    $result = [ordered]@{
+        ProbeSucceeded = $false
+        Present = $false
+        RootRetried = $false
+        Detail = ''
+    }
+    $attempt = Invoke-WslDirectCapture $Name $User 'test' @($TestFlag, $Path)
+    if ($attempt.Success) {
+        $result.ProbeSucceeded = $true
+        $result.Present = $true
+        return [pscustomobject]$result
+    }
+
+    # Exit 1 is the ordinary `test` "not present" result, but retry as root anyway:
+    # directory traversal/ACL differences or a cold WSL startup must not produce a false
+    # negative in the questionnaire.
+    $result.RootRetried = $true
+    $rootAttempt = Invoke-WslDirectCapture $Name 'root' 'test' @($TestFlag, $Path)
+    if ($rootAttempt.Success) {
+        $result.ProbeSucceeded = $true
+        $result.Present = $true
+        return [pscustomobject]$result
+    }
+    if (-not $rootAttempt.TimedOut -and $rootAttempt.ExitCode -eq 1) {
+        $result.ProbeSucceeded = $true
+        $result.Present = $false
+        return [pscustomobject]$result
+    }
+
+    $detail = Get-SafeDiagnosticExcerpt $rootAttempt.Text
+    if (-not $detail) { $detail = Get-SafeDiagnosticExcerpt $attempt.Text }
+    $result.Detail = if ($detail) { $detail } else { 'WSL path probe returned an unexpected failure.' }
+    return [pscustomobject]$result
+}
+
+function Get-DirectMLWslPrerequisites([string]$Name, [string]$User) {
+    $dxg = Test-DirectMLWslPath $Name $User '/dev/dxg' '-e'
+    $d3d12 = Test-DirectMLWslPath $Name $User '/usr/lib/wsl/lib/libd3d12.so' '-e'
+    $d3d12core = Test-DirectMLWslPath $Name $User '/usr/lib/wsl/lib/libd3d12core.so' '-e'
+    $dxcore = Test-DirectMLWslPath $Name $User '/usr/lib/wsl/lib/libdxcore.so' '-e'
+
+    $state = [ordered]@{
+        ProbeSucceeded = [bool]$dxg.ProbeSucceeded
+        DxgPresent = [bool]$dxg.Present
+        DxgRootRetried = [bool]$dxg.RootRetried
+        D3d12Present = [bool]$d3d12.Present
+        D3d12CorePresent = [bool]$d3d12core.Present
+        DxCorePresent = [bool]$dxcore.Present
+        LibraryProbeSucceeded = [bool]($d3d12.ProbeSucceeded -and $d3d12core.ProbeSucceeded -and $dxcore.ProbeSucceeded)
+        BridgeLibrariesReady = [bool]($d3d12.Present -and $d3d12core.Present -and $dxcore.Present)
+        TensorProbeAvailable = $false
+        TensorProbeSucceeded = $false
+        TensorProbeDetail = ''
+        Detail = [string]$dxg.Detail
+    }
+
+    # On Resume / repair, use an already-created installer-owned DirectML environment as
+    # an additional real execution signal. Fresh installs normally have no venv yet, so
+    # absence is not an error and does not block selection.
+    $linuxHome = Get-LinuxUserHome $Name $User
+    if (-not [string]::IsNullOrWhiteSpace($linuxHome)) {
+        $python = "$linuxHome/hermes-stack/data/directml/venv/bin/python"
+        $pythonProbe = Test-DirectMLWslPath $Name $User $python '-x'
+        if ($pythonProbe.ProbeSucceeded -and $pythonProbe.Present) {
+            $state.TensorProbeAvailable = $true
+            $code = 'import torch,torch_directml; d=torch_directml.device(); x=(torch.tensor([1.0]).to(d)+2.0).cpu().item(); raise SystemExit(0 if abs(float(x)-3.0)<0.001 else 1)'
+            $tensor = Invoke-WslDirectCapture $Name $User $python @('-c', $code) 90
+            if ($tensor.Success) {
+                $state.TensorProbeSucceeded = $true
+            } else {
+                $state.TensorProbeDetail = Get-SafeDiagnosticExcerpt $tensor.Text
+                if (-not $state.TensorProbeDetail) { $state.TensorProbeDetail = 'existing DirectML tensor probe failed without diagnostic output' }
+            }
+        }
+    }
+    return [pscustomobject]$state
+}
+
+
+function Get-LatticeValeGpuVendor([string]$Name) {
+    $n = ([string]$Name).ToLowerInvariant()
+    if ($n -match 'amd|radeon|advanced micro devices') { return 'amd' }
+    if ($n -match 'nvidia|geforce|quadro|tesla|rtx|gtx') { return 'nvidia' }
+    if ($n -match 'intel|arc|iris|uhd graphics|hd graphics') { return 'intel' }
+    if ($n -match 'qualcomm|adreno') { return 'qualcomm' }
+    return 'other'
+}
+
+function Get-WindowsGpuInventory {
+    $items = [System.Collections.Generic.List[object]]::new()
+    try {
+        foreach ($gpu in @(Get-CimInstance Win32_VideoController -ErrorAction Stop)) {
+            $name = ([string]$gpu.Name).Trim()
+            if ([string]::IsNullOrWhiteSpace($name)) { continue }
+            if ($name -match 'Microsoft Basic|Remote Display|Indirect Display') { continue }
+            $vendor = Get-LatticeValeGpuVendor $name
+            $items.Add([pscustomobject]@{
+                Name = $name
+                Vendor = $vendor
+                PnpDeviceId = [string]$gpu.PNPDeviceID
+            })
+        }
+    } catch {
+        Write-Warning "Windows GPU inventory probe failed: $($_.Exception.Message)"
+    }
+    return $items.ToArray()
+}
+
+function Get-LatticeValeWslGpuComponentInventory([string]$Name, [string]$User) {
+    $linuxHome = Get-LinuxUserHome $Name $User
+    $directmlPython = if ([string]::IsNullOrWhiteSpace($linuxHome)) { '' } else { "$linuxHome/hermes-stack/data/directml/venv/bin/python" }
+    $script = @'
+set -u
+pkg_ready() {
+  local pkg="$1"
+  dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q 'ok installed'
+}
+directml_pkgs=1
+for pkg in python3-venv libblas3 libomp5 liblapack3; do
+  pkg_ready "$pkg" || directml_pkgs=0
+done
+nvidia_ctk=0
+command -v nvidia-ctk >/dev/null 2>&1 && nvidia_ctk=1
+printf 'directml_packages=%s\n' "$directml_pkgs"
+printf 'nvidia_ctk=%s\n' "$nvidia_ctk"
+'@
+    $probe = Invoke-WslDirectCapture $Name $User 'bash' @('-lc', $script)
+    $state = [ordered]@{
+        ProbeSucceeded = $false
+        DirectMLPackagesReady = $false
+        DirectMLVenvPresent = $false
+        NvidiaToolkitPresent = $false
+    }
+    if ($probe.Success) {
+        $state.ProbeSucceeded = $true
+        foreach ($line in ($probe.StdOut -split "`r?`n")) {
+            if ($line -notmatch '^([^=]+)=(.*)$') { continue }
+            switch ($Matches[1]) {
+                'directml_packages' { $state.DirectMLPackagesReady = ($Matches[2] -eq '1') }
+                'nvidia_ctk' { $state.NvidiaToolkitPresent = ($Matches[2] -eq '1') }
+            }
+        }
+    }
+    if (-not [string]::IsNullOrWhiteSpace($directmlPython)) {
+        $venvProbe = Test-DirectMLWslPath $Name $User $directmlPython '-x'
+        $state.DirectMLVenvPresent = [bool]($venvProbe.ProbeSucceeded -and $venvProbe.Present)
+    }
+    return [pscustomobject]$state
+}
+
+function Get-LatticeValeGpuAccelerationPlan([string]$Name, [string]$User) {
+    $inventory = @(Get-WindowsGpuInventory)
+    $recognized = @($inventory | Where-Object { $_.Vendor -in @('amd','nvidia','intel','qualcomm') })
+    $vendors = @($recognized | ForEach-Object { $_.Vendor } | Select-Object -Unique)
+    $directml = Get-DirectMLWslPrerequisites $Name $User
+    $ollama = Get-OllamaWslGpuPrerequisites $Name $User
+    $components = Get-LatticeValeWslGpuComponentInventory $Name $User
+
+    $backend = 'ollama'
+    $ollamaAcceleration = 'auto'
+    $reason = 'No verified GPU acceleration path was found in the selected WSL distro, so stable Ollama with CPU fallback is the safest default.'
+
+    if (($vendors -contains 'nvidia') -and $ollama.NvidiaWslReady) {
+        $backend = 'ollama'
+        $ollamaAcceleration = 'nvidia'
+        $reason = 'An NVIDIA GPU is detected and WSL nvidia-smi is working. Managed Ollama NVIDIA acceleration is the preferred stable path; LatticeVale can install/configure the NVIDIA Container Toolkit if it is missing.'
+    } elseif (($vendors -contains 'amd') -and $ollama.AmdDockerReady) {
+        $backend = 'ollama'
+        $ollamaAcceleration = 'amd'
+        $reason = 'An AMD GPU is detected and the selected WSL distro exposes /dev/kfd plus /dev/dri. Managed Ollama ROCm is the preferred verified container path.'
+    } elseif (($recognized.Count -gt 0) -and $directml.ProbeSucceeded -and $directml.DxgPresent -and $directml.BridgeLibrariesReady) {
+        $backend = 'directml'
+        $ollamaAcceleration = 'auto'
+        if ($vendors -contains 'amd') {
+            $reason = 'An AMD/Radeon GPU is detected and the WSL DirectX bridge is healthy, while the managed ROCm container path is not fully verified. DirectML is recommended so the GPU still has an installer-managed acceleration path.'
+        } elseif ($vendors -contains 'intel') {
+            $reason = 'An Intel GPU is detected and the WSL DirectX bridge is healthy. DirectML is recommended because it is the broad cross-vendor DirectX 12 path supported by this release.'
+        } elseif ($vendors -contains 'qualcomm') {
+            $reason = 'A Qualcomm/Adreno GPU is detected and the WSL DirectX bridge is healthy. DirectML is the supported cross-vendor acceleration path for this hardware class.'
+        } else {
+            $reason = 'A DirectX 12 GPU and healthy WSL DirectML bridge were detected. DirectML is recommended because the vendor-specific managed Ollama GPU path is not currently verified.'
+        }
+    } elseif (($vendors -contains 'nvidia') -and $directml.ProbeSucceeded -and $directml.DxgPresent) {
+        $backend = 'directml'
+        $ollamaAcceleration = 'auto'
+        $reason = 'An NVIDIA GPU is visible through /dev/dxg but the CUDA/nvidia-smi WSL path is not verified. DirectML is the best available GPU attempt; Ollama remains the fallback.'
+    }
+
+    return [pscustomobject]@{
+        Inventory = $recognized
+        Vendors = $vendors
+        DirectML = $directml
+        Ollama = $ollama
+        Components = $components
+        RecommendedTextBackend = $backend
+        RecommendedOllamaAcceleration = $ollamaAcceleration
+        TextBackendDefault = $(if ($backend -eq 'directml') { 2 } else { 1 })
+        OllamaAccelerationDefault = $(switch ($ollamaAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default {1} })
+        Reason = $reason
+    }
+}
+
+function Write-LatticeValeGpuAccelerationPlan([object]$Plan) {
+    $gpuNames = @($Plan.Inventory | ForEach-Object { "$($_.Name) [$($_.Vendor)]" })
+    if ($gpuNames.Count -gt 0) {
+        Write-Info ('Detected Windows GPU(s): ' + ($gpuNames -join '; '))
+    } else {
+        Write-Info 'No recognized AMD/NVIDIA/Intel/Qualcomm Windows display adapter was detected; CPU-safe defaults remain available.'
+    }
+    $backendLabel = if ($Plan.RecommendedTextBackend -eq 'directml') { 'PyTorch DirectML gateway' } else { 'Ollama' }
+    Write-Info "GPU-aware recommendation: $backendLabel. $($Plan.Reason)"
+
+    if ($Plan.Components.ProbeSucceeded) {
+        $directmlPackages = if ($Plan.Components.DirectMLPackagesReady) { 'installed/reusable' } else { 'missing; LatticeVale will install them if DirectML is selected' }
+        $directmlVenv = if ($Plan.Components.DirectMLVenvPresent) { 'existing installer-owned venv detected and will be reused if healthy' } else { 'installer-owned venv will be created if DirectML is selected' }
+        $nvidiaToolkit = if ($Plan.Components.NvidiaToolkitPresent) { 'installed/reusable' } else { 'not detected; LatticeVale will install/configure it only if NVIDIA managed Ollama is selected and WSL nvidia-smi is healthy' }
+        Write-Info "WSL acceleration components: DirectML base packages=$directmlPackages; DirectML environment=$directmlVenv; NVIDIA Container Toolkit=$nvidiaToolkit."
+    }
+    if ($Plan.Ollama.AmdDockerReady) {
+        Write-Info 'AMD managed-Ollama ROCm devices are already exposed by WSL. LatticeVale uses the pinned Ollama ROCm container image; it does not replace the Windows/host display driver.'
+    } elseif (($Plan.Vendors -contains 'amd') -and $Plan.DirectML.DxgPresent) {
+        Write-Info 'AMD note: /dev/dxg is available but the managed ROCm container devices are not. LatticeVale will not fabricate /dev/kfd; DirectML is offered so compatible Radeon systems can still use the GPU.'
+    }
+}
+
+function Select-LatticeValeDirectMLGpu(
+    [string]$Name,
+    [string]$User,
+    [string]$SavedAdapterName = '',
+    [string]$SavedVendor = ''
+) {
+    $wslState = Get-DirectMLWslPrerequisites $Name $User
+    if (-not $wslState.ProbeSucceeded) {
+        Write-Warning "The DirectML /dev/dxg probe could not complete inside the selected Ubuntu distro. This is a probe failure, not proof that /dev/dxg is absent.$(if ($wslState.Detail) { ' ' + $wslState.Detail } else { '' })"
+        $choice = Read-MenuExplicit 'DirectML WSL GPU support could not be verified. Choose how to continue' @(
+            'Use Ollama instead (recommended until the probe succeeds)',
+            'Keep DirectML selected; Resume / repair will probe again'
+        )
+        if ($choice -eq 1) {
+            return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor='' }
+        }
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$SavedAdapterName; Vendor=$SavedVendor }
+    }
+    if (-not $wslState.DxgPresent) {
+        Write-Warning 'The selected Ubuntu distro was probed directly and /dev/dxg is not present. PyTorch DirectML in WSL2 requires the Windows GPU bridge.'
+        $choice = Read-MenuExplicit 'DirectML GPU bridge is currently unavailable. Choose how to continue' @(
+            'Use Ollama instead (recommended)',
+            'Keep DirectML selected; Resume / repair will probe again after WSL GPU support is fixed'
+        )
+        if ($choice -eq 1) {
+            return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor='' }
+        }
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$SavedAdapterName; Vendor=$SavedVendor }
+    }
+
+    $libraryState = "libd3d12=$($wslState.D3d12Present), libd3d12core=$($wslState.D3d12CorePresent), libdxcore=$($wslState.DxCorePresent)"
+    Write-Info "DirectML WSL preflight: /dev/dxg=present$(if ($wslState.DxgRootRetried) { ' (confirmed by root retry)' } else { '' }); $libraryState."
+    if ($wslState.LibraryProbeSucceeded -and -not $wslState.BridgeLibrariesReady) {
+        Write-Warning "WSL exposes /dev/dxg, but one or more Windows DirectX bridge libraries are missing from /usr/lib/wsl/lib ($libraryState). DirectML may not activate until WSL/WSLg GPU libraries are repaired."
+    } elseif (-not $wslState.LibraryProbeSucceeded) {
+        Write-Warning "The DirectX bridge-library probe was inconclusive ($libraryState). /dev/dxg itself is present, so LatticeVale will continue and the isolated DirectML runtime probe remains authoritative."
+    }
+    if ($wslState.TensorProbeAvailable) {
+        if ($wslState.TensorProbeSucceeded) {
+            Write-Info 'Existing isolated DirectML environment passed a real tensor execution probe.'
+        } else {
+            Write-Warning "An existing isolated DirectML environment was found but its real tensor probe failed. Resume / repair will rebuild/retry the installer-owned environment and Ollama fallback remains available.$(if ($wslState.TensorProbeDetail) { ' ' + $wslState.TensorProbeDetail } else { '' })"
+        }
+    }
+
+    $inventory = @(Get-WindowsGpuInventory)
+    $supported = @($inventory | Where-Object { $_.Vendor -in @('amd','nvidia','intel','qualcomm') })
+    if ($supported.Count -gt 0) {
+        Write-Info ('Windows GPU detection: ' + (($supported | ForEach-Object { "$($_.Name) [$($_.Vendor)]" }) -join '; '))
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($SavedAdapterName)) {
+        $saved = @($supported | Where-Object { $_.Name -eq $SavedAdapterName })
+        if ($saved.Count -eq 1) {
+            Write-Info "DirectML adapter preserved: $($saved[0].Name) [$($saved[0].Vendor)]."
+            return [pscustomobject]@{ UseDirectML=$true; AdapterName=$saved[0].Name; Vendor=$saved[0].Vendor }
+        }
+    }
+
+    if ($supported.Count -eq 1) {
+        Write-Info "DirectML adapter auto-selected: $($supported[0].Name) [$($supported[0].Vendor)]."
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$supported[0].Name; Vendor=$supported[0].Vendor }
+    }
+
+    if ($supported.Count -gt 1) {
+        $labels = @($supported | ForEach-Object { "$($_.Name) [$($_.Vendor)]" })
+        $idx = Read-MenuExplicit 'Multiple DirectML-capable Windows GPUs were detected. Choose the adapter LatticeVale should use' $labels
+        $picked = $supported[$idx - 1]
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$picked.Name; Vendor=$picked.Vendor }
+    }
+
+    Write-Warning 'Windows GPU vendor detection did not find a recognized AMD, NVIDIA, Intel, or Qualcomm display adapter.'
+    $manual = Read-MenuExplicit 'Select your GPU vendor, or use Ollama instead' @(
+        'AMD / Radeon',
+        'NVIDIA / GeForce',
+        'Intel / Arc / Iris',
+        'Qualcomm / Adreno',
+        'Use Ollama instead'
+    )
+    if ($manual -eq 5) {
+        return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor='' }
+    }
+    $vendor = @('amd','nvidia','intel','qualcomm')[$manual - 1]
+    Write-Info "DirectML vendor recorded from explicit user selection: $vendor. Runtime adapter enumeration will still fail closed if no matching DirectML device is available."
+    return [pscustomobject]@{ UseDirectML=$true; AdapterName=''; Vendor=$vendor }
+}
+
 function Get-WindowsNativeOllamaState {
     # Treat installation discovery, API readiness, and WSL bridge readiness as separate
     # facts. Ollama's Windows installer may use a custom /DIR location and OLLAMA_HOST
@@ -327,7 +651,7 @@ function Get-WindowsNativeOllamaState {
         Detail = ''
     }
 
-    $candidates = New-Object System.Collections.Generic.List[string]
+    $candidates = [System.Collections.Generic.List[string]]::new()
     $addCandidate = {
         param([string]$Path)
         if ([string]::IsNullOrWhiteSpace($Path)) { return }
@@ -373,7 +697,7 @@ function Get-WindowsNativeOllamaState {
     # Bounded fallback discovery: inspect only conventional application roots and only
     # Ollama-named immediate child directories. Never recurse through user data, whole
     # drives, arbitrary mounted volumes, or unrelated application trees.
-    $scanRoots = New-Object System.Collections.Generic.List[string]
+    $scanRoots = [System.Collections.Generic.List[string]]::new()
     foreach ($root in @(
         $env:LOCALAPPDATA,
         (Join-Path $env:LOCALAPPDATA 'Programs'),
@@ -452,10 +776,10 @@ function Get-WindowsNativeOllamaState {
     # scopes. Non-loopback OLLAMA_HOST values are recognized as configuration, but are not
     # adopted for LatticeVale's WSL-only relay because that relay intentionally targets a
     # Windows-local endpoint rather than a LAN listener.
-    $probeEndpoints = New-Object System.Collections.Generic.List[string]
+    $probeEndpoints = [System.Collections.Generic.List[string]]::new()
     $probeEndpoints.Add('http://127.0.0.1:11434')
     $probeEndpoints.Add('http://localhost:11434')
-    $configuredHosts = New-Object System.Collections.Generic.List[string]
+    $configuredHosts = [System.Collections.Generic.List[string]]::new()
     foreach ($scope in @('Process','User','Machine')) {
         try {
             $target = switch ($scope) { 'User' { [EnvironmentVariableTarget]::User }; 'Machine' { [EnvironmentVariableTarget]::Machine }; default { [EnvironmentVariableTarget]::Process } }
@@ -763,7 +1087,7 @@ function Get-WslIpv4Candidates([string]$Name) {
     # valid WSL network into an empty probe result under Windows process reserialization.
     $probe = Invoke-WslDirectCapture $Name '' 'ip' @('-4','-o','addr','show','scope','global') 15
     if (-not $probe.Success) { return @() }
-    $result = New-Object System.Collections.Generic.List[string]
+    $result = [System.Collections.Generic.List[string]]::new()
     foreach ($line in @($probe.StdOut -split "`r?`n")) {
         $tokens = @((([string]$line).Trim()) -split '\s+')
         for ($i = 0; $i -lt ($tokens.Count - 1); $i++) {
@@ -782,7 +1106,7 @@ function Get-WslDefaultIpv4GatewayCandidates([string]$Name) {
     # ip directly and parse tokens in PowerShell; do not depend on shell pipelines.
     $probe = Invoke-WslDirectCapture $Name '' 'ip' @('-4','route','show','default') 15
     if (-not $probe.Success) { return @() }
-    $result = New-Object System.Collections.Generic.List[string]
+    $result = [System.Collections.Generic.List[string]]::new()
     foreach ($line in @($probe.StdOut -split "`r?`n")) {
         $tokens = @((([string]$line).Trim()) -split '\s+')
         if ($tokens.Count -lt 3 -or $tokens[0] -ne 'default') { continue }
@@ -824,7 +1148,7 @@ function Get-WindowsWslAdapterIpv4Candidates([string]$Name) {
             }
         } catch { }
     }
-    $result = New-Object System.Collections.Generic.List[string]
+    $result = [System.Collections.Generic.List[string]]::new()
     try {
         foreach ($entry in @(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue)) {
             $candidate = ([string]$entry.IPAddress).Trim()
@@ -1269,7 +1593,7 @@ function Get-LatticeValeNativeBridgeCapability([string]$Name, [object]$OllamaSta
     $gatewayFailure = ''
     $routeCandidates = @(Get-WslDefaultIpv4GatewayCandidates $Name)
 
-    $natCandidates = New-Object System.Collections.Generic.List[string]
+    $natCandidates = [System.Collections.Generic.List[string]]::new()
     foreach ($routeCandidate in $routeCandidates) {
         if ((Test-LatticeValeBridgeIpv4 $routeCandidate) -and -not $natCandidates.Contains($routeCandidate)) { $natCandidates.Add($routeCandidate) }
     }
@@ -1386,6 +1710,12 @@ function Test-ManagedLatticeValeStackForUser([string]$Name, [string]$User) {
     if (-not $coreProbe.Success) { return $false }
     $stateProbe = Invoke-WslDirectCapture $Name 'root' 'test' @('-f', "$stackPath/.installer-state.json")
     if ($stateProbe.Success) { return $true }
+    # v14.5.43 universal repair: v12/v13-era managed stacks may predate the current
+    # checkpoint file but still carry exact installer finalization markers. Require
+    # the proven core file trio above plus one of these historical markers so an
+    # arbitrary ~/hermes-stack directory is never adopted merely by name.
+    $legacyMarkerProbe = Invoke-WslDirectCapture $Name 'root' 'bash' @('-lc', "test -s '$stackPath/.install-info' -o -f '$stackPath/.configured'")
+    if ($legacyMarkerProbe.Success) { return $true }
     $backupProbe = Invoke-WslDirectCapture $Name 'root' 'find' @(
         "$stackPath/backups", '-mindepth', '2', '-maxdepth', '2', '-type', 'f',
         '(', '-name', 'installer-config.tar.gz', '-o', '-name', 'files.tar.gz', ')', '-print', '-quit'
@@ -1421,14 +1751,6 @@ function Assert-LinuxNativeHomeFilesystem([string]$Name, [string]$User) {
         throw "The selected Ubuntu user's home directory is on filesystem '$fsType'. This stack stores Docker bind-mounted configuration and state under ~/hermes-stack and requires a Linux-native WSL filesystem. Move/use a normal Linux home inside the distro VHD, then rerun."
     }
     return $fsType
-}
-
-function Format-LinuxNativeFilesystemLabel([string]$FsType) {
-    if ([string]::IsNullOrWhiteSpace($FsType)) { return 'unknown Linux-native filesystem' }
-    # Linux statfs reports ext4 with the historical magic-name string "ext2/ext3" on many
-    # systems. Do not display that raw label as if the WSL distro were actually using ext2/3.
-    if ($FsType -eq 'ext2/ext3') { return 'ext-family (Linux-native; statfs reports ext2/ext3)' }
-    return $FsType
 }
 
 function Convert-LinuxPathToWslUnc([string]$Name, [string]$LinuxPath, [switch]$Legacy) {
@@ -2009,14 +2331,14 @@ function Set-WslGlobalInstanceIdleTimeoutDisabled([string]$Path) {
     # preserves all unrelated .wslconfig content.
     $exists = Test-Path -LiteralPath $Path -PathType Leaf
     $text = if ($exists) { Get-Content -LiteralPath $Path -Raw -ErrorAction Stop } else { '' }
-    $lines = New-Object System.Collections.Generic.List[string]
+    $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($line in ($text -split "`r?`n", -1)) { $lines.Add($line) }
     if ($lines.Count -eq 1 -and $lines[0] -eq '' -and -not $exists) { $lines.Clear() }
 
     $section = ''
     $generalHeader = -1
     $generalEnd = $lines.Count
-    $matching = New-Object System.Collections.Generic.List[int]
+    $matching = [System.Collections.Generic.List[int]]::new()
     for ($i = 0; $i -lt $lines.Count; $i++) {
         $trimmed = $lines[$i].Trim()
         if ($trimmed -match '^\[(.+)\]$') {
@@ -2301,6 +2623,98 @@ exit 1
 function Get-OptionValue([object]$Object, [string]$Name, $Default) {
     if ($null -ne $Object -and $null -ne $Object.PSObject.Properties[$Name]) { return $Object.$Name }
     return $Default
+}
+
+function ConvertTo-LatticeValeComparableVersion([string]$Value) {
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
+    $match = [regex]::Match($Value.Trim(), '^[vV]?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?')
+    if (-not $match.Success) { return $null }
+    $parts = @(0,0,0,0)
+    for ($i = 1; $i -le 4; $i++) {
+        if ($match.Groups[$i].Success) {
+            $parsed = 0
+            if (-not [int]::TryParse($match.Groups[$i].Value, [ref]$parsed)) { return $null }
+            $parts[$i-1] = $parsed
+        }
+    }
+    try { return [version]("{0}.{1}.{2}.{3}" -f $parts[0],$parts[1],$parts[2],$parts[3]) } catch { return $null }
+}
+
+function Get-LatticeValeRepairOriginInfo(
+    [string]$Name,
+    [string]$User,
+    [string]$LinuxHome,
+    [object]$Options,
+    [string]$BundleVersion,
+    [int]$CurrentSchema,
+    [int]$MinimumMajor
+) {
+    $optionVersion = [string](Get-OptionValue $Options 'installerVersion' '')
+    $optionSchema = 0
+    $schemaValue = Get-OptionValue $Options 'schema' 0
+    [void][int]::TryParse([string]$schemaValue, [ref]$optionSchema)
+
+    $stateVersion = ''
+    if ($LinuxHome) {
+        $statePath = "$LinuxHome/hermes-stack/.installer-state.json"
+        $probe = Invoke-WslDirectCapture $Name 'root' 'cat' @($statePath) 15
+        if ($probe.Success -and -not [string]::IsNullOrWhiteSpace($probe.Text)) {
+            try {
+                $state = ($probe.Text | ConvertFrom-Json)
+                $stateVersion = [string](Get-OptionValue $state 'installerVersion' '')
+            } catch { }
+        }
+    }
+
+    $bundleComparable = ConvertTo-LatticeValeComparableVersion $BundleVersion
+    if ($null -eq $bundleComparable) { throw "Current bundle version '$BundleVersion' is not comparable for repair migration." }
+    $knownVersions = @()
+    foreach ($candidate in @($optionVersion,$stateVersion)) {
+        if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+        $parsed = ConvertTo-LatticeValeComparableVersion $candidate
+        if ($null -ne $parsed) { $knownVersions += $parsed }
+    }
+
+    $newerThanBundle = $false
+    $belowSupportedFloor = $false
+    foreach ($parsed in $knownVersions) {
+        if ($parsed -gt $bundleComparable) { $newerThanBundle = $true }
+        if ($parsed.Major -lt $MinimumMajor) { $belowSupportedFloor = $true }
+    }
+
+    # If no comparable version survived, a historical schema can still prove that this
+    # is an old managed options format. Schema 0 means the oldest retained formats that
+    # predate an explicit schema field; ownership is separately proven before this call.
+    $versionKnown = ($knownVersions.Count -gt 0)
+    $schemaSupported = ($optionSchema -ge 0 -and $optionSchema -le $CurrentSchema)
+    $supported = (-not $newerThanBundle) -and (-not $belowSupportedFloor) -and ($versionKnown -or $schemaSupported)
+
+    $versionMismatch = $false
+    if ($versionKnown) {
+        foreach ($parsed in $knownVersions) {
+            if ($parsed -ne $bundleComparable) { $versionMismatch = $true; break }
+        }
+    } else { $versionMismatch = $true }
+    $schemaMismatch = ($optionSchema -ne $CurrentSchema)
+    $metadataMismatch = (-not [string]::IsNullOrWhiteSpace($optionVersion) -and -not [string]::IsNullOrWhiteSpace($stateVersion) -and $optionVersion -ne $stateVersion)
+    $needsMigration = $versionMismatch -or $schemaMismatch -or $metadataMismatch
+
+    $origin = if (-not [string]::IsNullOrWhiteSpace($optionVersion)) { $optionVersion } elseif (-not [string]::IsNullOrWhiteSpace($stateVersion)) { $stateVersion } else { 'legacy/unknown' }
+    return [pscustomobject]@{
+        OriginVersion = $origin
+        OptionsVersion = $optionVersion
+        StateVersion = $stateVersion
+        OriginSchema = $optionSchema
+        BundleVersion = $BundleVersion
+        CurrentSchema = $CurrentSchema
+        MinimumMajor = $MinimumMajor
+        VersionKnown = $versionKnown
+        Supported = $supported
+        NewerThanBundle = $newerThanBundle
+        BelowSupportedFloor = $belowSupportedFloor
+        MetadataMismatch = $metadataMismatch
+        NeedsMigration = $needsMigration
+    }
 }
 
 function Complete-WorkerMatrixOptions([object[]]$Workers, [bool]$GlobalMatrixEnabled, [bool]$EnableMissingByDefault, [bool]$PromptOnMissing, [bool]$AllowExistingRoomSelection = $false) {
@@ -2690,18 +3104,20 @@ function Get-LatticeValeCompatibility {
         }
         if ($key) { $values[$key] = $value }
     }
-    foreach ($required in @('SUPPORTED_UBUNTU_VERSIONS','MIN_WINDOWS_BUILD','MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE','MIN_HOST_PARTITION_FREE_GIB','MIN_MANAGED_REPAIR_FREE_GIB','MANAGED_REPAIR_REFRESH_DAYS','MANAGED_REPAIR_REFRESH_REVISION','WSL_PROBE_TIMEOUT_SECONDS')) {
+    foreach ($required in @('SUPPORTED_UBUNTU_VERSIONS','MIN_WINDOWS_BUILD','MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE','MIN_HOST_PARTITION_FREE_GIB','MIN_MANAGED_REPAIR_FREE_GIB','MANAGED_REPAIR_REFRESH_DAYS','MANAGED_REPAIR_REFRESH_REVISION','MIN_UNIVERSAL_REPAIR_MAJOR','INSTALL_OPTIONS_SCHEMA','WSL_PROBE_TIMEOUT_SECONDS')) {
         if (-not $values.ContainsKey($required) -or [string]::IsNullOrWhiteSpace([string]$values[$required])) {
             throw "compatibility.conf is missing required value '$required'."
         }
     }
-    $windowsBuild = 0; $totalGiB = 0; $freeGiB = 0; $repairFreeGiB = 0; $repairRefreshDays = 0; $repairRefreshRevision = 0; $probeTimeout = 0
+    $windowsBuild = 0; $totalGiB = 0; $freeGiB = 0; $repairFreeGiB = 0; $repairRefreshDays = 0; $repairRefreshRevision = 0; $universalRepairMajor = 0; $installOptionsSchema = 0; $probeTimeout = 0
     if (-not [int]::TryParse([string]$values['MIN_WINDOWS_BUILD'], [ref]$windowsBuild) -or $windowsBuild -lt 1) { throw 'Invalid MIN_WINDOWS_BUILD in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE'], [ref]$totalGiB) -or $totalGiB -lt 1) { throw 'Invalid MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MIN_HOST_PARTITION_FREE_GIB'], [ref]$freeGiB) -or $freeGiB -lt 1) { throw 'Invalid MIN_HOST_PARTITION_FREE_GIB in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MIN_MANAGED_REPAIR_FREE_GIB'], [ref]$repairFreeGiB) -or $repairFreeGiB -lt 1 -or $repairFreeGiB -gt $freeGiB) { throw 'Invalid MIN_MANAGED_REPAIR_FREE_GIB in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MANAGED_REPAIR_REFRESH_DAYS'], [ref]$repairRefreshDays) -or $repairRefreshDays -lt 1 -or $repairRefreshDays -gt 365) { throw 'Invalid MANAGED_REPAIR_REFRESH_DAYS in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MANAGED_REPAIR_REFRESH_REVISION'], [ref]$repairRefreshRevision) -or $repairRefreshRevision -lt 1 -or $repairRefreshRevision -gt 1000000) { throw 'Invalid MANAGED_REPAIR_REFRESH_REVISION in compatibility.conf.' }
+    if (-not [int]::TryParse([string]$values['MIN_UNIVERSAL_REPAIR_MAJOR'], [ref]$universalRepairMajor) -or $universalRepairMajor -lt 0 -or $universalRepairMajor -gt 99) { throw 'Invalid MIN_UNIVERSAL_REPAIR_MAJOR in compatibility.conf.' }
+    if (-not [int]::TryParse([string]$values['INSTALL_OPTIONS_SCHEMA'], [ref]$installOptionsSchema) -or $installOptionsSchema -lt 1 -or $installOptionsSchema -gt 1000) { throw 'Invalid INSTALL_OPTIONS_SCHEMA in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['WSL_PROBE_TIMEOUT_SECONDS'], [ref]$probeTimeout) -or $probeTimeout -lt 5 -or $probeTimeout -gt 120) { throw 'Invalid WSL_PROBE_TIMEOUT_SECONDS in compatibility.conf.' }
     $versions = @(([string]$values['SUPPORTED_UBUNTU_VERSIONS'] -split '\s+') | Where-Object { $_ })
     if ($versions.Count -eq 0) { throw 'SUPPORTED_UBUNTU_VERSIONS is empty in compatibility.conf.' }
@@ -2713,6 +3129,8 @@ function Get-LatticeValeCompatibility {
         MinManagedRepairFreeGiB = $repairFreeGiB
         ManagedRepairRefreshDays = $repairRefreshDays
         ManagedRepairRefreshRevision = $repairRefreshRevision
+        MinUniversalRepairMajor = $universalRepairMajor
+        InstallOptionsSchema = $installOptionsSchema
         WslProbeTimeoutSeconds = $probeTimeout
     }
     return $script:HermesCompatibility
@@ -2954,7 +3372,7 @@ function Invoke-LatticeValeCleanupMaintenance(
     if ($afterVhdBytes -ge 0) {
         Write-Info "WSL VHDX physical file after cleanup: $([math]::Round($afterVhdBytes / 1GB,2)) GB."
     }
-    Write-Info 'If Linux files were deleted but Windows free space did not rise equivalently, the dynamic VHDX retained allocated blocks. The TRIM amount shown by Linux is a logical discard range, not Windows space reclaimed. Option 7 intentionally leaves host-side VHDX compaction/resizing outside the installer cleanup boundary.'
+    Write-Info 'If Linux files were deleted but Windows free space did not rise equivalently, the dynamic VHDX retained allocated blocks. Option 7 intentionally leaves host-side VHDX compaction/resizing outside the installer cleanup boundary.'
 }
 
 function ConvertFrom-OsReleaseText([string]$Text) {
@@ -4119,7 +4537,7 @@ function Test-RemoteTcpEndpoint([string]$Address, [int]$Port, [int]$TimeoutMilli
 }
 
 function Get-LatticeValeWslIpv4Candidates([string]$Name) {
-    $result = New-Object System.Collections.Generic.List[string]
+    $result = [System.Collections.Generic.List[string]]::new()
     $probes = @(
         (Invoke-WslDirectCapture $Name '' 'ip' @('-4','-o','addr','show','dev','eth0','scope','global') 15),
         (Invoke-WslDirectCapture $Name '' 'hostname' @('-I') 15)
@@ -4136,7 +4554,7 @@ function Get-LatticeValeWslIpv4Candidates([string]$Name) {
             if (-not $result.Contains($text)) { $result.Add($text) }
         }
     }
-    return @($result)
+    return $result.ToArray()
 }
 
 function Resolve-LatticeValeReachableWslIpv4([string]$Name, [int[]]$BackendPorts, [int]$TimeoutSeconds = 20) {
@@ -4195,7 +4613,7 @@ exit 0
 }
 
 function Resolve-LatticeValeLocalPort([string]$Name, [string]$Label, [int]$Preferred, [int[]]$Disallow = @()) {
-    $candidates = New-Object System.Collections.Generic.List[int]
+    $candidates = [System.Collections.Generic.List[int]]::new()
     $candidates.Add($Preferred)
     for ($offset = 1; $offset -le 2000; $offset++) {
         $candidate = $Preferred + $offset
@@ -4430,7 +4848,7 @@ function Resolve-LatticeValeWindowsBridgePort(
     [int[]]$Disallow = @()
 ) {
     $proxyPorts = @((Get-WindowsPortProxyRules) | Where-Object { $_.ListenAddress -eq '127.0.0.1' } | ForEach-Object { $_.ListenPort })
-    $candidates = New-Object System.Collections.Generic.List[int]
+    $candidates = [System.Collections.Generic.List[int]]::new()
 
     # Re-center old installs on the canonical bridge port whenever it is now free.
     # If a real foreign listener owns the canonical port, preserve a previously-owned
@@ -4624,7 +5042,7 @@ function Get-LatticeValeRelayPowerShellCandidates {
     # The manual relay that proved this transport on the reference machine ran
     # under PowerShell 7. Prefer pwsh when installed, but retain Windows PowerShell
     # 5.1 as a compatibility fallback only after the relay self-test succeeds.
-    $items = New-Object System.Collections.Generic.List[string]
+    $items = [System.Collections.Generic.List[string]]::new()
     try {
         $pwsh = Get-Command pwsh.exe -ErrorAction SilentlyContinue
         if ($pwsh -and (Test-Path -LiteralPath $pwsh.Source -PathType Leaf)) { $items.Add([string]$pwsh.Source) }
@@ -4637,7 +5055,7 @@ function Get-LatticeValeRelayPowerShellCandidates {
     } catch { }
     $windowsPowerShell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
     if ((Test-Path -LiteralPath $windowsPowerShell -PathType Leaf) -and -not $items.Contains($windowsPowerShell)) { $items.Add($windowsPowerShell) }
-    return @($items)
+    return $items.ToArray()
 }
 
 function Get-LatticeValeRelayArguments([object]$Paths, [bool]$EnsureStackRunning, [switch]$SelfTest) {
@@ -4652,7 +5070,7 @@ function Get-LatticeValeRelayArguments([object]$Paths, [bool]$EnsureStackRunning
 }
 
 function Select-LatticeValeRelayPowerShell([object]$Paths, [bool]$EnsureStackRunning) {
-    $failures = New-Object System.Collections.Generic.List[string]
+    $failures = [System.Collections.Generic.List[string]]::new()
     foreach ($engine in @(Get-LatticeValeRelayPowerShellCandidates)) {
         $probe = Invoke-NativeProcessCapture $engine (Get-LatticeValeRelayArguments $Paths $EnsureStackRunning -SelfTest) 45
         if ($probe.Success) {
@@ -4775,7 +5193,7 @@ function Get-LatticeValeNativeServiceRelayArguments([object]$Paths, [switch]$Sel
 }
 
 function Select-LatticeValeNativeServicePowerShell([object]$Paths) {
-    $failures = New-Object System.Collections.Generic.List[string]
+    $failures = [System.Collections.Generic.List[string]]::new()
     foreach ($engine in @(Get-LatticeValeRelayPowerShellCandidates)) {
         $probe = Invoke-NativeProcessCapture $engine (Get-LatticeValeNativeServiceRelayArguments $Paths -SelfTest) 45
         if ($probe.Success) {
@@ -5139,7 +5557,7 @@ function Get-WindowsTailscaleServePortState(
     }
     if (-not $TailscaleExe -or $Port -le 0) { return [pscustomobject]$result }
 
-    $targets = New-Object System.Collections.Generic.List[string]
+    $targets = [System.Collections.Generic.List[string]]::new()
     $inUse = $false
 
     # Tailscale documents that `serve status --json` and the full Serve configuration
@@ -5434,6 +5852,9 @@ $requiredBundleFiles = @(
     'stack\audit-free.py',
     'stack\checkpoint-metadata.json',
     'stack\qmd-index-cycle.sh',
+    'stack\directml-gateway.py',
+    'stack\directml-gateway.sh',
+    'stack\directml-requirements.txt',
     'windows\LatticeVale-WslNativeRelay.ps1',
     'windows\LatticeVale-WindowsNativeServiceRelay.ps1',
     'windows\LatticeVale-Shortcut.ps1'
@@ -5473,8 +5894,7 @@ if ([string]::IsNullOrWhiteSpace($stackLinuxPath) -or -not $stackLinuxPath.Start
     throw "Could not derive a safe managed stack path from Linux home '$linuxHome'."
 }
 $linuxHomeFs = Assert-LinuxNativeHomeFilesystem $DistroName $linuxUser
-$linuxHomeFsDisplay = Format-LinuxNativeFilesystemLabel $linuxHomeFs
-Write-Info "Linux home filesystem: $linuxHomeFsDisplay - OK"
+Write-Info "Linux home filesystem: $linuxHomeFs - OK"
 
 $stackState = Get-LatticeValeStackPathState $DistroName $linuxUser
 # Low-space cleanup eligibility is granted at distro inventory time if any normal user owns a
@@ -5498,6 +5918,10 @@ $rebuildMatrixIdentity = $false
 $repairMaintenance = $false
 # Explicit Update / repair forces the current bundle's managed software refresh now instead of waiting for the periodic repair window.
 $forceManagedUpdate = $false
+# v14.5.43: Resume / repair can automatically perform a cumulative migration when
+# the saved installer metadata predates this full release. Same-version repair stays local-first.
+$repairOriginInfo = $null
+$universalRepairMigration = $false
 # Existing-install option 2 uses a scoped reconciliation questionnaire. Only the
 # categories explicitly selected here are allowed to change; all other saved
 # installer choices are carried forward verbatim.
@@ -5509,6 +5933,17 @@ switch ($stackState) {
         $existingOptions = Get-ExistingInstallOptions $DistroName $linuxUser $linuxHome
         if ($null -eq $existingOptions) {
             throw "Existing installer-managed ~/hermes-stack was detected, but its install-options.json is missing/unreadable and no valid pre-repair options snapshot could be recovered. LatticeVale will NOT fall back to clean-install choices because that could overwrite the intended managed configuration. Preserve the stack, repair/recover install-options.json (or restore it from an installer/manage.sh backup under ~/hermes-stack/backups), then rerun Resume / repair."
+        }
+        $repairOriginInfo = Get-LatticeValeRepairOriginInfo $DistroName $linuxUser $linuxHome $existingOptions $bundleVersion $compat.InstallOptionsSchema $compat.MinUniversalRepairMajor
+        if ($repairOriginInfo.NewerThanBundle) {
+            throw "This managed stack was created or last repaired by a newer LatticeVale release than v$bundleVersion (options=$($repairOriginInfo.OptionsVersion), state=$($repairOriginInfo.StateVersion)). Refusing a repair downgrade. Run the same or newer full LatticeVale release instead."
+        }
+        if (-not $repairOriginInfo.Supported) {
+            throw "The existing managed stack has unsupported or corrupt installer metadata/options schema (detected version=$($repairOriginInfo.OriginVersion), schema=$($repairOriginInfo.OriginSchema); current supported schema=$($repairOriginInfo.CurrentSchema)). LatticeVale preserved the stack and will not guess a destructive migration."
+        }
+        Write-Info "Detected managed-install metadata: version=$($repairOriginInfo.OriginVersion), options schema=$($repairOriginInfo.OriginSchema)."
+        if ($repairOriginInfo.NeedsMigration) {
+            Write-Warning "This installation predates the current v$bundleVersion repair schema. Choosing Resume / repair will perform a cumulative migration directly to this release; no intermediate LatticeVale installer is required."
         }
         Write-Step 'Existing installation audit'
         $auditText = Invoke-BundledStackAudit $DistroName $linuxUser $linuxHome
@@ -5525,7 +5960,16 @@ switch ($stackState) {
             'Cleanup / reclaim disk space - choose safe cleanup categories without changing the current LatticeVale runtime/data configuration'
         )
         switch ($modeChoice) {
-            1 { $installMode = 'resume' }
+            1 {
+                $installMode = 'resume'
+                if ($repairOriginInfo -and $repairOriginInfo.NeedsMigration) {
+                    $universalRepairMigration = $true
+                    $forceManagedUpdate = $true
+                    Write-Host "`nCUMULATIVE REPAIR MIGRATION" -ForegroundColor Cyan
+                    Write-Info "Resume / repair will migrate the proven managed stack from $($repairOriginInfo.OriginVersion) / schema $($repairOriginInfo.OriginSchema) directly to v$bundleVersion / schema $($repairOriginInfo.CurrentSchema)."
+                    Write-Info 'Before managed software/source refresh, LatticeVale will create the same verified rollback backup used by controlled Update / repair. Persistent application state and user-owned overrides remain preservation-first.'
+                }
+            }
             2 {
                 $installMode = 'change'
                 Write-Host "`nSAFE CHANGE MODE" -ForegroundColor Yellow
@@ -5653,7 +6097,7 @@ switch ($stackState) {
                     exit 0
                 }
                 Invoke-LatticeValeCleanupMaintenance $DistroName $stackLinuxPath $cleanupScopes $DistroStoragePath
-                Write-Host "`nCleanup maintenance complete. Protected-state verification passed; normal installer/repair stages were not run." -ForegroundColor Green
+                Write-Host "`nCleanup maintenance complete. Normal installer/repair stages were not run." -ForegroundColor Green
                 exit 0
             }
         }
@@ -5693,7 +6137,9 @@ if ($repairMaintenance -and (Test-LatticeValeBrokenShortcutLauncher $DistroName 
 }
 
 if ($repairMaintenance) {
-    if ($forceManagedUpdate) {
+    if ($universalRepairMigration) {
+        Write-Info 'Universal repair migration enabled: this older managed installation will receive the current bundle-owned scripts, cumulative checkpoint migrations, current managed package/image/source pins, and a fresh resource-policy calculation. Persistent application data and explicit user-owned overrides are preserved.'
+    } elseif ($forceManagedUpdate) {
         Write-Info 'Managed update enabled: this run forces the installer-managed package/image/source layer to the versions and channels declared by this LatticeVale bundle, then runs normal live repair verification. Persistent application data and explicit user-owned overrides are preserved.'
     } else {
         Write-Info "Repair maintenance enabled: Resume / repair can update installer-managed prerequisites, Docker packages, images/builds, and audited source pins when the $((Get-LatticeValeCompatibility).ManagedRepairRefreshDays)-day managed refresh is due (or when the refresh policy changes). Between refresh windows it remains local-first and is not a blanket update. Persistent application data and explicit custom overrides are preserved."
@@ -5794,6 +6240,16 @@ if ($reusePriorChoices) {
     $hermesLocalAI = [bool](Get-OptionValue $existingOptions 'hermesLocalAI' $false)
     $localTextModel = [string](Get-OptionValue $existingOptions 'localTextModel' 'qwen3.5:4b')
     $localEmbeddingModel = [string](Get-OptionValue $existingOptions 'localEmbeddingModel' 'qwen3-embedding:4b')
+    # v14.5.3: DirectML is additive and opt-in. Older installs that do not carry
+    # these keys stay on the proven Ollama text path during Resume / repair.
+    $localTextBackend = [string](Get-OptionValue $existingOptions 'localTextBackend' 'ollama')
+    if ($localTextBackend -notin @('ollama','directml')) { $localTextBackend = 'ollama' }
+    $directmlTextModel = [string](Get-OptionValue $existingOptions 'directmlTextModel' 'Qwen/Qwen2.5-1.5B-Instruct')
+    if ($directmlTextModel -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { $directmlTextModel = 'Qwen/Qwen2.5-1.5B-Instruct' }
+    $directmlPort = (Get-OptionTcpPort $existingOptions 'directmlPort' 11436)
+    $directmlAdapterName = [string](Get-OptionValue $existingOptions 'directmlAdapterName' '')
+    $directmlGpuVendor = [string](Get-OptionValue $existingOptions 'directmlGpuVendor' '')
+    if ($directmlGpuVendor -notin @('','amd','nvidia','intel','qualcomm')) { $directmlGpuVendor = '' }
     $ollamaBackend = [string](Get-OptionValue $existingOptions 'ollamaBackend' 'managed')
     if ($ollamaBackend -notin @('managed','windows-native')) { $ollamaBackend = 'managed' }
     $windowsOllamaBridgePort = (Get-OptionTcpPort $existingOptions 'windowsOllamaBridgePort' 11435)
@@ -5859,8 +6315,16 @@ if ($reusePriorChoices) {
         }
     }
 
-    if (-not $persistOllamaAcceleration -and ($honcho -or $hermesLocalAI) -and $ollamaBackend -eq 'managed') {
-        Write-Info 'Legacy repair: preserving the existing Ollama image/runtime choice. Use "Change installed components" if you want to opt into v14.2 GPU policy.'
+    if (-not $persistOllamaAcceleration -and $universalRepairMigration) {
+        # Pre-v14.2 installs had no managed acceleration field. Normalize them to an
+        # explicit CPU policy so resource policy v11 owns their CPU/RAM ceilings without
+        # silently opting an existing stack into GPU execution. Users can choose Auto/GPU
+        # later through Change installed components.
+        $ollamaAcceleration = 'cpu'
+        $persistOllamaAcceleration = $true
+        Write-Info 'Universal repair migration: normalized the legacy managed-Ollama acceleration setting to explicit CPU for backward-compatible policy-v11 resource ownership. GPU Auto/forced modes remain opt-in through Change installed components.'
+    } elseif (-not $persistOllamaAcceleration -and ($honcho -or $hermesLocalAI) -and $ollamaBackend -eq 'managed') {
+        Write-Info 'Legacy same-line repair: preserving the existing Ollama image/runtime choice. Use "Change installed components" if you want to opt into managed GPU acceleration.'
     }
     if ($ollamaBackend -eq 'managed' -and $persistOllamaAcceleration -and ($honcho -or $hermesLocalAI) -and $ollamaAcceleration -in @('amd','nvidia')) {
         $gpuState = Get-OllamaWslGpuPrerequisites $DistroName $linuxUser
@@ -5871,7 +6335,7 @@ if ($reusePriorChoices) {
             if ($installMode -eq 'change' -and $changeScopes -notcontains 'local-ai') {
                 Write-Info 'Scoped Change mode is preserving the saved Ollama acceleration because Local AI / Ollama was not selected for change. This run may remain NEEDS_REPAIR until that backend is repaired separately.'
             } else {
-            $repairChoices = New-Object System.Collections.Generic.List[string]
+            $repairChoices = [System.Collections.Generic.List[string]]::new()
             $nativeChoiceIndex = 0
             if ($windowsOllamaState -and $windowsOllamaState.ApiReady -and $windowsNativeBridgeState -and $windowsNativeBridgeState.Ready) {
                 $nativeChoiceIndex = 1
@@ -6021,7 +6485,7 @@ if ($reusePriorChoices) {
             Write-Host "`n-- Local AI / Honcho / Ollama --" -ForegroundColor White
             $honcho = Read-Choice 'Install fully self-hosted Honcho memory?' 'Changes the Honcho component selection.' 'Honcho is disabled; existing persistent Honcho data is not deliberately deleted.' $honcho
             $wasHermesLocalAI = $hermesLocalAI
-            $hermesLocalAI = Read-Choice 'Use Ollama as the default Hermes AI provider?' 'Changes the installer-owned default-profile local-AI selection.' 'The existing non-LatticeVale provider/model configuration is preserved unless provider setup is explicitly requested elsewhere.' $hermesLocalAI
+            $hermesLocalAI = Read-Choice 'Use a LatticeVale local AI backend as the default Hermes AI provider?' 'Changes the installer-owned default-profile local-AI selection. Local text inference can use Ollama or the experimental PyTorch DirectML gateway.' 'The existing non-LatticeVale provider/model configuration is preserved unless provider setup is explicitly requested elsewhere.' $hermesLocalAI
             if ($wasHermesLocalAI -and -not $hermesLocalAI) {
                 # The previous default model block was installer-owned Ollama configuration.
                 # A merely "valid" model config is not proof that the user has selected a
@@ -6030,6 +6494,38 @@ if ($reusePriorChoices) {
                 Write-Info 'Local Ollama is being removed as the default Hermes provider. LatticeVale will open the default-profile provider/model wizard later in this run so the old installer-owned Ollama model block is not silently retained.'
             }
             if ($honcho -or $hermesLocalAI) {
+                $gpuPlan = Get-LatticeValeGpuAccelerationPlan $DistroName $linuxUser
+                Write-LatticeValeGpuAccelerationPlan $gpuPlan
+                $textBackendDefault = if ($localTextBackend -eq 'directml') { 2 } else { 1 }
+                $ollamaBackendLabel = 'Ollama (stable; uses the selected Ollama runtime for text inference)' + $(if ($gpuPlan.RecommendedTextBackend -eq 'ollama') { ' [recommended for detected hardware]' } else { '' })
+                $directmlBackendLabel = 'PyTorch DirectML gateway (experimental; DirectX 12 GPU acceleration in WSL2, with automatic Ollama fallback)' + $(if ($gpuPlan.RecommendedTextBackend -eq 'directml') { ' [recommended for detected hardware]' } else { '' })
+                $textBackendChoice = Read-Menu 'Local text inference backend' @(
+                    $ollamaBackendLabel,
+                    $directmlBackendLabel
+                ) $textBackendDefault
+                $localTextBackend = if ($textBackendChoice -eq 2) { 'directml' } else { 'ollama' }
+                if ($localTextBackend -eq 'directml') {
+                    Write-Info 'DirectML accelerates Hermes and Honcho text inference through one WSL-host gateway. Ollama remains required for Honcho embeddings and as the automatic text fallback.'
+                    $directmlGpu = Select-LatticeValeDirectMLGpu $DistroName $linuxUser $directmlAdapterName $directmlGpuVendor
+                    if (-not $directmlGpu.UseDirectML) {
+                        $localTextBackend = 'ollama'
+                        $directmlAdapterName = ''
+                        $directmlGpuVendor = ''
+                        Write-Info 'Local text inference changed to Ollama because DirectML was not selected for the detected GPU environment.'
+                    } else {
+                        $directmlAdapterName = [string]$directmlGpu.AdapterName
+                        $directmlGpuVendor = [string]$directmlGpu.Vendor
+                    }
+                    if ($localTextBackend -eq 'directml') {
+                    while ($true) {
+                        $candidate = Read-Host "DirectML Hugging Face text model [current: $directmlTextModel; Enter preserves]"
+                        if (-not [string]::IsNullOrWhiteSpace($candidate)) { $directmlTextModel = $candidate.Trim() }
+                        if ($directmlTextModel -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { break }
+                        Write-Host 'Use a Hugging Face repository ID in owner/model form.' -ForegroundColor Yellow
+                    }
+                    $directmlPort = Read-TcpPort 'DirectML WSL-host gateway port' $directmlPort
+                    }
+                }
                 $windowsOllamaState = Get-WindowsNativeOllamaState
                 Write-Info $windowsOllamaState.Detail
                 $windowsNativeBridgeState = $null
@@ -6067,7 +6563,8 @@ if ($reusePriorChoices) {
                 }
 
                 while ($true) {
-                    $candidate = Read-Host "Local Ollama text model [current: $localTextModel; Enter preserves]"
+                    $ollamaTextRole = if ($localTextBackend -eq 'directml') { 'fallback' } else { 'text' }
+                    $candidate = Read-Host "Local Ollama $ollamaTextRole model [current: $localTextModel; Enter preserves]"
                     if (-not [string]::IsNullOrWhiteSpace($candidate)) { $localTextModel = $candidate.Trim() }
                     if ($localTextModel -match '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$') { break }
                     Write-Host 'Use a valid Ollama model/tag.' -ForegroundColor Yellow
@@ -6083,9 +6580,11 @@ if ($reusePriorChoices) {
                 if ($ollamaBackend -eq 'managed') {
                     $gpuState = Get-OllamaWslGpuPrerequisites $DistroName $linuxUser
                     Write-OllamaGpuPrerequisiteSummary $gpuState
-                    $accelDefault = switch ($ollamaAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default {1} }
+                    $accelDefault = switch ($ollamaAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default { $gpuPlan.OllamaAccelerationDefault } }
+                    $nvidiaAccelLabel = 'NVIDIA GPU' + $(if ($gpuPlan.RecommendedOllamaAcceleration -eq 'nvidia') { ' [recommended for detected hardware]' } else { '' })
+                    $amdAccelLabel = 'AMD GPU via ROCm' + $(if ($gpuPlan.RecommendedOllamaAcceleration -eq 'amd') { ' [recommended for detected hardware]' } else { '' })
                     while ($true) {
-                        $accelChoice = Read-Menu 'Ollama hardware acceleration' @('Auto-detect supported acceleration; CPU fallback','CPU only','NVIDIA GPU','AMD GPU via ROCm') $accelDefault
+                        $accelChoice = Read-Menu 'Ollama hardware acceleration' @('Auto-detect supported acceleration; CPU fallback','CPU only',$nvidiaAccelLabel,$amdAccelLabel) $accelDefault
                         if ($accelChoice -eq 3 -and -not $gpuState.NvidiaWslReady) { Write-Warning 'NVIDIA WSL prerequisites are not currently verified.'; continue }
                         if ($accelChoice -eq 4 -and -not $gpuState.AmdDockerReady) { Write-Warning 'AMD/ROCm WSL prerequisites are not currently verified.'; continue }
                         $ollamaAcceleration = @('auto','cpu','nvidia','amd')[$accelChoice - 1]
@@ -6257,7 +6756,50 @@ if ($reusePriorChoices) {
         }
         Write-Info 'Ollama runtime note: when an Ollama-dependent feature is selected, LatticeVale asks explicitly where Ollama should run. Native Windows Ollama can be detected while stopped, but it must be running before LatticeVale can use and link its local API; selecting the native option will re-check it and can offer to start an already-installed copy. The alternative installs/manages Ollama inside this Ubuntu WSL distro with Docker. LatticeVale does not install or update the Windows Ollama application. LatticeVale-managed WSL/Docker Ollama can be installed automatically only when you explicitly choose that backend; native Windows Ollama is usable only after both its Windows-local API and safe WSL relay path are verified.'
         $honcho = Read-Choice 'Install fully self-hosted Honcho memory?' 'Runs Honcho API, Postgres/pgvector, Redis, plus an Ollama LLM and embedding model. If selected, the next Ollama question explicitly asks whether to reuse native Windows Ollama or install/manage Ollama inside WSL/Docker.' 'Honcho memory is skipped; Hermes built-in state remains available.' ([bool](Get-OptionValue $old 'honcho' $false))
-        $hermesLocalAI = Read-Choice 'Use Ollama as the default Hermes AI provider?' 'Uses Ollama for the main Hermes model. If selected, the next Ollama question explicitly asks whether to reuse native Windows Ollama or install/manage Ollama inside WSL/Docker.' 'Hermes keeps the upstream interactive provider setup so you can choose an external or other provider.' ([bool](Get-OptionValue $old 'hermesLocalAI' $true))
+        $hermesLocalAI = Read-Choice 'Use a LatticeVale local AI backend as the default Hermes AI provider?' 'Uses local inference for the main Hermes model. You can choose stable Ollama or the experimental PyTorch DirectML gateway; DirectML keeps Ollama as its fallback.' 'Hermes keeps the upstream interactive provider setup so you can choose an external or other provider.' ([bool](Get-OptionValue $old 'hermesLocalAI' $true))
+        $localTextBackend = [string](Get-OptionValue $old 'localTextBackend' 'ollama')
+        if ($localTextBackend -notin @('ollama','directml')) { $localTextBackend = 'ollama' }
+        $directmlTextModel = [string](Get-OptionValue $old 'directmlTextModel' 'Qwen/Qwen2.5-1.5B-Instruct')
+        if ($directmlTextModel -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { $directmlTextModel = 'Qwen/Qwen2.5-1.5B-Instruct' }
+        $directmlPort = (Get-OptionTcpPort $old 'directmlPort' 11436)
+        $directmlAdapterName = [string](Get-OptionValue $old 'directmlAdapterName' '')
+        $directmlGpuVendor = [string](Get-OptionValue $old 'directmlGpuVendor' '')
+        if ($directmlGpuVendor -notin @('','amd','nvidia','intel','qualcomm')) { $directmlGpuVendor = '' }
+        if ($honcho -or $hermesLocalAI) {
+            $gpuPlan = Get-LatticeValeGpuAccelerationPlan $DistroName $linuxUser
+            Write-LatticeValeGpuAccelerationPlan $gpuPlan
+            $hasSavedTextBackend = ($null -ne $old -and $null -ne $old.PSObject.Properties['localTextBackend'])
+            $textBackendDefault = if ($hasSavedTextBackend) { if ($localTextBackend -eq 'directml') { 2 } else { 1 } } else { $gpuPlan.TextBackendDefault }
+            $ollamaBackendLabel = 'Ollama (stable; text inference uses the selected Ollama runtime)' + $(if ($gpuPlan.RecommendedTextBackend -eq 'ollama') { ' [recommended for detected hardware]' } else { '' })
+            $directmlBackendLabel = 'PyTorch DirectML gateway (experimental; DirectX 12 GPU acceleration in WSL2, with automatic Ollama fallback)' + $(if ($gpuPlan.RecommendedTextBackend -eq 'directml') { ' [recommended for detected hardware]' } else { '' })
+            $textBackendChoice = Read-Menu 'Local text inference backend' @(
+                $ollamaBackendLabel,
+                $directmlBackendLabel
+            ) $textBackendDefault
+            $localTextBackend = if ($textBackendChoice -eq 2) { 'directml' } else { 'ollama' }
+            if ($localTextBackend -eq 'directml') {
+                Write-Info 'DirectML is used for Hermes and Honcho text inference when healthy. Ollama remains installed/linked for automatic fallback and Honcho embeddings, so one backend failure does not strand the stack.'
+                $directmlGpu = Select-LatticeValeDirectMLGpu $DistroName $linuxUser $directmlAdapterName $directmlGpuVendor
+                if (-not $directmlGpu.UseDirectML) {
+                    $localTextBackend = 'ollama'
+                    $directmlAdapterName = ''
+                    $directmlGpuVendor = ''
+                    Write-Info 'Local text inference changed to Ollama because DirectML was not selected for the detected GPU environment.'
+                } else {
+                    $directmlAdapterName = [string]$directmlGpu.AdapterName
+                    $directmlGpuVendor = [string]$directmlGpu.Vendor
+                }
+                if ($localTextBackend -eq 'directml') {
+                while ($true) {
+                    $candidate = Read-Host "DirectML Hugging Face text model [suggested: $directmlTextModel; Enter accepts]"
+                    if (-not [string]::IsNullOrWhiteSpace($candidate)) { $directmlTextModel = $candidate.Trim() }
+                    if ($directmlTextModel -match '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { break }
+                    Write-Host 'Use a Hugging Face repository ID in owner/model form.' -ForegroundColor Yellow
+                }
+                $directmlPort = Read-TcpPort 'DirectML WSL-host gateway port' $directmlPort
+                }
+            }
+        }
         $ollamaBackend = 'managed'
         $windowsOllamaBridgePort = (Get-OptionTcpPort $old 'windowsOllamaBridgePort' 11435)
         $windowsOllamaTransport = [string](Get-OptionValue $old 'windowsOllamaTransport' 'windows-gateway-relay')
@@ -6384,7 +6926,8 @@ if ($reusePriorChoices) {
                 Write-Info 'Selected Ollama models are downloaded into the selected WSL distro. The default 4B model favors broad compatibility; CPU-only inference can be slower.'
             }
             while ($true) {
-                $candidate = Read-Host "Local Ollama text model [suggested: $localTextModel; Enter accepts]"
+                $ollamaTextRole = if ($localTextBackend -eq 'directml') { 'fallback' } else { 'text' }
+                $candidate = Read-Host "Local Ollama $ollamaTextRole model [suggested: $localTextModel; Enter accepts]"
                 if (-not [string]::IsNullOrWhiteSpace($candidate)) { $localTextModel = $candidate.Trim() }
                 if ($localTextModel -match '^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$') { break }
                 Write-Host 'Use a valid Ollama model/tag (letters, numbers, ., _, :, /, -).' -ForegroundColor Yellow
@@ -6401,20 +6944,22 @@ if ($reusePriorChoices) {
         }
         $ollamaAcceleration = 'cpu'
         if (($honcho -or $hermesLocalAI) -and $ollamaBackend -eq 'managed') {
-            $savedAcceleration = [string](Get-OptionValue $old 'ollamaAcceleration' 'auto')
-            $accelDefault = switch ($savedAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default {1} }
+            $savedAcceleration = [string](Get-OptionValue $old 'ollamaAcceleration' '')
+            $accelDefault = if ($savedAcceleration) { switch ($savedAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default {1} } } else { $gpuPlan.OllamaAccelerationDefault }
             $gpuState = Get-OllamaWslGpuPrerequisites $DistroName $linuxUser
             Write-OllamaGpuPrerequisiteSummary $gpuState
             $nvidiaLabel = if ($gpuState.NvidiaWslReady) {
-                'NVIDIA GPU (selected distro currently exposes a usable WSL NVIDIA device; installer may configure NVIDIA Container Toolkit)'
+                'NVIDIA GPU (selected distro currently exposes a usable WSL NVIDIA device; installer will reuse or configure NVIDIA Container Toolkit)'
             } else {
                 'NVIDIA GPU [currently unavailable in selected distro: /dev/dxg + working nvidia-smi were not both verified]'
             }
+            if ($gpuPlan.RecommendedOllamaAcceleration -eq 'nvidia') { $nvidiaLabel += ' [recommended for detected hardware]' }
             $amdLabel = if ($gpuState.AmdDockerReady) {
-                'AMD GPU via ROCm (selected distro currently exposes /dev/kfd + /dev/dri on x86_64)'
+                'AMD GPU via ROCm (selected distro currently exposes /dev/kfd + /dev/dri on x86_64; installer uses the ROCm Ollama image)'
             } else {
                 'AMD GPU via ROCm [currently unavailable for this Ollama Docker path: x86_64 + /dev/kfd + /dev/dri were not all verified]'
             }
+            if ($gpuPlan.RecommendedOllamaAcceleration -eq 'amd') { $amdLabel += ' [recommended for detected hardware]' }
             while ($true) {
                 $accelChoice = Read-Menu 'Ollama hardware acceleration' @(
                     'Auto-detect supported acceleration from the selected distro; use CPU when no supported GPU path is verified',
@@ -6620,10 +7165,16 @@ if ($sharedNativeTailscale) {
     $wslNetworkingModePolicy = if ($activeWslNetworkingMode) { $activeWslNetworkingMode } else { 'unknown' }
 }
 
+$repairOriginVersionForOptions = if ($repairOriginInfo) { [string]$repairOriginInfo.OriginVersion } else { $bundleVersion }
+$repairOriginSchemaForOptions = if ($repairOriginInfo) { [int]$repairOriginInfo.OriginSchema } else { [int]$compat.InstallOptionsSchema }
+
 $options = [ordered]@{
-    schema = 19
+    schema = $compat.InstallOptionsSchema
     installerVersion = $bundleVersion
     installerMode = $installMode
+    repairOriginVersion = $repairOriginVersionForOptions
+    repairOriginSchema = $repairOriginSchemaForOptions
+    universalRepairMigration = $universalRepairMigration
     questionnaireMode = $questionnaireMode
     dashboard = $dashboard
     multiAgent = $multiAgent
@@ -6647,6 +7198,11 @@ $options = [ordered]@{
     qmd = $qmd
     honcho = $honcho
     hermesLocalAI = $hermesLocalAI
+    localTextBackend = $localTextBackend
+    directmlTextModel = $directmlTextModel
+    directmlPort = $directmlPort
+    directmlAdapterName = if ($localTextBackend -eq 'directml') { $directmlAdapterName } else { '' }
+    directmlGpuVendor = if ($localTextBackend -eq 'directml') { $directmlGpuVendor } else { '' }
     localTextModel = $localTextModel
     localEmbeddingModel = $localEmbeddingModel
     ollamaBackend = $ollamaBackend
@@ -6678,10 +7234,9 @@ $options = [ordered]@{
     repairMaintenance = $repairMaintenance
     forceManagedUpdate = $forceManagedUpdate
 }
-# A legacy Resume/reconfigure run that predates v14.2 must not acquire an
-# acceleration-management field merely because this installer version knows about it.
-# Leaving the key absent lets configure-stack preserve the existing Ollama image tag.
-# Choosing "Change installed components" records the new policy normally.
+# Same-line legacy reconfigure/change paths may still intentionally preserve the absence
+# of an acceleration-management field. Universal v14.5.43 Resume / repair migration
+# normalizes that historical omission to explicit CPU before reaching this point.
 if (-not $persistOllamaAcceleration) { [void]$options.Remove('ollamaAcceleration') }
 
 Write-Host "`nSelected configuration:" -ForegroundColor White
@@ -6695,10 +7250,10 @@ Write-Host "  WSL implementation: $(if ($wslInfo.Modern) { 'Store/MSIX' } else {
 @(
     "Dashboard: $dashboard", "Multi-agent: $multiAgent", "Kanban: $kanban", "Matrix: $matrix",
     "Windows Tailscale integration: $tailscale", "Shared WSL networking policy: $wslNetworkingModePolicy ($wslNetworkingModeOwner)", "Tailscale Dashboard exposure: $tailscaleDashboard$(if ($tailscaleDashboard) { " (HTTPS $tailscaleDashboardPort)" } else { '' })", "Tailscale Matrix exposure: $tailscaleMatrix$(if ($tailscaleMatrix) { " (HTTPS $tailscaleMatrixPort)" } else { '' })", "SearXNG: $searxng", "QMD: $qmd", "Honcho (fully local): $honcho",
-    "Hermes self-hosted Ollama AI: $hermesLocalAI$(if ($hermesLocalAI) { " ($localTextModel)" } else { '' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
+    "Hermes local AI: $hermesLocalAI$(if ($hermesLocalAI) { " (text backend=$localTextBackend)" } else { '' })", "DirectML text model: $(if (($honcho -or $hermesLocalAI) -and $localTextBackend -eq 'directml') { "$directmlTextModel (WSL-host port $directmlPort; GPU=$(if ($directmlAdapterName) { $directmlAdapterName } else { $directmlGpuVendor }))" } else { 'n/a' })", "Ollama fallback text model: $(if ($honcho -or $hermesLocalAI) { $localTextModel } else { 'n/a' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
     "Local ports: Hermes API=$hermesApiPort$(if ($dashboard) { ", Dashboard=$dashboardLocalPort" } else { '' })$(if ($matrix) { ", Matrix=$matrixLocalPort" } else { '' })$(if ($searxng) { ", SearXNG=$searxngLocalPort" } else { '' })$(if ($honcho) { ", Honcho=$honchoLocalPort" } else { '' })",
     "Windows bridge ports: $(if ($tailscaleDashboard) { "Dashboard=$dashboardBridgePort " } else { '' })$(if ($tailscaleMatrix) { "Matrix=$matrixBridgePort" } else { '' })",
-    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Unattended updates: $unattended", "Repair maintenance: $repairMaintenance", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
+    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Unattended updates: $unattended", "Repair maintenance: $repairMaintenance", "Universal repair migration: $universalRepairMigration", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
 ) | ForEach-Object { Write-Host "  $_" }
 Write-Info 'Recovery model: verify live state first, preserve completed work, then resume the earliest incomplete/broken stage. Matrix precedes Hermes setup; Windows add-ons/Tailscale/auto-start remain last.'
 if ($kanban) {
@@ -6748,8 +7303,9 @@ if (-not $homeWritableProbe.Success) {
 }
 
 if ($forceManagedUpdate) {
-    Write-Step 'Creating pre-update managed-stack safety backup'
-    Write-Info 'Update / repair requires a verified rollback backup before installer-managed software is refreshed. This bundle supplies its own backup helper so a broken/outdated installed manage.sh cannot block the repair that would replace it.'
+    Write-Step $(if ($universalRepairMigration) { 'Creating cumulative repair-migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })
+    $backupReason = if ($universalRepairMigration) { 'Cumulative Resume / repair migration requires a verified rollback backup before installer-managed software is refreshed.' } else { 'Update / repair requires a verified rollback backup before installer-managed software is refreshed.' }
+    Write-Info "$backupReason This bundle supplies its own backup helper so a broken/outdated installed manage.sh cannot block the repair that would replace it."
     Write-Info 'The helper runs as WSL root only for this backup operation so container-owned persistent files can be read safely, dumps running Synapse/Honcho PostgreSQL databases, briefly stops only currently-running LatticeVale containers for a consistent filesystem snapshot, archives persistent configuration/data (including local Ollama data when present), restores the previously-running containers, and returns backup ownership to the selected Linux user.'
 
     $backupSource = Join-Path $PSScriptRoot 'linux\pre-update-safety-backup.sh'
@@ -6775,7 +7331,7 @@ if ($forceManagedUpdate) {
             if ($preUpdateBackup.ExitCode -ne $null) { $parts += "exit code $($preUpdateBackup.ExitCode)" }
             $backupDetail = (($parts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique) -join ' | ')
             if (-not $backupDetail) { $backupDetail = 'backup helper failed without stdout/stderr diagnostics' }
-            throw "Update / repair stopped before software refresh because the bundle-owned pre-update safety backup failed. Detail: $backupDetail`nNo installer-managed software refresh was started. The existing stack/data was left in place; correct the reported backup problem and retry option 6."
+            throw "The managed repair/update stopped before software refresh because the bundle-owned safety backup failed. Detail: $backupDetail`nNo installer-managed software refresh was started. The existing stack/data was left in place; correct the reported backup problem and rerun the current full installer."
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdOut)) { Write-Host $preUpdateBackup.StdOut.Trim() }
         if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdErr)) { Write-Warning $preUpdateBackup.StdErr.Trim() }
@@ -6851,7 +7407,7 @@ if (-not $mkdirProbe.Success) {
 try {
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'compatibility.conf') "$stageLinux/compatibility.conf" '0600'
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'linux\bootstrap.sh') "$stageLinux/linux/bootstrap.sh" '0600'
-    foreach ($file in @('compose.yaml','Dockerfile.qmd','patch-qmd-bind.py','configure-stack.sh','manage.sh','state-audit.py','latticevale_readonly.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh')) {
+    foreach ($file in @('compose.yaml','Dockerfile.qmd','patch-qmd-bind.py','configure-stack.sh','manage.sh','state-audit.py','latticevale_readonly.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
         Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot "stack\$file") "$stageLinux/stack/$file" '0600'
     }
     $optionsJson = $options | ConvertTo-Json -Depth 8 -Compress

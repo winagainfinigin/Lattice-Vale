@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.40', '14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}, version
+assert version in {'14.3.40', '14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='ascii')
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')
@@ -52,7 +52,7 @@ assert 'cp -a data/hermes/platforms/matrix/store "$recovery_dir/matrix-store"' i
 assert '[[ ! -e .matrix-identity-rebuild-pending ]] || return 1' in cfg
 
 # Update/repair must back up before the Linux staging/bootstrap path begins.
-backup_idx=ps.index("Write-Step 'Creating pre-update managed-stack safety backup'")
+backup_idx=ps.index("Write-Step $(if ($universalRepairMigration) { 'Creating cumulative repair-migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })")
 stage_idx=ps.index('$stageLinux = "/tmp/$stageName"', backup_idx)
 assert backup_idx < stage_idx
 backup_block=ps[backup_idx:stage_idx]

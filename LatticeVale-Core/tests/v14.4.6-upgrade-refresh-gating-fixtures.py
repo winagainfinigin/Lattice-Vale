@@ -5,7 +5,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}, VERSION
+assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, VERSION
 
 boot = (ROOT / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 compat = (ROOT / 'compatibility.conf').read_text(encoding='utf-8')
@@ -24,7 +24,7 @@ assert 'VERSION.txt alone is' in compat and 'not a managed-refresh trigger' in c
 PUBLIC_14_4_2_REFRESH_REVISION = 1
 PUBLIC_14_4_2_RESOURCE_POLICY = 2
 assert current_refresh_revision > PUBLIC_14_4_2_REFRESH_REVISION
-assert 'POLICY_VERSION=9' in cfg
+assert 'POLICY_VERSION=11' in cfg
 assert PUBLIC_14_4_2_RESOURCE_POLICY < 5
 
 # Ordinary repair refresh gating must use marker validity, refresh revision, or age.

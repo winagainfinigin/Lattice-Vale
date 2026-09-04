@@ -1,8 +1,21 @@
-# LatticeVale v14.5.2 audit
+# LatticeVale v14.5.46 audit
+
+> **v14.5.46 GPU-onboarding audit responsibility:** questionnaire recommendations must derive from both Windows GPU vendor inventory and direct selected-distro capability probes; a vendor name alone may never authorize GPU resource sizing. DirectML/NVIDIA prerequisite acquisition must be idempotent and selected-path-only, AMD ROCm remains gated by real WSL devices, and Windows/vendor display-driver ownership stays external.
+
+> **v14.5.45 PowerShell compatibility audit responsibility:** no PowerShell source may construct `System.Collections.Generic` collections through `New-Object`; direct `.NET ::new()` construction is required. GPU inventory and other list-returning helpers must preserve array semantics without triggering the PowerShell 7.6 binder path.
+>
+> **v14.5.44 DirectML preflight audit responsibility:** DirectML must use its dedicated direct `/dev/dxg` probe, retry as root, distinguish probe failure from confirmed absence, report D3D12/DXCore bridge-library state, and never regress to the Ollama GPU parser for DirectML admission.
+>
+> **v14.5.43 repair-migration audit responsibility:** a recognized older managed stack must remain on the managed path, preserve/recover installer options, reject downgrade/future-schema ambiguity, require the pre-refresh safety backup, and converge to current checkpoint/runtime/resource state without deleting persistent data. Same-version repair must remain local-first.
+> **v14.5.42 audit responsibility:** adaptive-policy health now includes policy v11, RAM/CPU profile, managed-Ollama acceleration, GPU count/min/max/aggregate VRAM, per-GPU overhead, DirectML percentage, shared-vendor state, model/context floor, and live Compose CPU/RAM convergence. A topology/fingerprint change is repairable stale state rather than HEALTHY.
+> **Canonical-policy audit:** the persisted state carries `HARDWARE_FINGERPRINT` and `POLICY_FINGERPRINT`; `resource-policy-report.txt` must exist and repeat both. Audit recomputes both fingerprints, verifies live Docker ceilings against the canonical persisted policy, and reports managed-Ollama GPU execution as verified only after the bounded `ollama ps` processor check. Planner/Compose/state/report drift is therefore a repairable failure, not a healthy configuration.
+
+## v14.5.4 DirectML VRAM / low-memory hardening audit
+
+DirectML is opt-in, host-side, localhost/host-gateway scoped, and fallback-preserving. Audit coverage checks the isolated dependency environment, WSL-host lifecycle, split Honcho text/embedding routing, adaptive host-RAM reserve, backup/uninstall ownership, bounded diagnostics, and preservation of Ollama as fallback.
+
 
 ## v14.5.2 Option 7 cleanup safety audit
-
-Live-run hardening requires Option 7 to capture protected identities before any cleanup action and compare them afterward. A successful run must report `Cleanup safety verification: PASS`; any missing/changed protected identity must return nonzero with `LATTICEVALE_CLEANUP_INTEGRITY_FAILED`. TRIM output must state that the reported discard quantity is logical filesystem extent space, not Windows host free space. The `ext2/ext3` statfs compatibility label must be displayed as Linux-native ext-family rather than as a literal ext2/3 claim.
 
 - Option 7 is additive to the existing six managed-stack modes and terminates after cleanup; no existing repair/change/reconfigure/recovery/update mode is routed through cleanup.
 - Cleanup is fail-closed to a valid current managed stack. Pre-update backup deletion requires strict LatticeVale ownership metadata for the exact stack; backup-like or user-created directories without that proof are preserved.
@@ -10,12 +23,12 @@ Live-run hardening requires Option 7 to capture protected identities before any 
 - Low-space recovery permits only Verify or Cleanup for a recognized managed install below the ordinary repair floor; existing mutating modes retain the storage gate and a selected fresh/unrecognized Linux user is rechecked against normal fresh-install storage requirements.
 - WSL root TRIM is optional/nonfatal and does not resize/move/compact the VHDX. This preserves the boundary between filesystem discard and Windows virtual-disk management.
 
-## v14.5.1 adaptive resource-policy / OOM audit
+## v14.5.1 adaptive resource-policy / OOM audit (historical)
 
-- Adaptive resource fingerprints now require `POLICY_VERSION=9` across generator, repair verifier, runtime start/restart refresh, root startup helper, and read-only state audit. Existing policy-v8-or-older state is stale and converges through the existing Compose reconciliation path. The fingerprint also records Matrix-enabled secondary gateway count, Kanban concurrency, and the derived Hermes topology floor.
-- Policy v9 retains hard per-container ceilings and an aggregate budget rather than removing safeguards. It preserves the audited Hermes correction and adds CPU-backed Ollama pressure headroom: <=6 GiB retains a 30% reserve; CPU-backed managed Ollama on >6-12 GiB uses a 10% reserve and a 4608 MiB provisional floor before model artifacts are measurable, then a model/context-aware floor after download; other >6-24 GiB shapes use 20%; >24 GiB uses 15%. Hermes keeps a 1024 MiB preferred floor and Honcho API 512 MiB.
+- The v14.5.1 release required `POLICY_VERSION=9` across generator, repair verifier, runtime start/restart refresh, root startup helper, and read-only state audit. Existing policy-v8-or-older state is stale and converges through the existing Compose reconciliation path. The fingerprint also records Matrix-enabled secondary gateway count, Kanban concurrency, and the derived Hermes topology floor.
+- v14.5.1 policy v9 retained hard per-container ceilings and an aggregate budget rather than removing safeguards. It preserves the audited Hermes correction and adds CPU-backed Ollama pressure headroom: <=6 GiB retains a 30% reserve; CPU-backed managed Ollama on >6-12 GiB uses a 10% reserve and a 4608 MiB provisional floor before model artifacts are measurable, then a model/context-aware floor after download; other >6-24 GiB shapes use 20%; >24 GiB uses 15%. Hermes keeps a 1024 MiB preferred floor and Honcho API 512 MiB.
 - CPU ceilings remain derived from processors visible to WSL and are now verified live against Docker `HostConfig.NanoCpus` as well as memory against `HostConfig.Memory`; stale CPU quotas are therefore repairable policy drift.
-- The old proportional low-RAM fallback is removed: if enabled-service plus profile/Kanban topology minima cannot fit inside the post-reserve budget, policy v9 refuses the adaptive plan instead of manufacturing tiny hard ceilings. Lighter selections remain valid when their own minima fit.
+- The old proportional low-RAM fallback is removed: if enabled-service plus profile/Kanban topology minima cannot fit inside the post-reserve budget, v14.5.1 policy v9 refused the adaptive plan instead of manufacturing tiny hard ceilings. Lighter selections remain valid when their own minima fit.
 - On the audited ~9946 MiB CPU-backed full-stack shape, the deterministic planner now yields approximately Hermes 1040 / Honcho API 528 / Ollama 4640 MiB. This retains the policy-v4 Hermes correction and adds measured headroom over policy v6, where Ollama reached ~98% of a 4128 MiB hard ceiling and recorded >15,000 `memory.max` events.
 - `state-audit.py` now treats Docker `OOMKilled=true` on a selected running managed container as `runtimePolicy PARTIAL`. `./manage.sh verify` and the v14.5 read-only repair planner inherit that result instead of allowing recovered endpoints to mask active cgroup starvation.
 - Global WSL `memory` / `autoMemoryReclaim`, user `compose.override.yaml`, profiles/providers, Matrix identity, persistent volumes, and the existing mutating reconciliation engine remain outside this patch.

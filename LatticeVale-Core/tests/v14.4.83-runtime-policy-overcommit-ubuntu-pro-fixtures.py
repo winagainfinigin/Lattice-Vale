@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert VERSION in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2'}, VERSION
+assert VERSION in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, VERSION
 
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
@@ -20,11 +20,11 @@ features = (REPO / 'docs/FEATURES.md').read_text(encoding='utf-8')
 instructions = (REPO / 'docs/Instructions.txt').read_text(encoding='utf-8')
 
 # The current adaptive policy must converge through every clean/repair/start/audit path that owns the overlay.
-assert "printf 'POLICY_VERSION=9\\nCPUS=%s" in cfg
-assert 'saved_version" == 9' in cfg
+assert '[POLICY_VERSION]=11' in cfg and "printf 'POLICY_VERSION=%s\\n'" in cfg
+assert 'statev POLICY_VERSION)" == 11' in cfg
 assert './configure-stack.sh --refresh-resource-policy' in manage
 assert './configure-stack.sh --refresh-resource-policy' in boot
-assert 'values.get("POLICY_VERSION") != "9"' in audit
+assert 'values.get("POLICY_VERSION") != "11"' in audit
 assert 'run_uncheckpointed_repair_step repair_runtime_policy' in cfg
 assert 'state_mark infrastructure pending' in cfg and 'state_mark reconcile pending' in cfg
 

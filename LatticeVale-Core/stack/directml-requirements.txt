@@ -1,0 +1,16 @@
+# LatticeVale DirectML text gateway - pinned vendor-neutral compatibility envelope.
+# GPU execution is provided by torch-directml. To prevent pip from downloading
+# irrelevant CUDA/NVIDIA runtimes on AMD/Intel/Qualcomm systems, directml-gateway.sh
+# installs these separately from the official PyTorch CPU wheel index:
+#   torch==2.4.1+cpu
+#   torchvision==0.19.1+cpu
+# and then installs:
+#   torch-directml==0.2.5.dev240914 --no-deps
+# The remaining framework/runtime dependencies are kept here so the entire isolated
+# environment is still fingerprinted by this file. NumPy stays below 2 for the
+# conservative preview-backend ABI envelope.
+numpy<2
+transformers==4.46.3
+accelerate==0.34.2
+safetensors==0.4.5
+sentencepiece==0.2.0
