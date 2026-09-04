@@ -213,7 +213,7 @@ a69cc760f3fda426b6eba90ec9fbfc4c8cf385b2ea5e6e0f0cd3f5bfec6151a0  LatticeVale-Co
 4f81ad3471e702acbeb1f05779b56f3bd485cd268a53baf877c5fd3bdaa083a7  LatticeVale-Core/tests/v14.5.1-release-identity-fixtures.py
 64dd80ab1744e7339bf3858c7a900c0c06dfc3ca842f2be72c4b69f134235e7b  LatticeVale-Core/tests/v14.5.1-resource-policy-oom-fixtures.py
 a789db7ffb851d2e37d5d60937b8aee403448f6a3143ba6e93e063e13fa37a7d  LatticeVale-Core/tests/v14.5.2-documentation-audit-fixtures.py
-6a60e8a2bcb9b65457a711743cda40de93e6602029f2964034a2b9e0016e61d7  LatticeVale-Core/tests/v14.5.2-option7-cleanup-fixtures.py
+b35924ab5b3c87c4888d939aea95663ed6b75019fb0b3c28a03ccb1390419d38  LatticeVale-Core/tests/v14.5.2-option7-cleanup-fixtures.py
 129cd719aaceae3ea5f659bbff15825d0df07119b2071c9ceeff40d97c722e62  LatticeVale-Core/tests/v14.5.2-release-identity-fixtures.py
 1d7b1f12ca45620d771e924bcd3f8a6839234cf91690b822204268ed1e0e53b4  LatticeVale-Core/tests/v14.5.3-directml-hybrid-fixtures.py
 a1483d9eaaa37218f7dfde3e01e39f98cfbbe8f6f93351857eaabc01baeb46ee  LatticeVale-Core/tests/v14.5.4-vram-lowmem-fixtures.py

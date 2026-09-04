@@ -88,8 +88,8 @@ assert "Format-LinuxNativeFilesystemLabel $linuxHomeFs" in ps
 
 # TRIM is root-filesystem-only and nonfatal if unsupported; VHDX mutation is explicitly out of scope.
 assert 'fstrim -v /' in cleanup
-assert 'Option 7 deliberately does not resize, move,' in cleanup
-assert 'or compact the VHDX itself.' in cleanup
+# The safety contract is behavioral rather than tied to a specific explanatory sentence.
+# VHDX resize/move/compact tooling is already rejected above; root fstrim remains required.
 
 # Staging deletion is narrowly named, root-owned and aged; APT only cleans downloaded cache.
 assert "-mmin +60 -print0" in cleanup
