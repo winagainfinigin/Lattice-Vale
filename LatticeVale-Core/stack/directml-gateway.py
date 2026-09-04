@@ -47,11 +47,13 @@ NATIVE_FALLBACK_URL = os.environ.get("LATTICEVALE_NATIVE_OLLAMA_URL", "").rstrip
 REQUESTED_ADAPTER_NAME = os.environ.get("LATTICEVALE_DIRECTML_ADAPTER_NAME", "").strip()
 REQUESTED_GPU_VENDOR = os.environ.get("LATTICEVALE_DIRECTML_GPU_VENDOR", "").strip().lower()
 FORCE_FALLBACK = os.environ.get("LATTICEVALE_DIRECTML_FORCE_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+HOST_RESERVE_MIB = max(1024, min(int(os.environ.get("LATTICEVALE_DIRECTML_HOST_RESERVE_MIB", "2048")), 8192))
+CPU_THREADS = max(1, min(int(os.environ.get("LATTICEVALE_DIRECTML_CPU_THREADS", str(max(1, (os.cpu_count() or 2) // 2)))), 4))
 
 os.environ.setdefault("HF_HOME", str(HF_HOME))
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-os.environ.setdefault("OMP_NUM_THREADS", str(max(1, min(4, (os.cpu_count() or 2) // 2))))
-os.environ.setdefault("MKL_NUM_THREADS", os.environ["OMP_NUM_THREADS"])
+os.environ.setdefault("OMP_NUM_THREADS", str(CPU_THREADS))
+os.environ.setdefault("MKL_NUM_THREADS", str(CPU_THREADS))
 
 MODEL_LOCK = threading.RLock()
 INFERENCE_LOCK = threading.Lock()  # one GPU generation at a time: bounded VRAM/RAM spikes
@@ -298,23 +300,32 @@ def _model_vram_plan(model: Any) -> tuple[int, int, int, int, str]:
     return weight_mib, estimated_mib, effective_context, budget_mib, detail
 
 
+def _host_mem_available_mib() -> int:
+    try:
+        for line in Path("/proc/meminfo").read_text(encoding="utf-8", errors="replace").splitlines():
+            if line.startswith("MemAvailable:"):
+                return max(0, int(line.split()[1]) // 1024)
+    except Exception:
+        pass
+    return 0
+
+
 def probe_dependencies() -> dict[str, Any]:
     global TORCH, DML_DEVICE, DEPENDENCY_PROBE, LAST_ERROR
     with STATE_LOCK:
         try:
+            if FORCE_FALLBACK:
+                raise RuntimeError("DirectML is temporarily disabled after a prior hard gateway/model failure; serving Ollama fallback without importing the DirectML runtime")
             import torch
             import torch_directml
             import transformers
-
-            if FORCE_FALLBACK:
-                raise RuntimeError("DirectML is temporarily disabled after a prior hard gateway/model failure; Resume / repair will retry it")
             device, device_index, vram_mib, device_name = _directml_device_and_vram(torch_directml)
             # A real operation proves more than merely constructing the device handle.
             value = (torch.tensor([1.0], dtype=torch.float32).to(device) + 2.0).cpu().item()
             if abs(float(value) - 3.0) > 0.001:
                 raise RuntimeError("DirectML tensor verification produced an unexpected result")
             try:
-                torch.set_num_threads(max(1, min(4, (os.cpu_count() or 2) // 2)))
+                torch.set_num_threads(CPU_THREADS)
             except Exception:
                 pass
             TORCH = torch
@@ -358,6 +369,12 @@ def _load_model() -> tuple[Any, Any, Any]:
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
+            available_mib = _host_mem_available_mib()
+            if available_mib and available_mib < HOST_RESERVE_MIB:
+                raise RuntimeError(
+                    f"DirectML host-RAM admission refused: MemAvailable={available_mib}MiB is below "
+                    f"the LatticeVale host reserve={HOST_RESERVE_MIB}MiB; using Ollama fallback instead"
+                )
             HF_HOME.mkdir(parents=True, exist_ok=True)
             tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, cache_dir=str(HF_HOME), trust_remote_code=False)
             kwargs: dict[str, Any] = {

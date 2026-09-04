@@ -22,7 +22,7 @@ assert 'DIRECTML_VRAM_LIMIT_PCT=75' in cfg
 
 # Resource policy v11 removes the v14.5.3 additive host-reserve double count and
 # introduces a tighter <=12 GiB WSL profile without weakening the 1 GiB Hermes floor.
-for marker in ('POLICY_VERSION=11','[LOW_MEMORY_PROFILE]="$(if (( mem_mib <= 12288 ))','mem_mib <= 12288','directml_reserve_mib=1792'):
+for marker in ('POLICY_VERSION=11','[LOW_MEMORY_PROFILE]="$(if (( mem_mib <= 12288 ))','mem_mib <= 12288','directml_reserve_mib=$((mem_mib/4))','directml_reserve_mib=2048','directml_reserve_mib=4096'):
     assert marker in cfg, marker
 assert 'reserve_mib=$((reserve_mib+directml_reserve_mib))' not in cfg
 assert '(( reserve_mib < directml_reserve_mib )) && reserve_mib=$directml_reserve_mib' in cfg
@@ -53,14 +53,14 @@ assert alloc['hermes']>=1024 and alloc['ollama']>=3072 and sum(alloc.values())<=
 assert alloc['honcho-api']>=384 and alloc['honcho-deriver']>=256,alloc
 
 # 16 GB-class Windows hosts commonly expose about 8 GiB to WSL by default. With
-# DirectML's 1536 MiB host-reserve floor, the container budget is 6656 MiB. The
-# audited user's ~9.7 GiB WSL case yields an 8154 MiB container budget. Both must
+# DirectML now retains a bounded 25% WSL-host reserve (minimum 2 GiB) before
+# distributing the remaining container budget. Representative safe budgets must
 # admit the full provisional hybrid topology before downloaded model artifacts are
 # measured; post-download model sizing remains authoritative.
 def run_budget(budget):
     args=[str(budget),'true','true','true','true','true','cpu','1024','3072','true']
     return subprocess.run([sys.executable,'-c',planner,*args],text=True,capture_output=True,timeout=10)
-for budget in (6656,8154):
+for budget in (6144,7168):
     r=run_budget(budget); assert r.returncode==0,(budget,r.stderr)
     a={k:int(v) for k,v in (line.split('=',1) for line in r.stdout.splitlines())}
     assert sum(a.values())<=budget and a['hermes']>=1024 and a['ollama']>=3072,(budget,a)

@@ -1021,7 +1021,7 @@ def main() -> int:
                 audit_accel = env_value(root / ".env", "LATTICEVALE_OLLAMA_ACCELERATION").lower() or str(opts.get("ollamaAcceleration") or "cpu").lower()
                 text_mib, embed_mib, ollama_context, ollama_floor = expected_ollama_policy_metrics(root, opts, audit_accel, current_mem_mib)
                 if directml_selected:
-                    directml_reserve_mib = 1536 if current_mem_mib <= 8192 else 1792 if current_mem_mib <= 12288 else 2048 if current_mem_mib <= 16384 else 2560 if current_mem_mib <= 24576 else 3072
+                    directml_reserve_mib = max(2048, min(4096, current_mem_mib // 4))
                 else:
                     directml_reserve_mib = 0
                 lowmem = 1 if current_mem_mib <= 12288 else 0

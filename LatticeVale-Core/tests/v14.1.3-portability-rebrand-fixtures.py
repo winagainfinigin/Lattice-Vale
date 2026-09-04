@@ -94,7 +94,7 @@ assert 'function Confirm-LatticeValeGlobalWslRestart' in installer
 assert "@('--list','--running','--quiet')" in installer or "@('--list', '--running', '--quiet')" in installer
 assert 'Other running distros:' in installer
 assert "Read-YesNo 'Continue and temporarily stop all currently running WSL distros" in installer
-assert installer.index('Confirm-LatticeValeGlobalWslRestart $DistroName') < installer.index('Set-WslGlobalInstanceIdleTimeoutDisabled $wslLifetime.Path')
+assert installer.index('Confirm-LatticeValeGlobalWslRestart $DistroName') < installer.index('Set-WslGlobalIdleTimeoutsDisabled $wslLifetime.Path')
 
 # New state uses LatticeVale markers while still reading old marker names for migration.
 assert 'LATTICEVALE_PROVISIONING_STATE' in configure

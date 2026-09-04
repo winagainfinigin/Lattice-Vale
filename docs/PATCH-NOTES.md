@@ -2,6 +2,14 @@
 
 ## v14.5.46 — GPU-aware onboarding / selected-path prerequisite provisioning
 
+### Same-version WSL stability correction
+
+A same-version v14.5.46 repair can now resume directly at a later checkpoint without losing helper functions that were previously declared only while `prepare_config` executed. This fixes the observed `apply_honcho_timeout_policy: command not found` failure during the `integrations` stage.
+
+DirectML is also treated as an additional WSL-host workload rather than inheriting CPU-Ollama's most aggressive <=12 GiB memory relaxation. The canonical policy retains 25% of WSL-visible RAM for host/kernel/DirectML work, bounded to 2-4 GiB, and the gateway admits model loading only while that host headroom is actually available. DirectML helper CPU threads use approximately half of WSL-visible CPUs (maximum four), and repeated hard worker startup failures back off and switch the gateway to its existing Ollama fallback path instead of repeatedly importing the failing DirectML runtime.
+
+Persistent WSL server lifetime now writes both current WSL idle controls—`[general] instanceIdleTimeout=-1` and `[wsl2] vmIdleTimeout=-1`—only when the user selected that behavior. The installer still backs up `.wslconfig`, preserves unrelated settings, defers the global WSL restart until Linux repair work succeeds, and runs the existing 75-second persistence verification afterward.
+
 - Detects recognized AMD/NVIDIA/Intel/Qualcomm Windows adapters and combines that with selected-distro WSL capability probes before recommending local inference.
 - Recommends managed Ollama NVIDIA for verified WSL NVIDIA, managed Ollama ROCm only for real ROCm device exposure, DirectML for healthy cross-vendor DX12 fallback, or CPU-safe Ollama when no GPU path is verified.
 - Reports whether DirectML base packages/venv and NVIDIA Container Toolkit are already reusable; installs missing installer-owned prerequisites only after that path is selected.

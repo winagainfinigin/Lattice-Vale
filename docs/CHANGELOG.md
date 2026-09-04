@@ -2,6 +2,13 @@
 
 ## 14.5.46 - 2026-09-03
 
+### WSL/DirectML stability hotfix (same release identity)
+- Fixes Resume / repair skipping `prepare_config` and later failing in `integrations` because Honcho timeout helpers were defined only inside the skipped stage; cross-stage helpers are now available from script load time.
+- Restores conservative host headroom when DirectML is selected: the <=12 GiB CPU-Ollama 10% reserve relaxation no longer applies to the additional WSL-host DirectML process, and DirectML now keeps a bounded 25% host reserve (2-4 GiB) outside Docker.
+- Stops the DirectML gateway from overriding its own half-CPU policy with hardcoded four-thread OMP/MKL settings; compact 4-vCPU WSL instances now use two DirectML helper threads.
+- Adds host-RAM admission before DirectML model load and bounded supervisor backoff/fallback so a broken DirectML runtime cannot repeatedly hot-loop native imports while the Ollama fallback is available.
+- When persistent WSL server lifetime is explicitly selected, configures both distro-instance `instanceIdleTimeout=-1` and VM `vmIdleTimeout=-1`, preserving unrelated `.wslconfig` content and applying the global restart only after Linux repair stages complete.
+
 - Adds a GPU-aware questionnaire plan built from recognized Windows GPU inventory plus direct selected-distro DirectML/Ollama prerequisite probes.
 - Marks the recommended local text backend and managed-Ollama acceleration choice while retaining explicit user selection.
 - Reuses or installs missing selected-path DirectML Ubuntu prerequisites; existing healthy DirectML venvs remain reusable and repairable.

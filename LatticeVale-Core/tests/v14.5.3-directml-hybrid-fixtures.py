@@ -12,7 +12,7 @@ assert "Get-OptionValue $existingOptions 'localTextBackend' 'ollama'" in ps
 assert 'Qwen/Qwen2.5-1.5B-Instruct' in ps and 'directmlPort' in ps
 assert 'python3-venv libblas3 libomp5 liblapack3' in boot
 assert 'latticevale-directml-gateway.service' in boot and 'directml-gateway.sh supervise' in boot
-assert 'DIRECTML_HOST_RESERVE_MIB' in cfg and 'directml_reserve_mib=1792' in cfg and 'directml_reserve_mib=3072' in cfg
+assert 'DIRECTML_HOST_RESERVE_MIB' in cfg and 'directml_reserve_mib=$((mem_mib/4))' in cfg and 'directml_reserve_mib=2048' in cfg and 'directml_reserve_mib=4096' in cfg
 assert 'http://directml.host:%s/v1' in cfg and 'local_text_openai_base_url' in cfg
 assert 'embedding_base' in cfg and 'text_base' in cfg and 'VECTOR_DIMENSIONS = 1536' in cfg
 assert compose.count('directml.host:host-gateway')==3

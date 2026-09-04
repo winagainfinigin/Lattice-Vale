@@ -189,14 +189,27 @@ probe_health() {
   curl -fsS --noproxy '*' --connect-timeout 2 --max-time 8 "$url"
 }
 
+directml_cpu_threads() {
+  local cpus
+  cpus="$(nproc 2>/dev/null || printf 2)"
+  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 ]] || cpus=2
+  cpus=$(((cpus+1)/2))
+  (( cpus < 1 )) && cpus=1
+  (( cpus > 4 )) && cpus=4
+  printf '%s' "$cpus"
+}
+
 start_worker() {
-  local host py native_url='' pid
+  local host py native_url='' pid cpu_threads host_reserve
   host="$(docker_host_gateway_ip)" || { log_msg 'waiting for Docker default host-gateway'; return 1; }
   py="$(python_bin)" || return 1
   if [[ "$(ollama_backend)" == windows-native ]]; then native_url="$(native_fallback_url 2>/dev/null || true)"; fi
   mkdir -p logs "$state_dir" "$hf_cache"
   stop_worker
-  log_msg "starting DirectML gateway worker listen=${host}:$(port) model=$(model) fallback=$(ollama_backend)"
+  cpu_threads="$(directml_cpu_threads)"
+  host_reserve="$(sed -n 's/^DIRECTML_HOST_RESERVE_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1 || true)"
+  [[ "$host_reserve" =~ ^[0-9]+$ ]] || host_reserve=2048
+  log_msg "starting DirectML gateway worker listen=${host}:$(port) model=$(model) fallback=$(ollama_backend) cpu_threads=${cpu_threads} host_reserve=${host_reserve}MiB"
   env \
     HF_HOME="$PWD/$hf_cache" \
     TOKENIZERS_PARALLELISM=false \
@@ -212,8 +225,10 @@ start_worker() {
     LATTICEVALE_NATIVE_OLLAMA_URL="$native_url" \
     LATTICEVALE_DIRECTML_MAX_NEW_TOKENS=512 \
     LATTICEVALE_DIRECTML_IDLE_UNLOAD_SECONDS=300 \
-    OMP_NUM_THREADS="${OMP_NUM_THREADS:-4}" \
-    MKL_NUM_THREADS="${MKL_NUM_THREADS:-4}" \
+    LATTICEVALE_DIRECTML_HOST_RESERVE_MIB="$host_reserve" \
+    LATTICEVALE_DIRECTML_CPU_THREADS="$cpu_threads" \
+    OMP_NUM_THREADS="$cpu_threads" \
+    MKL_NUM_THREADS="$cpu_threads" \
     "$py" "$PWD/directml-gateway.py" --listen-address "$host" --listen-port "$(port)" >>"$log_file" 2>&1 </dev/null &
   pid=$!
   printf '%s\n' "$pid" >"$pid_file"
@@ -236,9 +251,25 @@ supervise_gateway() {
   cleanup() { stop_worker; rm -f "$supervisor_pid_file"; log_msg 'DirectML gateway supervisor stopped'; exit 0; }
   trap cleanup TERM INT HUP
   log_msg "DirectML gateway supervisor started pid=$$"
+  local failures=0 delay=5
   while [[ ! -e "$disabled_file" ]]; do
     if ! owned_worker_pid >/dev/null 2>&1 || ! probe_health >/dev/null 2>&1; then
-      start_worker || { sleep 5; continue; }
+      if start_worker; then
+        failures=0; delay=5
+      else
+        failures=$((failures+1))
+        if (( failures >= 2 )) && [[ ! -e "$force_fallback_file" ]]; then
+          log_msg 'DirectML worker failed twice before reaching health; switching to lightweight Ollama fallback to protect WSL host resources'
+          printf '%s\n' "$(date --iso-8601=seconds) repeated DirectML worker startup failure" >"$force_fallback_file"
+          failures=0; delay=5
+        else
+          (( delay < 60 )) && delay=$((delay*3))
+          (( delay > 60 )) && delay=60
+          log_msg "DirectML worker restart deferred ${delay}s after startup failure"
+          sleep "$delay"
+        fi
+        continue
+      fi
     fi
     sleep 15
   done

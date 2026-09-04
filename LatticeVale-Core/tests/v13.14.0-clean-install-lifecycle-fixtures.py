@@ -34,18 +34,19 @@ assert 'bash -c \'cd "$1" && timeout --foreground --kill-after=10s 240s docker c
 assert '/root/hermes-stack' not in generated
 assert 'cd "$HOME/hermes-stack"' not in generated
 
-# WSL service lifetime: use the distro/instance setting introduced in Store WSL 2.5.4,
-# do not conflate it with the VM-level vmIdleTimeout, and validate across the observed
-# >60 second failure window.
+# WSL service lifetime: Store WSL 2.5.4+ exposes the distro/instance timer. The
+# current v14.5.46 hardening also disables the VM idle timer when the user explicitly
+# requests persistent server lifetime, then validates across the observed >60s window.
 for text in (
     "[version]'2.5.4'",
     'instanceIdleTimeout=-1',
-    'function Set-WslGlobalInstanceIdleTimeoutDisabled',
+    'function Set-WslGlobalIdleTimeoutsDisabled',
     'function Test-LatticeValeWslPersistence',
     'Test-LatticeValeWslPersistence $DistroName 75',
     'keepWslServicesRunning = $keepWslServicesRunning',
 ): assert text in ps, text
-assert 'vmIdleTimeout=-1' not in ps
+assert 'vmIdleTimeout=-1' in ps
+assert 'function Get-WslGlobalVmIdleTimeout' in ps
 assert "Get-OptionValue $old 'autoStart' $false" in ps
 assert "Get-OptionValue $existingOptions 'autoStart' $false" in ps
 assert "$existingOptions.PSObject.Properties['keepWslServicesRunning']" in ps

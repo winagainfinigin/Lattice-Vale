@@ -2338,48 +2338,78 @@ function Get-WslGlobalInstanceIdleTimeout {
     return [pscustomobject]@{ Path=$path; Value='default'; Explicit=$false }
 }
 
-function Set-WslGlobalInstanceIdleTimeoutDisabled([string]$Path) {
-    # WSL 2.5.4+ distinguishes distro/instance idleness from the VM-level
-    # [wsl2] vmIdleTimeout. LatticeVale changes only the instance lifetime key and
-    # preserves all unrelated .wslconfig content.
+function Get-WslGlobalVmIdleTimeout {
+    $path = Join-Path $env:USERPROFILE '.wslconfig'
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{ Path=$path; Value='default'; Explicit=$false }
+    }
+    try { $text = Get-Content -LiteralPath $path -Raw -ErrorAction Stop } catch {
+        return [pscustomobject]@{ Path=$path; Value='unknown'; Explicit=$false }
+    }
+    $section = ''
+    foreach ($line in ($text -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if ($trimmed -match '^\[(.+)\]$') { $section = $Matches[1].Trim().ToLowerInvariant(); continue }
+        if ($section -eq 'wsl2' -and $trimmed -match '^(?i:vmIdleTimeout)\s*=\s*(.+?)\s*$') {
+            return [pscustomobject]@{ Path=$path; Value=$Matches[1].Trim(); Explicit=$true }
+        }
+    }
+    return [pscustomobject]@{ Path=$path; Value='default'; Explicit=$false }
+}
+
+function Set-WslGlobalIdleTimeoutsDisabled([string]$Path) {
+    # Current WSL has separate distro/instance and VM idle timers. When the user
+    # explicitly selects persistent server lifetime, disable both while preserving
+    # every unrelated .wslconfig setting. A single pre-change backup covers both keys.
     $exists = Test-Path -LiteralPath $Path -PathType Leaf
     $text = if ($exists) { Get-Content -LiteralPath $Path -Raw -ErrorAction Stop } else { '' }
     $lines = [System.Collections.Generic.List[string]]::new()
     foreach ($line in ($text -split "`r?`n", -1)) { $lines.Add($line) }
     if ($lines.Count -eq 1 -and $lines[0] -eq '' -and -not $exists) { $lines.Clear() }
 
-    $section = ''
-    $generalHeader = -1
-    $generalEnd = $lines.Count
-    $matching = [System.Collections.Generic.List[int]]::new()
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        $trimmed = $lines[$i].Trim()
-        if ($trimmed -match '^\[(.+)\]$') {
-            if ($section -eq 'general' -and $generalEnd -eq $lines.Count) { $generalEnd = $i }
-            $section = $Matches[1].Trim().ToLowerInvariant()
-            if ($section -eq 'general' -and $generalHeader -lt 0) { $generalHeader = $i; $generalEnd = $lines.Count }
-            continue
+    function Set-LatticeValeWslConfigValue(
+        [System.Collections.Generic.List[string]]$Lines,
+        [string]$SectionName,
+        [string]$Key,
+        [string]$Value
+    ) {
+        $section = ''
+        $sectionHeader = -1
+        $sectionEnd = $Lines.Count
+        $matching = [System.Collections.Generic.List[int]]::new()
+        for ($i = 0; $i -lt $Lines.Count; $i++) {
+            $trimmed = $Lines[$i].Trim()
+            if ($trimmed -match '^\[(.+)\]$') {
+                if ($section -eq $SectionName -and $sectionEnd -eq $Lines.Count) { $sectionEnd = $i }
+                $section = $Matches[1].Trim().ToLowerInvariant()
+                if ($section -eq $SectionName -and $sectionHeader -lt 0) { $sectionHeader = $i; $sectionEnd = $Lines.Count }
+                continue
+            }
+            if ($section -eq $SectionName -and $trimmed -match ('^(?i:' + [regex]::Escape($Key) + ')\s*=')) { $matching.Add($i) }
         }
-        if ($section -eq 'general' -and $trimmed -match '^(?i:instanceIdleTimeout)\s*=') { $matching.Add($i) }
+
+        $desired = "$Key=$Value"
+        $changed = $false
+        if ($matching.Count -gt 0) {
+            $first = $matching[0]
+            $indent = ([regex]::Match($Lines[$first], '^\s*')).Value
+            if ($Lines[$first].Trim() -ne $desired) { $Lines[$first] = "${indent}${desired}"; $changed = $true }
+            for ($j = $matching.Count - 1; $j -ge 1; $j--) { $Lines.RemoveAt($matching[$j]); $changed = $true }
+        } elseif ($sectionHeader -ge 0) {
+            $Lines.Insert($sectionEnd, $desired)
+            $changed = $true
+        } else {
+            if ($Lines.Count -gt 0 -and $Lines[$Lines.Count-1] -ne '') { $Lines.Add('') }
+            $Lines.Add("[$SectionName]")
+            $Lines.Add($desired)
+            $changed = $true
+        }
+        return $changed
     }
 
     $changed = $false
-    if ($matching.Count -gt 0) {
-        $first = $matching[0]
-        $indent = ([regex]::Match($lines[$first], '^\s*')).Value
-        if ($lines[$first].Trim() -ne 'instanceIdleTimeout=-1') { $lines[$first] = "${indent}instanceIdleTimeout=-1"; $changed = $true }
-        # Duplicate definitions are ambiguous. Keep the first deterministic value and
-        # remove only duplicate definitions of this exact key, leaving all other text.
-        for ($j = $matching.Count - 1; $j -ge 1; $j--) { $lines.RemoveAt($matching[$j]); $changed = $true }
-    } elseif ($generalHeader -ge 0) {
-        $lines.Insert($generalEnd, 'instanceIdleTimeout=-1')
-        $changed = $true
-    } else {
-        if ($lines.Count -gt 0 -and $lines[$lines.Count-1] -ne '') { $lines.Add('') }
-        $lines.Add('[general]')
-        $lines.Add('instanceIdleTimeout=-1')
-        $changed = $true
-    }
+    if (Set-LatticeValeWslConfigValue $lines 'general' 'instanceIdleTimeout' '-1') { $changed = $true }
+    if (Set-LatticeValeWslConfigValue $lines 'wsl2' 'vmIdleTimeout' '-1') { $changed = $true }
 
     if (-not $changed) { return [pscustomobject]@{ Changed=$false; Backup=''; Path=$Path } }
     $backup = ''
@@ -6392,7 +6422,7 @@ if ($reusePriorChoices) {
         } else {
             # v13.13.4 and earlier did not record this global-policy choice. Ask once on
             # the first v13.14 repair instead of silently mutating the user's .wslconfig.
-            $keepWslServicesRunning = Read-ChoiceExplicit 'Prevent WSL from auto-shutting down this running server instance?' 'Uses WSL''s supported global [general] instanceIdleTimeout=-1 policy. This is not a keepalive process, polling loop, or Windows auto-start; your normal launcher still owns startup.' 'Leaves WSL''s instance-idle policy unchanged; on affected WSL builds the distro may terminate even while server services are intended to stay available.'
+            $keepWslServicesRunning = Read-ChoiceExplicit 'Prevent WSL from auto-shutting down this running server instance?' 'Uses WSL''s supported [general] instanceIdleTimeout=-1 plus [wsl2] vmIdleTimeout=-1 policies. This is not a polling loop or Windows auto-start; your normal launcher still owns startup.' 'Leaves WSL''s instance-idle policy unchanged; on affected WSL builds the distro may terminate even while server services are intended to stay available.'
         }
     } else {
         $keepWslServicesRunning = $false
@@ -6613,7 +6643,7 @@ if ($reusePriorChoices) {
             $containerResourceLimits = Read-Choice 'Apply adaptive CPU/RAM ceilings to LatticeVale containers?' 'Recalculates one safe container-memory budget from the CPU/RAM currently visible to WSL, leaves extra WSL/Windows headroom, and applies conservative allocator/Synapse/PostgreSQL RAM tuning to enabled services. It auto-refreshes after a WSL restart when those limits change. User compose.override.yaml remains authoritative.' 'LatticeVale container ceilings are disabled.' $containerResourceLimits
             $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Changes only the managed unattended-updates policy.' 'Ubuntu security updates remain manual.' $unattended
             if ($wslLifetimeSupported) {
-                $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Changes only LatticeVale ownership of the supported global instanceIdleTimeout policy.' 'The existing LatticeVale WSL lifetime policy is disabled.' $keepWslServicesRunning
+                $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Changes only LatticeVale ownership of the supported instance/VM idle-timeout keys required for persistent WSL server lifetime.' 'The existing LatticeVale WSL lifetime policy is disabled.' $keepWslServicesRunning
             }
             $autoStart = Read-Choice 'Start the stack automatically at Windows logon?' 'Changes only the LatticeVale scheduled auto-start task.' 'No full-stack auto-start task is configured.' $autoStart
             $windowsShortcuts = Read-Choice 'Create Windows desktop shortcuts to start and shut down this LatticeVale install?' 'Changes only installer-owned shortcuts for this exact install.' 'No LatticeVale desktop shortcuts are requested.' $windowsShortcuts
@@ -7004,7 +7034,7 @@ if ($reusePriorChoices) {
         $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Automatically installs eligible Ubuntu security updates inside WSL.' 'Updates must be applied manually.' ([bool](Get-OptionValue $old 'unattendedUpdates' $true))
         $keepWslServicesRunning = $false
         if ($wslLifetimeSupported) {
-            $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Uses WSL''s supported global [general] instanceIdleTimeout=-1 policy. This is not a keepalive process, polling loop, or Windows auto-start; your normal launcher still owns startup.' 'Leaves WSL''s instance-idle policy unchanged; on affected WSL builds the distro may terminate even while server services are intended to stay available.' ([bool](Get-OptionValue $old 'keepWslServicesRunning' $tailscaleMatrix))
+            $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Uses WSL''s supported [general] instanceIdleTimeout=-1 plus [wsl2] vmIdleTimeout=-1 policies. This is not a polling loop or Windows auto-start; your normal launcher still owns startup.' 'Leaves WSL''s instance-idle policy unchanged; on affected WSL builds the distro may terminate even while server services are intended to stay available.' ([bool](Get-OptionValue $old 'keepWslServicesRunning' $tailscaleMatrix))
         }
         $autoStart = Read-Choice 'Start the stack automatically at Windows logon?' 'Creates a scheduled task that starts Docker/Hermes after sign-in. The small Windows Tailscale relay is separate and never wakes WSL unless this option is enabled.' 'Start LatticeVale with your normal launcher/./manage.sh start. The Windows relay may start at logon, but stays passive and does not start or keep WSL running.' ([bool](Get-OptionValue $old 'autoStart' $false))
         $windowsShortcuts = Read-Choice 'Create Windows desktop shortcuts to start and shut down this LatticeVale install?' 'Creates current-user Start and Shut Down shortcuts bound to this exact WSL distro, Linux user, and LatticeVale stack. Start follows install-options through manage.sh; Shut Down stops selected services/relay but intentionally does not terminate the distro, avoiding a known WSL 2.7.x hvsocket/session regression.' 'No desktop shortcuts are created. Existing non-LatticeVale shortcuts are never overwritten or removed.' ([bool](Get-OptionValue $old 'windowsShortcuts' $false))
@@ -7128,13 +7158,14 @@ if ($tailscaleMatrix) {
 $wslNetworking = Get-WslGlobalNetworkingMode
 $activeWslNetworkingMode = Get-WslNetworkingMode $DistroName
 $wslLifetime = Get-WslGlobalInstanceIdleTimeout
+$wslVmLifetime = Get-WslGlobalVmIdleTimeout
 # Remote Tailscale endpoints can become unavailable if WSL is allowed to terminate,
 # but LatticeVale must not silently override the user's WSL lifetime policy.
 if ($wslLifetimeSupported -and ($tailscaleDashboard -or $tailscaleMatrix) -and -not $keepWslServicesRunning) {
     Write-Warning 'Remote Tailscale Dashboard/Matrix access is selected while persistent WSL service lifetime is disabled. LatticeVale will preserve that choice; remote endpoints may become unavailable when WSL terminates.'
 }
 
-$applyWslInstanceIdleTimeout = ($keepWslServicesRunning -and (-not $wslLifetime.Explicit -or $wslLifetime.Value -ne '-1'))
+$applyWslLifetimePolicy = ($keepWslServicesRunning -and ((-not $wslLifetime.Explicit -or $wslLifetime.Value -ne '-1') -or (-not $wslVmLifetime.Explicit -or $wslVmLifetime.Value -ne '-1')))
 $wslNetworkingModeOwner = 'user'
 $wslNetworkingModePolicy = if ($activeWslNetworkingMode) { $activeWslNetworkingMode } elseif ($wslNetworking.Mode) { $wslNetworking.Mode } else { 'unknown' }
 $sharedNativeTailscale = (($tailscaleDashboard -or $tailscaleMatrix) -and ($honcho -or $hermesLocalAI) -and $ollamaBackend -eq 'windows-native')
@@ -7444,22 +7475,23 @@ if (($honcho -or $hermesLocalAI) -and $ollamaBackend -eq 'windows-native' -and $
 # bounded WSL restart whenever possible.
 $wslGlobalConfigChanged = $false
 $globalWslRestartLikely = $false
-if ($applyWslInstanceIdleTimeout -and (-not $wslLifetime.Explicit -or $wslLifetime.Value -ne '-1')) { $globalWslRestartLikely = $true }
+if ($applyWslLifetimePolicy) { $globalWslRestartLikely = $true }
 if ($globalWslRestartLikely) {
     # Ask before writing .wslconfig because applying a global WSL change requires a
     # global WSL shutdown; declining must leave the user's global config untouched.
     [void](Confirm-LatticeValeGlobalWslRestart $DistroName)
 }
-if ($applyWslInstanceIdleTimeout) {
-    Write-Step 'Applying persistent WSL service-instance lifetime policy'
-    $lifetimeUpdate = Set-WslGlobalInstanceIdleTimeoutDisabled $wslLifetime.Path
+if ($applyWslLifetimePolicy) {
+    Write-Step 'Applying persistent WSL service-instance + VM lifetime policy'
+    $lifetimeUpdate = Set-WslGlobalIdleTimeoutsDisabled $wslLifetime.Path
     if ($lifetimeUpdate.Changed) {
         $wslGlobalConfigChanged = $true
         if ($lifetimeUpdate.Backup) { Write-Info "Backed up .wslconfig to: $($lifetimeUpdate.Backup)" }
     }
     $currentLifetime = Get-WslGlobalInstanceIdleTimeout
-    if (-not $currentLifetime.Explicit -or $currentLifetime.Value -ne '-1') {
-        throw 'LatticeVale could not apply [general] instanceIdleTimeout=-1 to .wslconfig. The Linux stack is preserved; correct the WSL configuration and rerun.'
+    $currentVmLifetime = Get-WslGlobalVmIdleTimeout
+    if (-not $currentLifetime.Explicit -or $currentLifetime.Value -ne '-1' -or -not $currentVmLifetime.Explicit -or $currentVmLifetime.Value -ne '-1') {
+        throw 'LatticeVale could not apply both [general] instanceIdleTimeout=-1 and [wsl2] vmIdleTimeout=-1 to .wslconfig. The Linux stack is preserved; correct the WSL configuration and rerun.'
     }
 }
 if ($wslGlobalConfigChanged) {
@@ -7475,7 +7507,7 @@ if ($wslGlobalConfigChanged) {
 if ($keepWslServicesRunning) {
     Write-Step 'Validating WSL service-instance persistence'
     if (-not (Test-LatticeValeWslPersistence $DistroName 75)) {
-        throw "WSL distro '$DistroName' stopped during the 75-second persistence test even though LatticeVale configured [general] instanceIdleTimeout=-1. This matches a WSL lifecycle failure rather than an application/container failure. Existing stack data is preserved. Check 'wsl --version', .wslconfig, and current Microsoft WSL issues before rerunning Resume / repair."
+        throw "WSL distro '$DistroName' stopped during the 75-second persistence test even though LatticeVale configured both WSL idle-timeout disable keys. This matches a WSL lifecycle failure rather than an application/container failure. Existing stack data is preserved. Check 'wsl --version', .wslconfig, and current Microsoft WSL issues before rerunning Resume / repair."
     }
     Write-Info "WSL distro '$DistroName' remained running through the idle observation window."
 }

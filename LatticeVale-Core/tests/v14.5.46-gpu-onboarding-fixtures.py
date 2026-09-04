@@ -5,6 +5,9 @@ version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
 assert version == '14.5.46', version
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 boot = (ROOT / 'linux' / 'bootstrap.sh').read_text(encoding='utf-8')
+cfg = (ROOT / 'stack' / 'configure-stack.sh').read_text(encoding='utf-8')
+dml_sh = (ROOT / 'stack' / 'directml-gateway.sh').read_text(encoding='utf-8')
+dml_py = (ROOT / 'stack' / 'directml-gateway.py').read_text(encoding='utf-8')
 
 # Hardware-aware recommendation is distinct from the authoritative runtime probes.
 for token in (
@@ -50,6 +53,34 @@ assert "AMD/ROCm managed Ollama selected. Reusing the WSL-provided /dev/kfd + /d
 # Host/vendor driver ownership remains explicit; LatticeVale must not install a Linux display driver.
 assert 'No Linux NVIDIA display driver was installed.' in boot
 assert 'does not install or replace the Windows/host display driver' in boot
+
+# Same-version Resume / repair may skip prepare_config; helpers used by later stages
+# must therefore be defined globally before the first stage function.
+assert cfg.index('apply_honcho_timeout_policy() {') < cfg.index('stage_prepare_config() {')
+assert cfg.index('apply_honcho_timeout_policy data/hermes/honcho.json') > cfg.index('stage_integrations() {')
+
+# DirectML adds a WSL-host workload that did not exist in the stable v14.5.2 topology.
+assert 'managed_ollama_enabled && ! directml_text_enabled' in cfg
+assert 'directml_reserve_mib=$((mem_mib/4))' in cfg
+assert 'directml_reserve_mib=2048' in cfg and 'directml_reserve_mib=4096' in cfg
+
+# Compact WSL CPU allocations leave CPU for Docker/WSL housekeeping; repeated hard
+# DirectML starts switch to lightweight fallback rather than hot-looping torch imports.
+assert 'directml_cpu_threads() {' in dml_sh
+assert 'OMP_NUM_THREADS="$cpu_threads"' in dml_sh and 'MKL_NUM_THREADS="$cpu_threads"' in dml_sh
+assert 'worker failed twice before reaching health' in dml_sh
+assert 'restart deferred ${delay}s' in dml_sh
+assert 'LATTICEVALE_DIRECTML_HOST_RESERVE_MIB' in dml_sh
+assert dml_py.index('if FORCE_FALLBACK:') < dml_py.index('import torch\n')
+assert '_host_mem_available_mib' in dml_py and 'DirectML host-RAM admission refused' in dml_py
+assert 'torch.set_num_threads(CPU_THREADS)' in dml_py
+
+# Current WSL distinguishes distro-instance idleness from VM idleness. Persistent
+# server lifetime must disable both timers, while repair still applies the policy only
+# after Linux stages complete successfully.
+assert 'function Set-WslGlobalIdleTimeoutsDisabled' in ps
+assert 'instanceIdleTimeout=-1' in ps and 'vmIdleTimeout=-1' in ps
+assert ps.index("if ($applyWslLifetimePolicy) {") > ps.index("Invoke-LatticeValeWslInteractiveGuarded $DistroName")
 
 print('v14.5.46 GPU ONBOARDING / RECOMMENDATION FIXTURES: PASS')
 print('- GPU-vendor + WSL capability plan recommends NVIDIA, ROCm, DirectML, or CPU safely')

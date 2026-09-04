@@ -972,7 +972,7 @@ write_latticevale_compose_overlay() {
   # Other >6-24 GiB shapes keep 20%; <=6 GiB keeps the conservative 30% reserve.
   if (( mem_mib <= 6144 )); then
     reserve_pct=30
-  elif (( mem_mib <= 12288 )) && [[ "$accel" == cpu ]] && managed_ollama_enabled; then
+  elif (( mem_mib <= 12288 )) && [[ "$accel" == cpu ]] && managed_ollama_enabled && ! directml_text_enabled; then
     reserve_pct=10
   elif (( mem_mib <= 24576 )); then
     reserve_pct=20
@@ -989,12 +989,13 @@ write_latticevale_compose_overlay() {
   # VMs while still keeping DirectML outside the Docker budget.
   local directml_reserve_mib=0
   if directml_text_enabled; then
-    if (( mem_mib <= 8192 )); then directml_reserve_mib=1536
-    elif (( mem_mib <= 12288 )); then directml_reserve_mib=1792
-    elif (( mem_mib <= 16384 )); then directml_reserve_mib=2048
-    elif (( mem_mib <= 24576 )); then directml_reserve_mib=2560
-    else directml_reserve_mib=3072
-    fi
+    # DirectML is a WSL-host process, not a cgroup-limited Compose service. Unlike
+    # the v14.5.2 topology it can also use shared GPU/system memory for staging.
+    # Keep a bounded quarter of WSL RAM outside the container budget so model load
+    # cannot consume the last host headroom and destabilize the WSL VM.
+    directml_reserve_mib=$((mem_mib/4))
+    (( directml_reserve_mib < 2048 )) && directml_reserve_mib=2048
+    (( directml_reserve_mib > 4096 )) && directml_reserve_mib=4096
     (( reserve_mib < directml_reserve_mib )) && reserve_mib=$directml_reserve_mib
   fi
   budget_mib=$((mem_mib-reserve_mib))
@@ -3337,6 +3338,67 @@ p=Path(sys.argv[1]); d=json.loads(p.read_text()); d['stages']={}; d['status']='r
 PY_RESET
 fi
 
+# Cross-stage helpers must be defined at script load time. Resume / repair may
+# legitimately skip the prepare-config stage and continue at the later integrations stage.
+# Keeping these helpers global preserves the v14.5.2 repair invariant that any
+# independently resumed stage has all of its callable dependencies available.
+choose_honcho_timeout() {
+  local cpus accel text_mib=0 timeout
+  cpus="$(nproc 2>/dev/null || printf 4)"; [[ "$cpus" =~ ^[0-9]+$ ]] || cpus=4
+  if directml_text_enabled; then
+    # DirectML has a potentially expensive first model load but subsequent calls are
+    # GPU-backed through the shared gateway. Give cold starts room without inheriting
+    # CPU-Ollama's larger model-size timeout penalties.
+    timeout=150
+  elif windows_native_ollama_enabled; then
+    timeout=150
+  else
+    accel="$(sed -n 's/^LATTICEVALE_OLLAMA_ACCELERATION=//p' .env 2>/dev/null | head -n1)"; [[ -n "$accel" ]] || accel="$(resolve_ollama_acceleration 2>/dev/null || printf cpu)"
+    if [[ "$accel" == cpu ]]; then
+      if (( cpus <= 4 )); then timeout=180; elif (( cpus <= 8 )); then timeout=150; else timeout=120; fi
+    else
+      timeout=90
+    fi
+  fi
+  text_mib="$(ollama_model_manifest_mib "$(opt_text localTextModel)" 2>/dev/null || printf 0)"
+  if ! directml_text_enabled && [[ "$text_mib" =~ ^[0-9]+$ ]]; then
+    if (( text_mib >= 16384 )); then timeout=$((timeout+120)); elif (( text_mib >= 8192 )); then timeout=$((timeout+60)); elif (( text_mib >= 4096 )); then timeout=$((timeout+30)); fi
+  fi
+  (( timeout > 300 )) && timeout=300
+  printf '%s' "$timeout"
+}
+
+apply_honcho_timeout_policy() {
+  local path="$1" recommended marker
+  [[ -s "$path" ]] || return 1
+  recommended="$(choose_honcho_timeout)" || return 1
+  marker="${path}.latticevale-timeout-auto"
+  python3 - "$path" "$marker" "$recommended" <<'PY_HONCHO_TIMEOUT'
+from pathlib import Path
+import json,sys
+path=Path(sys.argv[1]); marker=Path(sys.argv[2]); recommended=float(sys.argv[3])
+try: cfg=json.loads(path.read_text(encoding='utf-8'))
+except Exception as exc: raise SystemExit(f'Invalid Honcho JSON {path}: {exc}')
+if not isinstance(cfg,dict): raise SystemExit('Honcho config root must be an object')
+current=cfg.get('timeout', cfg.get('requestTimeout'))
+previous=None
+try: previous=float(marker.read_text(encoding='utf-8').strip()) if marker.is_file() else None
+except Exception: previous=None
+owned=(current is None) or (previous is not None and isinstance(current,(int,float)) and float(current)==previous)
+if owned:
+    cfg.pop('requestTimeout',None)
+    cfg['timeout']=recommended
+    path.write_text(json.dumps(cfg,indent=2)+'\n',encoding='utf-8')
+    path.chmod(0o600)
+    marker.write_text(str(int(recommended) if recommended.is_integer() else recommended)+'\n',encoding='utf-8')
+    marker.chmod(0o600)
+    print(f'Honcho request timeout: LatticeVale-managed {recommended:g}s ({path})')
+else:
+    marker.unlink(missing_ok=True)
+    print(f'Preserving user-set Honcho request timeout={current} ({path})')
+PY_HONCHO_TIMEOUT
+}
+
 stage_prepare_config() {
 assert_docker_namespace_safe
 mkdir -p backups config/searxng config/honcho data/hermes data/qmd/config data/qmd/cache data/synapse data/synapse-db \
@@ -3861,62 +3923,7 @@ if [[ "$(opt_bool honcho)" == true ]]; then
   fi
   unset honcho_db_populated honcho_local_config
 
-choose_honcho_timeout() {
-  local cpus accel text_mib=0 timeout
-  cpus="$(nproc 2>/dev/null || printf 4)"; [[ "$cpus" =~ ^[0-9]+$ ]] || cpus=4
-  if directml_text_enabled; then
-    # DirectML has a potentially expensive first model load but subsequent calls are
-    # GPU-backed through the shared gateway. Give cold starts room without inheriting
-    # CPU-Ollama's larger model-size timeout penalties.
-    timeout=150
-  elif windows_native_ollama_enabled; then
-    timeout=150
-  else
-    accel="$(sed -n 's/^LATTICEVALE_OLLAMA_ACCELERATION=//p' .env 2>/dev/null | head -n1)"; [[ -n "$accel" ]] || accel="$(resolve_ollama_acceleration 2>/dev/null || printf cpu)"
-    if [[ "$accel" == cpu ]]; then
-      if (( cpus <= 4 )); then timeout=180; elif (( cpus <= 8 )); then timeout=150; else timeout=120; fi
-    else
-      timeout=90
-    fi
-  fi
-  text_mib="$(ollama_model_manifest_mib "$(opt_text localTextModel)" 2>/dev/null || printf 0)"
-  if ! directml_text_enabled && [[ "$text_mib" =~ ^[0-9]+$ ]]; then
-    if (( text_mib >= 16384 )); then timeout=$((timeout+120)); elif (( text_mib >= 8192 )); then timeout=$((timeout+60)); elif (( text_mib >= 4096 )); then timeout=$((timeout+30)); fi
-  fi
-  (( timeout > 300 )) && timeout=300
-  printf '%s' "$timeout"
-}
 
-apply_honcho_timeout_policy() {
-  local path="$1" recommended marker
-  [[ -s "$path" ]] || return 1
-  recommended="$(choose_honcho_timeout)" || return 1
-  marker="${path}.latticevale-timeout-auto"
-  python3 - "$path" "$marker" "$recommended" <<'PY_HONCHO_TIMEOUT'
-from pathlib import Path
-import json,sys
-path=Path(sys.argv[1]); marker=Path(sys.argv[2]); recommended=float(sys.argv[3])
-try: cfg=json.loads(path.read_text(encoding='utf-8'))
-except Exception as exc: raise SystemExit(f'Invalid Honcho JSON {path}: {exc}')
-if not isinstance(cfg,dict): raise SystemExit('Honcho config root must be an object')
-current=cfg.get('timeout', cfg.get('requestTimeout'))
-previous=None
-try: previous=float(marker.read_text(encoding='utf-8').strip()) if marker.is_file() else None
-except Exception: previous=None
-owned=(current is None) or (previous is not None and isinstance(current,(int,float)) and float(current)==previous)
-if owned:
-    cfg.pop('requestTimeout',None)
-    cfg['timeout']=recommended
-    path.write_text(json.dumps(cfg,indent=2)+'\n',encoding='utf-8')
-    path.chmod(0o600)
-    marker.write_text(str(int(recommended) if recommended.is_integer() else recommended)+'\n',encoding='utf-8')
-    marker.chmod(0o600)
-    print(f'Honcho request timeout: LatticeVale-managed {recommended:g}s ({path})')
-else:
-    marker.unlink(missing_ok=True)
-    print(f'Preserving user-set Honcho request timeout={current} ({path})')
-PY_HONCHO_TIMEOUT
-}
 
   # Active Honcho inference is now entirely local. "ollama-local" is a dummy
   # compatibility value for the OpenAI client; it is not a cloud credential.
