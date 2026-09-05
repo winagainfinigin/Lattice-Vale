@@ -1,50 +1,5 @@
 # Changelog
 
-## 14.6.0 - 2026-09-04
-
-### Same-version compatibility hardening — DirectML memory evidence and fallback convergence
-- Replaces single-source Windows VRAM fallback with PNP-correlated DXDiag + 64-bit display-driver registry evidence; legacy DWORD/WMI memory remains lower-bound only. Dedicated, shared, and display memory are not conflated.
-- Gives integrated/UMA adapters an adaptive shared-memory DirectML admission ceiling bounded by both Windows-reported shared capacity and current WSL-visible RAM. Discrete GPUs retain dedicated-memory admission. No GPU model or known host-RAM topology is hard-coded.
-- Keeps resource-policy backend fingerprints stable across transient DirectML runtime/model failures when the configured DirectML topology and host reserve are unchanged. The active gateway can fall back to Ollama without causing final repair verification to reject an otherwise valid `runtime-policy.json`.
-- Makes installer Option 8 stage the current canonical validator, compatibility contract, and fresh Windows hardware snapshot into WSL, so older installed stacks can be diagnosed read-only before migration.
-- Preserves the ownership boundary: Windows/WSL and vendor drivers are prerequisites; LatticeVale manages its DirectML venv, capability probes, adapter selection/correlation, bounded admission, backend health, and fallback.
-
-### Canonical hardware/backend/resource architecture
-- Completes a full documentation synchronization for v14.6.0: current install/repair/GPU/resource/native-Ollama/security/support/testing/release/GitHub guidance now describes schema 22, policy v12, 142 fixtures, canonical adaptive resource ownership, and the single-root `Lattice-Vale/` archive contract; historical release notes remain explicitly historical.
-- Separates durable installer choices from derived machine state. Windows GPU/host data is staged as `windows-hardware.json`; WSL generates fingerprinted `hardware-capabilities.json`, backend capability/health/selection state, and a canonical `runtime-policy.json`.
-- Adds the shared `latticevale_arch.py` implementation for schema ownership, option validation, hardware/backend fingerprints, stable Windows adapter identity, backend health, atomic JSON writes, and host-memory budget invariants.
-- Classifies DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU independently. DirectML remains valid through `/dev/dxg` even when the managed Linux GPU inventory is empty; explicit adapter intent is preserved and is not silently redirected.
-- Advances installer schema to 22, resource policy to 12, and managed repair refresh revision to 4. Generation and verification consume the same canonical resource-budget function and generated state self-validates before downstream mutation.
-- Adds first-class architecture diagnostics, dependency-aware repair planning, task-oriented current documentation, test-confidence levels, and a declarative release-content policy that keeps legacy v13 patch-note archives in the repository while omitting them from normal end-user release ZIPs.
-
-
-## 14.5.47 - 2026-09-04
-
-### Same-version Hotfix 2 — canonical resource-policy repair verification
-- Fixes Option 1 reaching `repair_runtime_policy`, regenerating a correct policy-v11 overlay, and then aborting because the verifier still expected an obsolete DirectML host-reserve tier.
-- Adds canonical `resource_host_memory_budget()` used by both policy generation and policy verification. DirectML uses 25% of WSL-visible RAM bounded to 2048-4096 MiB as a floor on normal host reserve; CPU/Vulkan/CUDA/ROCm base-reserve rules remain topology-specific.
-- Verification now checks `RESERVE_MIB`, `DIRECTML_HOST_RESERVE_MIB`, and `BUDGET_MIB`, preventing writer/verifier drift from being silently accepted.
-- Keeps DirectML eligibility independent of Linux-native GPU inventory: `/dev/dxg` DirectML may coexist with zero CUDA/ROCm/DRM adapters and a CPU Ollama fallback without making resource policy invalid.
-- Adds deterministic coverage across irregular/non-tier-aligned WSL memory allocations, CPU/Vulkan/NVIDIA/AMD managed-Ollama modes, managed-Ollama on/off, DirectML on/off, and unsafe tiny allocations that must remain fail-closed; no observed test-PC topology is a production target.
-- Release identity remains 14.5.47.
-
-### Same-version Hotfix 1 — Resume / repair schema validator
-- Fixes Option 1 `Resume / repair installation` aborting after the installer normalizes `install-options.json` to schema 21.
-- Updates the Linux `configure-stack.sh` fail-closed validator from a stale maximum schema of 20 to the current schema 21, including `repairOriginSchema`. Future schema 22+ remains rejected.
-- Strengthens the existing v14.5.47 regression fixture to execute the embedded options validator with current/future schema cases instead of only inspecting source text.
-- Release identity remains 14.5.47; users of the initial 14.5.47 package can rerun the revised full release with Option 1 without uninstalling or resetting managed data.
-
-### WSL GPU recovery / cross-vendor inference fallback
-- Exports the selected Windows adapter through `MESA_D3D12_DEFAULT_ADAPTER_NAME` before DirectML dependency probes and worker import, then keeps exact `torch_directml` adapter matching as a second fail-closed guard.
-- Records selected-adapter dedicated VRAM from Windows DXDiag as `directmlVramMiB`; the gateway uses it only when `torch_directml.gpu_memory()` cannot provide a usable value. Unknown capacity still refuses DirectML model admission.
-- Rejects DirectML onboarding on Windows builds older than the supported WSL DirectML floor instead of treating `/dev/dxg` alone as sufficient.
-- Replaces permanent/legacy hard fallback with fingerprinted fallback state. Upgrading from v14.5.46 or changing the relevant kernel/WSL bridge/selected adapter/runtime shape grants one fresh DirectML retry; repeated failures on the same fingerprint remain on Ollama fallback.
-- Adds `directml-gateway.sh diagnose` and `LatticeVale-Core/tools/Audit-LatticeVale-Gpu.ps1` for read-only Windows/WSL/DirectML/Docker routing diagnostics, including stack discovery that is not limited to one fixed Linux home path.
-- Adds managed-Ollama `vulkan` acceleration for WSL systems exposing `/dev/dri/renderD*`. The generated overlay passes `/dev/dri`, sets `OLLAMA_VULKAN=1`, and retains conservative resource policy until `ollama ps` proves real model offload.
-- Preserves existing managed NVIDIA CUDA, AMD/ROCm, CPU, DirectML, and native-Windows Ollama paths and continues to leave Windows/vendor display-driver ownership external.
-- Advances installer options schema from 20 to 21 and managed repair refresh revision from 2 to 3 so existing recognized installs converge on the corrected GPU runtime policy through Resume / repair.
-- Release contract increases from 139 to 140 deterministic fixtures.
-
 ## 14.5.46 - 2026-09-03
 
 ### WSL/DirectML stability hotfix (same release identity)

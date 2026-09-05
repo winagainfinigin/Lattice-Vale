@@ -7,17 +7,8 @@ TEST_TMP_BASE='/dev/shm' if Path('/dev/shm').is_dir() and os.access('/dev/shm', 
 
 with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
     stack=Path(td)/'stack'; stack.mkdir()
-    # Stage the same canonical architecture inputs that the real 14.6 bootstrap
-    # places in ~/hermes-stack. Resume simulations must exercise the current stack
-    # contract rather than a pre-14.6 partial copy.
-    for source_rel in (
-        'compatibility.conf',
-        'stack/configure-stack.sh', 'stack/compose.yaml',
-        'stack/latticevale_arch.py', 'stack/hardware-capabilities.py',
-        'stack/backend-capabilities.py', 'stack/runtime-policy.py',
-        'stack/diagnostics.py', 'stack/checkpoint-metadata.json',
-    ):
-        src=ROOT/source_rel
+    for rel in ('stack/configure-stack.sh','stack/compose.yaml'):
+        src=ROOT/rel
         (stack/src.name).write_bytes(src.read_bytes())
     (stack/'configure-stack.sh').chmod(0o755)
     # The production script must reject root, but CI/audit containers may themselves run as root.

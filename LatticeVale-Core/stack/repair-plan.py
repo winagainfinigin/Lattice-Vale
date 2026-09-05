@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only repair planner for LatticeVale v14.6.0.
+"""Read-only repair planner for LatticeVale v14.5.0.
 
 The planner is deliberately advisory.  It never writes stack state and it does not replace
 the proven configure-stack.sh reconciliation path.  Applying a repair still happens through
@@ -99,41 +99,8 @@ def _runtime_findings(audit: dict[str, Any]) -> list[dict[str, str]]:
     return findings
 
 
-
-def _architecture_plan(snapshot: StackSnapshot) -> list[dict[str, Any]]:
-    root = snapshot.root
-    actions: list[dict[str, Any]] = []
-    states = {
-        "hardware": root / "data/latticevale/hardware-capabilities.json",
-        "backends": root / "data/latticevale/backend-capabilities.json",
-        "policy": root / "data/latticevale/runtime-policy.json",
-    }
-    docs: dict[str, dict[str, Any]] = {}
-    for name, path in states.items():
-        try:
-            value = json.loads(path.read_text(encoding="utf-8"))
-            docs[name] = value if isinstance(value, dict) else {}
-        except Exception:
-            docs[name] = {}
-            actions.append({"stage": name, "action": "REGENERATE", "reasonCode": "GENERATED_STATE_MISSING", "reason": f"{path.relative_to(root)} is missing or unreadable"})
-    hw = docs.get("hardware", {})
-    be = docs.get("backends", {})
-    rp = docs.get("policy", {})
-    hwfp = str(hw.get("hardwareFingerprint") or "")
-    if be and str(be.get("hardwareFingerprint") or "") != hwfp:
-        actions.append({"stage": "backends", "action": "REPROBE", "reasonCode": "HARDWARE_FINGERPRINT_CHANGED", "reason": "backend capability state was derived from a different hardware fingerprint"})
-    if rp:
-        if str(rp.get("hardwareFingerprint") or "") != hwfp:
-            actions.append({"stage": "policy", "action": "REGENERATE", "reasonCode": "HARDWARE_FINGERPRINT_CHANGED", "reason": "runtime policy was derived from a different hardware fingerprint"})
-        if be and str(rp.get("backendFingerprint") or "") != str(be.get("backendFingerprint") or ""):
-            actions.append({"stage": "policy", "action": "REGENERATE", "reasonCode": "BACKEND_FINGERPRINT_CHANGED", "reason": "runtime policy was derived from a different backend capability fingerprint"})
-    # Dependency order is explicit: hardware -> backends -> policy -> runtime reconcile.
-    rank = {"hardware": 0, "backends": 1, "policy": 2}
-    return sorted(actions, key=lambda item: rank.get(str(item.get("stage")), 99))
-
 def build_plan(snapshot: StackSnapshot, audit: dict[str, Any], audit_error: str | None) -> dict[str, Any]:
     checkpoint_actions = _checkpoint_plan(snapshot)
-    architecture_actions = _architecture_plan(snapshot)
     runtime_findings = _runtime_findings(audit)
     raw = snapshot.raw_options
     explicit_identity_rebuild = bool(raw.get("rebuildMatrixIdentity"))
@@ -150,7 +117,7 @@ def build_plan(snapshot: StackSnapshot, audit: dict[str, Any], audit_error: str 
         )
 
     overall = str(audit.get("overall") or "UNKNOWN") if audit else "UNKNOWN"
-    needs_repair = bool(checkpoint_actions or architecture_actions or runtime_findings or overall == "NEEDS_REPAIR")
+    needs_repair = bool(checkpoint_actions or runtime_findings or overall == "NEEDS_REPAIR")
     return {
         "schema": 1,
         "mode": "read-only",
@@ -170,7 +137,6 @@ def build_plan(snapshot: StackSnapshot, audit: dict[str, Any], audit_error: str 
         ],
         "auditOverall": overall,
         "checkpointActions": checkpoint_actions,
-        "architectureActions": architecture_actions,
         "runtimeFindings": runtime_findings,
         "needsRepair": needs_repair,
         "explicitIdentityRebuildRequested": explicit_identity_rebuild,
@@ -212,16 +178,6 @@ def _print_human(plan: dict[str, Any]) -> None:
             for reason in item["reasons"]:
                 print(f"    - {reason}")
             print(f"    - recovery policy: {item['recovery']}")
-
-    architecture = plan.get("architectureActions", [])
-    print()
-    print("Canonical architecture dependency plan:")
-    if not architecture:
-        print("  Hardware/backend/runtime-policy fingerprints are internally consistent.")
-    else:
-        for item in architecture:
-            print(f"  {item['stage']:<12} {item['action']} [{item['reasonCode']}]")
-            print(f"    - {item['reason']}")
 
     findings = plan["runtimeFindings"]
     print()

@@ -1,93 +1,114 @@
 #!/usr/bin/env python3
-"""v14.5.1-origin CPU/RAM adaptation regressions against the 14.6 canonical engine."""
+"""v14.5.1-derived policy-v11 CPU/RAM adaptation matrix regression fixtures."""
 from pathlib import Path
-import sys
+import subprocess, sys
 
 ROOT = Path(__file__).resolve().parents[1]
-version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
-sys.path.insert(0, str(ROOT / 'stack'))
-from latticevale_arch import cpu_quota_plan, host_memory_budget, service_memory_plan  # noqa:E402
+assert (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
+assert 'POLICY_VERSION=11' in cfg
 
-assert '[POLICY_VERSION]=12' in cfg
-assert '[RESOURCE_POLICY_MODE]=adaptive' in cfg
-assert 'runtime-policy.py host-budget' in cfg
-assert 'runtime-policy.py cpu-plan' in cfg
-assert 'runtime-policy.py service-plan' in cfg
-assert 'PY_RESOURCE_PLAN' not in cfg
-assert 'LOW_MEMORY_PROFILE' not in cfg
-assert 'mem_mib <= 12288' not in cfg
+# CPU policy is based on CPUs actually visible to WSL, never Windows host guesses.
+def cpu_plan(cpus: int):
+    assert cpus >= 1
+    hermes = (cpus * 3 + 3) // 4
+    hermes = min(cpus, max(1, hermes))
+    heavy = cpus
+    medium = max(1, (cpus + 1) // 2)
+    light = max(1, (cpus + 3) // 4)
+    return hermes, heavy, medium, light
 
-# Host resource policy is continuous/adaptive: arbitrary RAM inputs must remain
-# bounded and larger allocations may never reduce the container budget.
-for accel in ('cpu','vulkan','nvidia','amd'):
-    for managed in (False, True):
-        for directml in (False, True):
-            previous = -1
-            for mem in (2053, 3187, 4771, 7039, 9587, 13711, 22103, 38917, 73129):
-                state = host_memory_budget(mem, accel, managed, directml)
-                assert state['reserveMiB'] >= 0
-                assert state['directmlHostReserveMiB'] >= 0
-                assert state['reserveMiB'] + state['containerBudgetMiB'] == mem
-                assert state['containerBudgetMiB'] >= 384
-                assert state['containerBudgetMiB'] >= previous
-                previous = state['containerBudgetMiB']
-                if directml:
-                    assert state['reserveMiB'] >= state['directmlHostReserveMiB'] > 0
-                else:
-                    assert state['directmlHostReserveMiB'] == 0
+expected = {
+    1: (1, 1, 1, 1),
+    2: (2, 2, 1, 1),
+    3: (3, 3, 2, 1),
+    4: (3, 4, 2, 1),
+    6: (5, 6, 3, 2),
+    8: (6, 8, 4, 2),
+    16: (12, 16, 8, 4),
+    32: (24, 32, 16, 8),
+    64: (48, 64, 32, 16),
+}
+for cpus, want in expected.items():
+    got = cpu_plan(cpus)
+    assert got == want, (cpus, got, want)
+    assert all(1 <= v <= cpus for v in got), (cpus, got)
 
-# CPU quotas derive from CPUs visible to WSL and workload pressure, not host tiers.
-for accel in ('cpu','vulkan','nvidia','amd'):
-    prev = 0
-    for cpus in (1,2,3,5,7,11,19,37):
-        q = cpu_quota_plan(cpus, 1, 3, accel)
-        cap = cpus * 1000
-        assert all(250 <= value <= cap for value in q.values())
-        assert q['hermes'] >= prev
-        prev = q['hermes']
-        busy = cpu_quota_plan(cpus, 8, 8, accel)
-        assert busy['hermes'] >= q['hermes']
-        assert all(250 <= value <= cap for value in busy.values())
+for marker in (
+    'hermes_cpu=$(((cpus*3+3)/4))',
+    'heavy_cpu=$cpus',
+    'medium_cpu=$(((cpus+1)/2))',
+    'light_cpu=$(((cpus+3)/4))',
+    'resource_policy["CPU_${resource_state_key}_MILLI"]="${cpu_limits[$resource_state_svc]}000"',
+    'resource_policy[CPU_HERMES_MILLI]',
+    '{{.HostConfig.NanoCpus}}',
+    'effective Compose CPU limit',
+):
+    assert marker in cfg, marker
 
-# Enabled services are planned from the current container budget.  Find the minimum
-# viable budget dynamically rather than freezing a machine-specific threshold.
-def full_plan(budget: int):
-    return service_memory_plan(budget, matrix=True, searxng=True, qmd=True, ollama=True,
-                               honcho=True, hermes_floor=1024, ollama_floor=3072)
+start = cfg.index('import sys\nbudget=int(sys.argv[1])', cfg.index("<<'PY_RESOURCE_PLAN'"))
+end = cfg.index('\nPY_RESOURCE_PLAN', start)
+planner = cfg[start:end]
 
-lo, hi = 384, 65536
-while lo < hi:
-    mid = (lo + hi) // 2
-    try:
-        full_plan(mid); hi = mid
-    except ValueError:
-        lo = mid + 1
-threshold = lo
-assert threshold > 384
-assert sum(full_plan(threshold).values()) <= threshold
-try:
-    full_plan(threshold - 1)
-except ValueError as exc:
-    assert 'cannot safely fit selected services' in str(exc)
-else:
-    raise AssertionError('planner admitted a budget below its own adaptive service minima')
+def reserve(mem_mib: int, ollama=True, accel='cpu'):
+    if mem_mib <= 6144:
+        pct = 30
+    elif mem_mib <= 12288 and ollama and accel == 'cpu':
+        pct = 10
+    elif mem_mib <= 24576:
+        pct = 20
+    else:
+        pct = 15
+    reserve_mib = mem_mib * pct // 100
+    reserve_mib = max(768, min(4096, reserve_mib))
+    return reserve_mib, mem_mib - reserve_mib
 
-# Larger arbitrary budgets preserve enabled-service identity and never shrink service limits.
-previous = None
-for budget in (threshold, threshold + 337, threshold + 1291, threshold + 4703, threshold + 15317):
-    alloc = full_plan(budget)
-    assert sum(alloc.values()) <= budget
-    assert set(alloc) == {'hermes','synapse-db','synapse','searxng-valkey','searxng','qmd','qmd-indexer','ollama','honcho-db','honcho-redis','honcho-api','honcho-deriver'}
-    if previous:
-        for name in alloc:
-            assert alloc[name] >= previous[name], (name, budget, previous[name], alloc[name])
-    previous = alloc
+def run_plan(mem_mib: int, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, accel='cpu', ollama_floor=None):
+    reserve_mib, budget = reserve(mem_mib, ollama=ollama, accel=accel)
+    if budget < 384:
+        return 1, {}, reserve_mib, budget, 'budget too small'
+    if ollama_floor is None: ollama_floor = 5120 if accel == 'cpu' else 2304
+    args = [str(budget)] + ['true' if x else 'false' for x in (matrix,searxng,qmd,ollama,honcho)] + [accel, '1024', str(ollama_floor)]
+    p = subprocess.run([sys.executable, '-c', planner, *args], text=True, capture_output=True, timeout=10)
+    out = {}
+    if p.returncode == 0:
+        for line in p.stdout.splitlines():
+            k,v = line.split('=',1); out[k] = int(v)
+    return p.returncode, out, reserve_mib, budget, p.stderr
 
-# A lighter service selection remains viable at a correspondingly smaller envelope.
-core = service_memory_plan(1103, matrix=False, searxng=False, qmd=False, ollama=False,
-                           honcho=False, hermes_floor=1024, ollama_floor=0)
-assert core['hermes'] >= 1024 and sum(core.values()) <= 1103
+# Full CPU-backed managed stack: undersized systems are rejected instead of receiving
+# an Ollama hard limit below the model-aware 5120 MiB representative floor.
+for mem in (1536, 2048, 3072, 4096, 5120, 6144, 7168, 8192, 9216):
+    rc, alloc, reserve_mib, budget, err = run_plan(mem)
+    assert rc != 0 and not alloc, (mem, reserve_mib, budget, alloc, err)
+    assert 'cannot safely fit' in err or budget < 384, (mem, err)
+
+# The audited ~9.7 GiB host and larger systems fit the CPU-backed full stack with
+# bounded aggregate ceilings and >=5120 MiB managed Ollama headroom.
+for mem in (9946, 10240, 12288, 16384, 24576, 32768, 65536):
+    rc, alloc, reserve_mib, budget, err = run_plan(mem)
+    assert rc == 0, (mem, reserve_mib, budget, err)
+    assert sum(alloc.values()) <= budget, (mem, budget, sum(alloc.values()), alloc)
+    assert alloc['hermes'] >= 1024 and alloc['honcho-api'] >= 512 and alloc['ollama'] >= 5120, (mem, alloc)
+
+# Non-CPU managed Ollama retains the less RAM-intensive protected-floor behavior;
+# it does not inherit the CPU-only 4096 MiB viability requirement.
+for mem in (8192, 9216, 12288):
+    rc, alloc, reserve_mib, budget, err = run_plan(mem, accel='nvidia')
+    assert rc == 0, (mem, reserve_mib, budget, err)
+    assert alloc['ollama'] >= 2304 and sum(alloc.values()) <= budget, (mem, alloc)
+
+# Feature-awareness: small systems can still use lighter selections when their minima fit.
+rc, alloc, _, budget, err = run_plan(2048, matrix=False, searxng=False, qmd=False, ollama=False, honcho=False)
+assert rc == 0 and alloc['hermes'] >= 1024 and sum(alloc.values()) <= budget, (alloc, err)
+# CPU-backed Ollama + core requires its real 4.5 GiB floor, but an 8 GiB WSL VM
+# with the lighter service set has enough post-reserve budget.
+rc, alloc, _, budget, err = run_plan(6144, matrix=False, searxng=False, qmd=False, ollama=True, honcho=False)
+assert rc != 0, (budget, alloc, err)
+rc, alloc, _, budget, err = run_plan(8192, matrix=False, searxng=False, qmd=False, ollama=True, honcho=False)
+assert rc == 0 and alloc['hermes'] >= 1024 and alloc['ollama'] >= 5120, (alloc, err)
+# GPU-backed core + Ollama can still fit a 5 GiB WSL allocation.
+rc, alloc, _, budget, err = run_plan(5120, matrix=False, searxng=False, qmd=False, ollama=True, honcho=False, accel='nvidia', ollama_floor=2304)
+assert rc == 0 and alloc['hermes'] >= 1024 and alloc['ollama'] >= 2304, (alloc, err)
 
 print('v14.5.1 ADAPTIVE HARDWARE MATRIX FIXTURES: PASS')

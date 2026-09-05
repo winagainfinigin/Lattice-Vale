@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
 CONFIGURE = (ROOT / "stack" / "configure-stack.sh").read_text(encoding="utf-8")
 
-assert VERSION in {"14.4.7","14.4.8","14.4.81","14.4.82","14.4.83","14.4.84","14.4.85","14.5.0","14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}, VERSION
+assert VERSION in {"14.4.7","14.4.8","14.4.81","14.4.82","14.4.83","14.4.84","14.4.85","14.5.0","14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46'}, VERSION
 assert "integrations) printf '4' ;;" in CONFIGURE
 assert "web['search_backend']='searxng'" in CONFIGURE
 assert "web['extract_backend']='latticevale-local'" in CONFIGURE

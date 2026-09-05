@@ -8,25 +8,17 @@ cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')
-version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
+assert (ROOT/'VERSION.txt').read_text(encoding='ascii').strip() in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
 
-policy_marker = 'POLICY_VERSION=12' if version == '14.6.0' else 'POLICY_VERSION=11'
 for marker in (
-    policy_marker, 'ollama_model_manifest_mib() {', 'resource_ollama_model_metrics() {',
+    'POLICY_VERSION=11', 'ollama_model_manifest_mib() {', 'resource_ollama_model_metrics() {',
     '[OLLAMA_TEXT_ARTIFACT_MIB]="$ollama_text_mib"', '[OLLAMA_EMBED_ARTIFACT_MIB]="$ollama_embed_mib"', '[OLLAMA_CONTEXT_LENGTH]="$ollama_context"',
     '[OLLAMA_MODEL_FLOOR_MIB]="$ollama_floor_mib"', 'reconcile_model_aware_ollama_resources() {',
-    'Managed Ollama model artifacts are now measurable',
+    'Managed Ollama model artifacts are now measurable', 'requested_ollama_floor',
 ):
     assert marker in cfg, marker
-if version == '14.6.0':
-    assert 'runtime-policy.py verify' in cfg
-    assert 'runtime-policy.py ollama-floor' in cfg
-    assert 'model-aware policy v12 ceiling' in cfg
-    assert 'RUNTIME_POLICY_SCHEMA' in (ROOT/'compatibility.conf').read_text()
-else:
-    assert 'statev POLICY_VERSION)" == 11' in cfg
-    assert 'values.get("POLICY_VERSION") != "11"' in audit
+assert 'statev POLICY_VERSION)" == 11' in cfg
+assert 'values.get("POLICY_VERSION") != "11"' in audit
 assert './configure-stack.sh --refresh-resource-policy' in manage
 assert './configure-stack.sh --refresh-resource-policy' in boot
 

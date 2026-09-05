@@ -6,7 +6,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, version
+assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
 
 cfg = (root / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (root / 'stack/manage.sh').read_text(encoding='utf-8')
@@ -37,28 +37,26 @@ sequence = [
 pos = [cfg.index(x) for x in sequence]
 assert pos == sorted(pos), pos
 
-# Current policy verification delegates formula-level checks to the canonical
-# runtime-policy consumer, while retaining structural Compose/report checks.
+# Policy verification must require the current fingerprint and all v3 RAM controls.
 for token in (
-    'python3 runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json',
+    'statev POLICY_VERSION)" == 11',
     'MALLOC_ARENA_MAX:',
     'SYNAPSE_CACHE_FACTOR:',
     'shared_buffers=',
     'max_connections=200',
     'compose.latticevale.yaml',
-    "hardware_cpus=\"$(jq -r '.wsl.cpuCount // 0'",
 ):
     assert token in cfg, token
-assert 'statev POLICY_VERSION)' not in cfg[cfg.index('verify_adaptive_runtime_policy() {'):cfg.index('verify_live_resource_policy_limits() {')]
 
-# The repair reconciler remains deterministic: stale canonical state triggers exactly
-# one regeneration, marks Compose-owning stages pending, and a subsequent valid
-# verification becomes a no-op. Formula behavior itself is covered by the current
-# canonical architecture fixture rather than duplicated here.
+# Execute the exact v14.4.5 verifier/reconciliation functions in a small repair
+# harness. This reproduces a stale policy-v2 install and proves reconciliation writes a
+# current policy, marks live Compose-owning stages pending, and becomes idempotent.
 def between(text: str, start: str, end: str) -> str:
     a = text.index(start)
     b = text.index(end, a)
     return text[a:b]
+
+verify_fn = between(cfg, 'verify_adaptive_runtime_policy() {', 'repair_runtime_policy_reconcile() {')
 repair_fn = between(cfg, 'repair_runtime_policy_reconcile() {', 'choose_ollama_context_length() {')
 with tempfile.TemporaryDirectory(prefix='lv145-runtime-policy-') as td:
     td = Path(td)
@@ -66,27 +64,104 @@ with tempfile.TemporaryDirectory(prefix='lv145-runtime-policy-') as td:
     harness.write_text(
         r'''#!/usr/bin/env bash
 set -euo pipefail
-verify_count=0
-opt_bool() { [[ "$1" == containerResourceLimits ]] && printf true || printf false; }
-verify_adaptive_runtime_policy() {
-  verify_count=$((verify_count+1))
-  (( verify_count >= 2 ))
+opt_bool() {
+  case "$1" in
+    containerResourceLimits|matrix|honcho) printf true ;;
+    *) printf false ;;
+  esac
 }
+opt_text() { printf ''; }
 managed_ollama_enabled() { return 1; }
+resource_ram_profile() { local m="$1"; if (( m <= 8192 )); then printf compact; elif (( m <= 16384 )); then printf balanced; else printf large; fi; }
+resource_cpu_profile() { local c="$1"; if (( c <= 4 )); then printf compact; elif (( c <= 8 )); then printf balanced; else printf high; fi; }
+resource_directml_selected() { return 1; }
 resolve_ollama_acceleration() { printf cpu; }
-write_latticevale_compose_overlay() { printf 'write:%s:%s\n' "$1" "$2" >> calls.log; }
+resource_matrix_profile_gateways() { printf '0'; }
+resource_kanban_concurrency() { printf '1'; }
+resource_hermes_floor_mib() { printf '1024'; }
+resource_ollama_model_metrics() { printf '0:0:0:0'; }
 state_mark() { printf '%s|%s|%s\n' "$1" "$2" "${3:-}" >> state.log; }
+write_latticevale_compose_overlay() {
+  local cpus mem_mib lowmem
+  cpus="$(nproc)"
+  mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo)"
+  lowmem=0
+  (( mem_mib <= 12288 )) && lowmem=1
+  cat > .latticevale-resource-state <<EOF
+POLICY_VERSION=11
+CPUS=$cpus
+CPU_PROFILE=$(resource_cpu_profile "$cpus")
+MEM_MIB=$mem_mib
+RAM_PROFILE=$(resource_ram_profile "$mem_mib")
+LOW_MEMORY_PROFILE=$lowmem
+RESERVE_MIB=1024
+DIRECTML_HOST_RESERVE_MIB=0
+BUDGET_MIB=$((mem_mib-1024))
+MATRIX_PROFILE_GATEWAYS=0
+KANBAN_CONCURRENCY=1
+HERMES_MIN_MIB=1024
+OLLAMA_ACCELERATION=cpu
+GPU_COUNT=0
+GPU_MIN_MIB=0
+GPU_MAX_MIB=0
+GPU_TOTAL_MIB=0
+GPU_HETEROGENEOUS=false
+OLLAMA_GPU_OVERHEAD_MIB=0
+DIRECTML_VRAM_LIMIT_PCT=75
+GPU_SHARED_WITH_DIRECTML=false
+DIRECTML_SELECTED=false
+DIRECTML_GPU_VENDOR=
+DIRECTML_ADAPTER_NAME=
+OLLAMA_TEXT_ARTIFACT_MIB=0
+OLLAMA_EMBED_ARTIFACT_MIB=0
+OLLAMA_CONTEXT_LENGTH=0
+OLLAMA_MODEL_FLOOR_MIB=0
+EOF
+  hardware_material="CPUS=$cpus|MEM_MIB=$mem_mib|OLLAMA_ACCELERATION=cpu|GPU_COUNT=0|GPU_MIN_MIB=0|GPU_MAX_MIB=0|GPU_TOTAL_MIB=0|DIRECTML_SELECTED=false|DIRECTML_GPU_VENDOR=|DIRECTML_ADAPTER_NAME="
+  hardware_fingerprint="$(printf '%s' "$hardware_material" | sha256sum | awk '{print $1}')"
+  printf 'HARDWARE_FINGERPRINT=%s\n' "$hardware_fingerprint" >> .latticevale-resource-state
+  policy_fingerprint="$(LC_ALL=C sort .latticevale-resource-state | sha256sum | awk '{print $1}')"
+  printf 'POLICY_FINGERPRINT=%s\n' "$policy_fingerprint" >> .latticevale-resource-state
+  printf 'LatticeVale Resource Policy Report\nHardware fingerprint: %s\nPolicy fingerprint: %s\n' "$hardware_fingerprint" "$policy_fingerprint" > resource-policy-report.txt
+  cat > compose.latticevale.yaml <<'EOF'
+services:
+  hermes:
+    environment:
+      MALLOC_ARENA_MAX: "2"
+  synapse-db:
+    command: ["postgres", "-c", "shared_buffers=64MB"]
+  synapse:
+    environment:
+      MALLOC_ARENA_MAX: "2"
+      SYNAPSE_CACHE_FACTOR: "0.35"
+  honcho-db:
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=64MB"]
+  honcho-api:
+    environment:
+      MALLOC_ARENA_MAX: "2"
+EOF
+  printf 'COMPOSE_FILE=compose.yaml:compose.latticevale.yaml:compose.override.yaml\n' > .env
+}
+# Seed the observed legacy condition: old policy fingerprint + completed unrelated config.
+printf 'POLICY_VERSION=2\nCPUS=1\nMEM_MIB=1024\n' > .latticevale-resource-state
+printf 'COMPOSE_FILE=compose.yaml:compose.override.yaml\n' > .env
 '''
+        + verify_fn
         + repair_fn
         + r'''
+if verify_adaptive_runtime_policy; then
+  echo 'stale policy unexpectedly verified' >&2
+  exit 20
+fi
 repair_runtime_policy_reconcile
-[[ "$(grep -c '^write:cpu:true$' calls.log)" == 1 ]]
+verify_adaptive_runtime_policy
 [[ "$(grep -c '^infrastructure|pending|' state.log)" == 1 ]]
 [[ "$(grep -c '^reconcile|pending|' state.log)" == 1 ]]
+[[ "$(sed -n 's/^POLICY_VERSION=//p' .latticevale-resource-state)" == 11 ]]
+grep -q '^COMPOSE_FILE=compose.yaml:compose.latticevale.yaml:compose.override.yaml$' .env
 before="$(wc -l < state.log)"
 repair_runtime_policy_reconcile
 [[ "$(wc -l < state.log)" == "$before" ]]
-[[ "$(grep -c '^write:cpu:true$' calls.log)" == 1 ]]
 ''',
         encoding='utf-8',
     )
@@ -114,7 +189,7 @@ for token in (
 # v14.4.6 supersedes that behavior: VERSION.txt remains provenance only, while the
 # explicit managed-refresh revision/age/legacy-state gate decides ordinary repair.
 assert 'last_refresh_installer_version=' in boot
-assert ('MANAGED_REPAIR_REFRESH_REVISION=4' in compat) if version == '14.6.0' else (('MANAGED_REPAIR_REFRESH_REVISION=3' in compat) if version == '14.5.47' else ('MANAGED_REPAIR_REFRESH_REVISION=2' in compat))
+assert 'MANAGED_REPAIR_REFRESH_REVISION=2' in compat
 if version == '14.4.5':
     assert '[[ "$last_refresh_installer_version" != "$installer_version" ]]' in boot
     assert 'Managed repair package/image/source refresh is due because the LatticeVale bundle changed' in boot

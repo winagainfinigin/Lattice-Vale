@@ -1,12 +1,6 @@
-# Native Windows Ollama integration
+## v14.5.46 GPU recommendation non-ownership
 
-> **v14.6.0 current behavior:** native Windows Ollama remains an optional, user-owned backend boundary. The canonical backend engine records it independently from DirectML, CUDA, ROCm, Vulkan, managed WSL/Docker Ollama, and CPU; LatticeVale may verify relay/runtime health but does not install, replace, or retune the Windows Ollama service or Windows GPU driver. Derived backend/resource state may be regenerated during repair without rewriting the user's durable native-Windows preference.
-
-> **v14.6.0 networking/resource boundary:** native Windows Ollama is outside the managed WSL/Docker container budget and GPU-memory policy. LatticeVale validates only the selected relay/reachability contract and keeps firewall/networking changes scoped and explicit. A failed native-Windows route can fall back only according to the saved backend policy; it does not silently take ownership of the Windows service.
-
-## Historical v14.5.47 GPU recommendation non-ownership
-
-v14.5.47 may use Windows GPU inventory to recommend a LatticeVale local-inference path, but it does not take ownership of native Windows Ollama's acceleration backend or install/replace its Windows GPU driver. Native Windows Ollama remains separately owned; the new automatic prerequisite acquisition applies only to installer-owned WSL components for the selected LatticeVale-managed path.
+v14.5.46 may use Windows GPU inventory to recommend a LatticeVale local-inference path, but it does not take ownership of native Windows Ollama's acceleration backend or install/replace its Windows GPU driver. Native Windows Ollama remains separately owned; the new automatic prerequisite acquisition applies only to installer-owned WSL components for the selected LatticeVale-managed path.
 
 ## v14.5.45 PowerShell-compatibility non-impact
 
@@ -26,7 +20,7 @@ Native Windows Ollama remains external to LatticeVale's managed WSL/Docker resou
 
 The canonical resource object and `resource-policy-report.txt` therefore record native Windows Ollama only as an external ownership boundary; they do not invent managed VRAM/CPU limits for it. Native Ollama configuration remains advisory/user-owned even when DirectML is also selected.
 
-## Historical native Windows Ollama integration details
+# Native Windows Ollama integration
 
 > **v14.4.81 WSL recovery note:** the bounded preflight recovery can change an explicitly mirrored host to NAT only after persistent `E_UNEXPECTED` and explicit user approval. If that occurs, later native-Windows-Ollama/Tailscale integration checks must rediscover and verify the recovered live topology; they must not assume the pre-recovery mirrored path remains valid. This does not change native Ollama ownership, model placement, or relay/firewall policy.
 

@@ -1,8 +1,4 @@
 # Contributing
-## v14.6.0 architecture ownership rule
-
-Do not duplicate install-options schema ceilings, host-memory reserve formulas, backend-selection ranking, or hardware/backend fingerprint logic outside the canonical architecture layer. Compatibility/orchestration wrappers may call `latticevale_arch.py`/the companion CLIs but must not reimplement their calculations. New generated architecture JSON must be atomic, schema-versioned, fingerprinted where appropriate, and immediately validated. Tests should assert behavior/invariants rather than private implementation strings.
-
 
 ## v14.4.1 release-layout rule
 

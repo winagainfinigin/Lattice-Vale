@@ -7,11 +7,9 @@ $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Manifest = Join-Path $Root 'installer\SOURCE-SHA256SUMS.txt'
 
 . (Join-Path $PSScriptRoot 'ReleaseManifest.ps1')
-$releasePolicy = Get-LatticeValeReleaseContentPolicy -ReleaseRoot $Root
 $allReleaseItems = @(Get-ChildItem -LiteralPath $Root -Force -Recurse | Where-Object {
-    if ($_.FullName -eq $Manifest -or $_.FullName -match '[\/]\.git(?:[\/]|$)') { return $false }
-    $relativeCandidate = $_.FullName.Substring($Root.Length).TrimStart('\','/').Replace('\','/')
-    return -not (Test-LatticeValeRepositoryOnlyRelativePath -RelativePath $relativeCandidate -Policy $releasePolicy)
+    $_.FullName -ne $Manifest -and
+    $_.FullName -notmatch '[\\/]\.git(?:[\\/]|$)'
 })
 foreach ($item in $allReleaseItems) {
     $relativeCheck = $item.FullName.Substring($Root.Length).TrimStart('\','/').Replace('\','/')

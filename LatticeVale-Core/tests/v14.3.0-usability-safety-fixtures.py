@@ -8,11 +8,10 @@ manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 conf=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 readme=(RELEASE/'docs/README.md').read_text(encoding='utf-8')
 security=(RELEASE/'docs/SECURITY.md').read_text(encoding='utf-8')
-arch=(ROOT/'stack/latticevale_arch.py').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
+assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
 assert 'schema = $compat.InstallOptionsSchema' in ps
 assert "questionnaireMode = $questionnaireMode" in ps
-if (ROOT/'VERSION.txt').read_text().strip() in {'14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}:
+if (ROOT/'VERSION.txt').read_text().strip() in {'14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
     assert 'Choose setup questionnaire:' not in ps
     assert 'Quick setup — recommended defaults' not in ps
     assert "questionnaireMode = 'explicit'" in ps
@@ -24,9 +23,8 @@ else:
     assert "Dashboard=on, SearXNG=on, Matrix=off" in ps
 assert "containerResourceLimits = $containerResourceLimits" in ps
 assert "ollamaAcceleration = $ollamaAcceleration" in ps
-assert 'schema must be an integer from 1 through {current_schema}' in arch
-assert 'latticevale_arch.py validate-options install-options.json --compat compatibility.conf' in conf
-assert 'questionnaireMode must be quick, custom, or explicit' in arch
+assert 'schema must be an integer from 1 through 20' in conf
+assert ('questionnaireMode must be quick or custom' in conf) or ('questionnaireMode must be quick, custom, or explicit' in conf)
 # NVIDIA toolkit must never be silently downgraded by this release.
 assert '--allow-downgrades' not in boot
 assert 'dpkg --compare-versions' in boot

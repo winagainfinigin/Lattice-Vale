@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v14.5.42-origin hardware/resource safety fixtures against the current canonical policy."""
+"""v14.5.42 resource-policy v11, hardware diversity, and release-consistency fixtures."""
 from pathlib import Path
 import importlib.util
 import os
@@ -11,87 +11,86 @@ import tempfile
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
-assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() in {"14.5.42", "14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}
+assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() in {"14.5.42", "14.5.43","14.5.44",'14.5.45','14.5.46'}
 cfg = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
 audit = (ROOT / "stack/state-audit.py").read_text(encoding="utf-8")
 compose = (ROOT / "stack/compose.yaml").read_text(encoding="utf-8")
 gateway = (ROOT / "stack/directml-gateway.py").read_text(encoding="utf-8")
 installer = (ROOT / "Install-LatticeVale.ps1").read_text(encoding="ascii")
 runner = (ROOT / "tests/run-regressions.py").read_text(encoding="utf-8")
-sys.path.insert(0, str(ROOT / "stack"))
-from latticevale_arch import (  # noqa: E402
-    gpu_context_recommendation,
-    gpu_coordination,
-    ram_context_recommendation,
-    service_memory_plan,
-)
 
-# Canonical policy v12 is frozen once, then consumed by Compose/state/diagnostics.
+# Canonical policy v11 is frozen once, then consumed by Compose/state/diagnostics.
 for marker in (
-    "Policy v12 canonicalization", "declare -A resource_policy=(", "[POLICY_VERSION]=12",
+    "Policy v11 canonicalization", "declare -A resource_policy=(", "[POLICY_VERSION]=11",
     "resource_policy[POLICY_FINGERPRINT]", "resource_policy[HARDWARE_FINGERPRINT]",
     "resource_policy[\"LIMIT_${resource_state_key}_MIB\"]", "resource_policy[\"CPU_${resource_state_key}_MILLI\"]",
     "resource-policy-report.txt", "GPU execution verified:", "Policy fingerprint:", "Hardware fingerprint:",
     "resource_ram_profile() {", "resource_cpu_profile() {", "ollama_gpu_inventory() {", "ollama_gpu_metrics() {",
-    "resource_gpu_coordination() {", "runtime-policy.py gpu-coordination", "runtime-policy.py service-plan",
-    "GPU_HETEROGENEOUS", "OLLAMA_GPU_OVERHEAD_MIB", "DIRECTML_VRAM_LIMIT_PCT",
+    "resource_gpu_coordination() {", "GPU_HETEROGENEOUS", "OLLAMA_GPU_OVERHEAD_MIB", "DIRECTML_VRAM_LIMIT_PCT",
 ):
     assert marker in cfg, marker
-for marker in ("canonical architecture", "hardware-capabilities.json", "backend-capabilities.json", "runtime-policy.json", "resource-policy-report.txt", "validate_runtime_policy_document"):
+for marker in ("POLICY_FINGERPRINT", "HARDWARE_FINGERPRINT", "GPU_HETEROGENEOUS", "resource-policy-report.txt"):
     assert marker in audit, marker
 
-# Downstream generated Compose must consume canonical values rather than re-deriving
-# finalized CPU/memory decisions.
-emit_start = cfg.index("rm -f compose.latticevale.yaml", cfg.index("Policy v12 canonicalization"))
-emit_end = cfg.index("  compose_files='compose.yaml'", emit_start)
+# Downstream generated Compose must consume the canonical service values rather than
+# recomputing or substituting the pre-finalized CPU/memory variables.
+emit_start = cfg.index("rm -f compose.latticevale.yaml", cfg.index("Policy v11 canonicalization"))
+emit_end = cfg.index("  compose_files=\'compose.yaml\'", emit_start)
 emit = cfg[emit_start:emit_end]
 assert "resource_policy[CPU_HERMES_MILLI]" in emit and "resource_policy[LIMIT_HERMES_MIB]" in emit
 assert "resource_policy[CPU_OLLAMA_MILLI]" in emit and "resource_policy[LIMIT_OLLAMA_MIB]" in emit
 assert '"$ollama_cpu" "${mem_limits[ollama]}"' not in emit
 assert '"$hermes_cpu" "${mem_limits[hermes]}"' not in emit
 
-# Compact 8 GiB WSL target: service allocation is owned by the canonical engine.
-alloc = service_memory_plan(
-    7373, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True,
-    hermes_floor=1024, ollama_floor=4096,
-)
+# Compact 8 GiB WSL target: 10% CPU-Ollama reserve -> 7373 MiB container budget.
+start = cfg.index("import sys\nbudget=int(sys.argv[1])", cfg.index("<<'PY_RESOURCE_PLAN'"))
+end = cfg.index("\nPY_RESOURCE_PLAN", start)
+planner = cfg[start:end]
+args = ["7373", "true", "true", "true", "true", "true", "cpu", "1024", "4096", "true"]
+r = subprocess.run([sys.executable, "-c", planner, *args], text=True, capture_output=True, timeout=10)
+assert r.returncode == 0, r.stderr
+alloc = {k: int(v) for k, v in (line.split("=", 1) for line in r.stdout.splitlines())}
 assert sum(alloc.values()) <= 7373, alloc
 assert alloc["hermes"] >= 1024 and alloc["ollama"] >= 4096, alloc
 
-# Diverse single/multi-GPU coordination remains per-device, not aggregate VRAM.
-for spec in [(1,3071,3071),(1,7169,7169),(2,5921,9713),(2,3587,18721),(3,8011,12289)]:
-    got = gpu_coordination("nvidia", spec[0], spec[1], spec[2], "nvidia", True)
-    assert got["sharedVendor"] is True, (spec, got)
-    assert 256 <= got["ollamaGpuOverheadMiB"] <= int(spec[1] * 0.75) + 256, (spec, got)
-    assert 5 <= got["directmlVramLimitPct"] <= 50, (spec, got)
-for mismatch in (("cpu",1,4096,4096,"nvidia",True),("nvidia",1,4096,4096,"amd",True),("nvidia",0,0,0,"nvidia",True),("nvidia",1,4096,4096,"nvidia",False)):
-    got=gpu_coordination(*mismatch)
-    assert got["sharedVendor"] is False and got["ollamaGpuOverheadMiB"] == 0
+# Execute the exact shared-GPU coordination function over diverse synthetic topology.
+def between(text: str, start_marker: str, end_marker: str) -> str:
+    a = text.index(start_marker); b = text.index(end_marker, a); return text[a:b]
+coord_fn = between(cfg, "resource_gpu_coordination() {", "resource_ram_profile() {")
+with tempfile.TemporaryDirectory(prefix="lv14542-gpu-coord-") as td:
+    h = Path(td) / "h.sh"
+    h.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        "opt_text(){ [[ \"$1\" == directmlGpuVendor ]] && printf nvidia || true; }\n"
+        "resource_directml_selected(){ return 0; }\n" + coord_fn + "\n"
+        "for spec in '1 4096 4096' '1 8192 8192' '1 12288 12288' '2 8192 8192' '2 8192 12288' '2 4096 24576' '2 1024 8192' '3 8192 12288'; do\n"
+        "  set -- $spec; resource_gpu_coordination nvidia \"$1\" \"$2\" \"$3\";\n"
+        "done\n",
+        encoding="utf-8",
+    )
+    rr = subprocess.run(["bash", str(h)], text=True, capture_output=True, timeout=10)
+    assert rr.returncode == 0, rr.stderr
+    lines = rr.stdout.splitlines()
+    assert lines == [
+        "2048:50:true", "4096:50:true", "6144:50:true", "4096:50:true",
+        "6144:50:true", "3072:12:true", "768:9:true", "6144:50:true",
+    ], lines
 
 # Topology is never represented as one fictitious aggregate GPU, and missing VRAM
 # telemetry is fail-closed for a selected GPU backend.
 assert "count:min:max:aggregate" in cfg
 assert "treating aggregate VRAM as one interchangeable pool" in cfg
 assert "GPU-backed hard limits must never be based on an invented capacity" in cfg
-assert '[[ -n "$inventory" ]] || return 1' in cfg
+assert "[[ -n \"$inventory\" ]] || return 1" in cfg
 # Auto intentionally prefers a verified NVIDIA runtime, then AMD/ROCm; simultaneous
 # vendors therefore resolve deterministically rather than merging unlike devices.
 auto_block = cfg[cfg.index("    auto)"):cfg.index("    *) echo \"Unsupported Ollama acceleration policy", cfg.index("    auto)"))]
 assert auto_block.index("nvidia_container_runtime_ready") < auto_block.index("/dev/kfd")
 
-# RAM- and usable-VRAM-aware context sizing is canonical.
-allowed={4096,8192,16384,32768,65536}
-prev=0
-for mem in (2051,4777,8093,12017,19001,33331,70001):
-    ctx=ram_context_recommendation(mem)
-    assert ctx in allowed and ctx >= prev
-    prev=ctx
-prev=0
-for usable in (0,1537,3581,6143,11003,24011,50021):
-    ctx=gpu_context_recommendation(usable)
-    assert ctx in allowed and ctx >= prev
-    prev=ctx
-assert "runtime-policy.py context ram" in cfg and "runtime-policy.py context gpu" in cfg
+# RAM- and usable-VRAM-aware context sizing.
+assert "mem_mib <= 8192" in cfg and "printf 4096" in cfg
+assert "usable_max=$((max_mib-overhead))" in cfg
+assert '(( gpu_ctx < ram_ctx )) && ram_ctx="$gpu_ctx"' in cfg
 
 # DirectML must honor a small coordinated percentage and fail admission rather than
 # silently exceeding a sub-1GiB policy envelope.
@@ -148,25 +147,37 @@ for bad in ("__pycache__", ".pyc", ".pyo"):
     assert bad in runner, bad
 assert "PYTHONDONTWRITEBYTECODE" in runner
 
-# Active documentation describes 14.6.0/policy v12; historical release notes retain
-# the 14.5.42 provenance this fixture protects.
-current_docs = [
+# Active documentation consistency: historical release notes may mention older
+# versions, but current install/repair entry points must identify v14.5.42/policy v11.
+active_docs = [
     REPO / "README.md", ROOT / "README.md", ROOT / "AUDIT.md", REPO / "docs/README.md",
-    REPO / "docs/FEATURES.md", REPO / "docs/Instructions.txt", REPO / "docs/RELEASE.md",
-    REPO / "docs/SUPPORT.md", REPO / "docs/RESOURCE-POLICY.md", REPO / "docs/GPU-BACKENDS.md",
+    REPO / "docs/FEATURES.md", REPO / "docs/Instructions.txt", REPO / "docs/Installer Description.txt",
+    REPO / "docs/RELEASE.md", REPO / "docs/CHANGELOG.md", REPO / "docs/PATCH-NOTES.md",
+    REPO / "docs/SUPPORT.md", REPO / "docs/SOURCES.md", REPO / "docs/SECURITY.md",
+    REPO / "docs/NATIVE-OLLAMA-INTEGRATION.md", REPO / "docs/WINDOWS-INTEGRATION-TEST-MATRIX.md",
+    REPO / "docs/THIRD-PARTY-NOTICES.md",
 ]
-for path in current_docs:
+for path in active_docs:
     text = path.read_text(encoding="utf-8")
-    assert "14.6.0" in text, path
-for path in (REPO / "README.md", ROOT / "README.md", REPO / "docs/README.md", REPO / "docs/FEATURES.md", REPO / "docs/RESOURCE-POLICY.md"):
-    text = path.read_text(encoding="utf-8").lower()
-    assert "policy v12" in text or "resource policy v12" in text, path
-for path in (REPO / "docs/CHANGELOG.md", REPO / "docs/PATCH-NOTES.md"):
-    assert "14.5.42" in path.read_text(encoding="utf-8"), path
+    assert "14.5.42" in text, path
+for path in (REPO / "README.md", ROOT / "README.md", REPO / "docs/README.md", REPO / "docs/FEATURES.md", REPO / "docs/Instructions.txt"):
+    text=path.read_text(encoding="utf-8")
+    assert "policy v11" in text.lower() or "resource policy v11" in text.lower(), path
 root_readme=(REPO / "README.md").read_text(encoding="utf-8")
 assert "Resume / repair installation" in root_readme
 assert "resource-policy-report.txt" in root_readme
 for path in (ROOT / "README.md", ROOT / "AUDIT.md", REPO / "docs/README.md", REPO / "docs/FEATURES.md", REPO / "docs/RELEASE.md", REPO / "docs/SUPPORT.md"):
     assert "resource-policy-report.txt" in path.read_text(encoding="utf-8"), path
+# Current-release preambles cannot accidentally present historical policy v9/v10 as current.
+current_sections = {
+    REPO / "README.md": "### v14.5.4",
+    ROOT / "AUDIT.md": "## v14.5.4",
+    REPO / "docs/README.md": "> **v14.5.4:",
+    REPO / "docs/SUPPORT.md": "## v14.5.4",
+}
+for path, boundary in current_sections.items():
+    prefix=path.read_text(encoding="utf-8").split(boundary,1)[0].lower()
+    assert "current policy v9" not in prefix and "current policy v10" not in prefix, path
+    assert "current resource policy v9" not in prefix and "current resource policy v10" not in prefix, path
 
 print("v14.5.42 HARDWARE / CANONICAL RESOURCE / RELEASE CONSISTENCY FIXTURES: PASS")

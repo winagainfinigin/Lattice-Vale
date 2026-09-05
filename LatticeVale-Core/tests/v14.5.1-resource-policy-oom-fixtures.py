@@ -9,103 +9,106 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
-assert version in {"14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}, version
+assert version in {"14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46'}, version
 
 cfg = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
 manage = (ROOT / "stack/manage.sh").read_text(encoding="utf-8")
 boot = (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8")
 audit = (ROOT / "stack/state-audit.py").read_text(encoding="utf-8")
 features = (REPO / "docs/FEATURES.md").read_text(encoding="utf-8")
-sys.path.insert(0,str(ROOT/'stack'))
-from latticevale_arch import host_memory_budget, service_memory_plan  # noqa:E402
 
-# Current policy is schema 12 and formula verification is delegated to the canonical
-# runtime-policy engine. Older starvation/OOM regressions remain protected behaviorally.
-assert '[POLICY_VERSION]=12' in cfg
-assert 'runtime-policy.py verify --stack . --compat compatibility.conf' in cfg
+# v4 was proven to starve the central Hermes cgroup on a real ~9.7 GiB full stack.
+assert "POLICY_VERSION=11" in cfg
+assert 'statev POLICY_VERSION)" == 11' in cfg
 assert './configure-stack.sh --refresh-resource-policy' in manage
 assert './configure-stack.sh --refresh-resource-policy' in boot
-assert 'validate_runtime_policy_state' in audit and 'validate_runtime_policy_document' in audit
+assert 'values.get("POLICY_VERSION") != "11"' in audit
 
-# Host budgeting must be adaptive across arbitrary WSL allocations and backend shapes.
-for accel in ("cpu", "vulkan", "nvidia", "amd"):
-    for managed in (False, True):
-        for directml in (False, True):
-            previous_budget = -1
-            for mem in (2137, 3923, 6179, 9053, 12791, 18437, 27611, 49157):
-                state = host_memory_budget(mem, accel, managed, directml)
-                assert state["reserveMiB"] + state["containerBudgetMiB"] == mem
-                assert state["containerBudgetMiB"] >= 384
-                assert state["containerBudgetMiB"] >= previous_budget
-                previous_budget = state["containerBudgetMiB"]
-                if directml:
-                    assert 0 < state["directmlHostReserveMiB"] <= state["reserveMiB"]
-                else:
-                    assert state["directmlHostReserveMiB"] == 0
-assert 'runtime-policy.py service-plan' in cfg
+# Preserve the conservative <=6 GiB reserve. Policy v11 gives CPU-backed managed
+# Ollama extra hard-limit headroom on >6-12 GiB WSL VMs while retaining a bounded
+# host reserve; non-CPU Ollama and other >6-24 GiB shapes keep the 20% reserve.
+assert 'mem_mib <= 6144 )); then' in cfg and 'reserve_pct=30' in cfg
+assert 'mem_mib <= 12288 )) && [[ "$accel" == cpu ]] && managed_ollama_enabled' in cfg
+assert 'reserve_pct=10' in cfg
+assert 'mem_mib <= 24576 )); then' in cfg and 'reserve_pct=20' in cfg
+assert "specs=[('hermes',8,hermes_floor,hermes_cap)]" in cfg
 assert 'resource_hermes_floor_mib() {' in cfg
+assert "('honcho-api',4,512,3072)" in cfg
+assert 'requested_ollama_floor' in cfg
 assert 'resource_ollama_model_metrics() {' in cfg
 assert '[OLLAMA_MODEL_FLOOR_MIB]="$ollama_floor_mib"' in cfg
-assert 'PY_RESOURCE_PLAN' not in cfg
-assert 'LOW_MEMORY_PROFILE' not in cfg
 
-# Clean installs persist exact generated ceilings and live repair verifies Docker consumes them.
+# Clean installs persist the exact generated service ceilings, while repair verification
+# compares those desired values with Docker HostConfig.Memory so a current YAML file
+# cannot hide an old live cgroup from a pre-v7 container.
 for marker in (
     'resource_policy["LIMIT_${resource_state_key}_MIB"]="${mem_limits[$resource_state_svc]}"',
     "verify_live_resource_policy_limits() {",
     "{{.HostConfig.Memory}}",
     "docker compose config --format json",
     "live Docker CPU/RAM ceilings do not match the current adaptive resource policy",
-    "Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v12",
+    "Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v11",
 ):
     assert marker in cfg, marker
 
-class PlanResult:
-    def __init__(self, returncode:int, stderr:str=''):
-        self.returncode=returncode; self.stderr=stderr; self.stdout=''
+# Execute the embedded allocator with the exact budget produced by the audited host:
+# 9946 MiB visible with CPU-backed managed Ollama: policy v11 uses a 10% reserve,
+# giving 1491 MiB host headroom and an 8455 MiB managed-container budget.
+start = cfg.index("import sys\nbudget=int(sys.argv[1])", cfg.index("<<'PY_RESOURCE_PLAN'"))
+end = cfg.index("\nPY_RESOURCE_PLAN", start)
+planner = cfg[start:end]
 
-def plan_result(budget: int, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, hermes_floor=1024, ollama_floor=3072):
-    try:
-        alloc=service_memory_plan(budget,matrix=matrix,searxng=searxng,qmd=qmd,ollama=ollama,honcho=honcho,hermes_floor=hermes_floor,ollama_floor=ollama_floor)
-        r=PlanResult(0); r.alloc=alloc; return r
-    except ValueError as exc:
-        r=PlanResult(3,str(exc)); r.alloc={}; return r
+def plan_result(budget: int, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, accel='cpu', hermes_floor=1024, ollama_floor=5120):
+    args = [str(budget)] + [('true' if x else 'false') for x in (matrix,searxng,qmd,ollama,honcho)] + [accel, str(hermes_floor), str(ollama_floor)]
+    return subprocess.run([sys.executable, "-c", planner, *args], text=True, capture_output=True, timeout=10)
 
-def first_fit(**kwargs):
-    lo,hi=384,131072
-    while lo<hi:
-        mid=(lo+hi)//2
-        if plan_result(mid,**kwargs).returncode==0: hi=mid
-        else: lo=mid+1
-    return lo
+def plan(budget: int, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, accel='cpu', hermes_floor=1024, ollama_floor=5120):
+    r = plan_result(budget, matrix, searxng, qmd, ollama, honcho, accel, hermes_floor, ollama_floor)
+    assert r.returncode == 0, r.stderr
+    out = {}
+    for line in r.stdout.splitlines():
+        k,v=line.split('=',1); out[k]=int(v)
+    return out
 
-# Full and light selections compute their viability threshold from enabled-service minima.
-full_threshold=first_fit()
-assert plan_result(full_threshold).returncode==0
-assert plan_result(full_threshold-1).returncode==3
-full=plan_result(full_threshold+977).alloc
-assert sum(full.values())<=full_threshold+977
-assert full['hermes']>=1024 and full['ollama']>=3072
-assert full['honcho-api']>=384 and full['honcho-deriver']>=256
+full = plan(8952)
+assert sum(full.values()) <= 8952, full
+assert full["hermes"] >= 1024, full
+assert full["ollama"] >= 5120, full
+assert full["honcho-api"] >= 512, full
+assert full["honcho-deriver"] >= 384, full
+# Lock the audited ~9.7 GiB CPU-backed full-stack shape so future allocator changes
+# cannot regress into memory.max pressure again. Policy v6 produced only 4128 MiB
+# Ollama and the live cgroup recorded >15k max-pressure events at ~98% usage.
+assert full["hermes"] == 1040, full
+assert full["honcho-api"] == 528, full
+assert full["honcho-deriver"] == 400, full
+assert full["ollama"] == 5152, full
+# Regression target: v4 generated 544 MiB for Hermes; v6 left CPU Ollama too tight.
+assert full["hermes"] > 544 and full["ollama"] > 4128, full
 
-core_threshold=first_fit(matrix=False,searxng=False,qmd=False,ollama=False,honcho=False,ollama_floor=0)
-assert core_threshold==1024
-core=plan_result(core_threshold+191,matrix=False,searxng=False,qmd=False,ollama=False,honcho=False,ollama_floor=0).alloc
-assert core['hermes']>=1024 and sum(core.values())<=core_threshold+191
+# Policy v11 makes the CPU-backed Ollama model floor a viability requirement.
+# A full selected stack therefore needs >=8320 MiB managed container budget.
+for budget in (768, 1280, 2868, 5735, 7958, 8831):
+    r = plan_result(budget)
+    assert r.returncode == 3, (budget, r.returncode, r.stdout, r.stderr)
+    assert "cannot safely fit the selected services" in r.stderr, (budget, r.stderr)
 
-ollama_threshold=first_fit(matrix=False,searxng=False,qmd=False,ollama=True,honcho=False,ollama_floor=2304)
-assert plan_result(ollama_threshold-1,matrix=False,searxng=False,qmd=False,ollama=True,honcho=False,ollama_floor=2304).returncode==3
-small_gpu=plan_result(ollama_threshold+257,matrix=False,searxng=False,qmd=False,ollama=True,honcho=False,ollama_floor=2304).alloc
-assert small_gpu['hermes']>=1024 and small_gpu['ollama']>=2304
+# Lighter selections remain adaptive. Core Hermes alone still fits 1280 MiB.
+# Hermes + CPU-backed managed Ollama requires >=5632 MiB, while GPU-backed managed
+# Ollama keeps the older best-effort floor and can fit smaller selected-service sets.
+core = plan(1280, matrix=False, searxng=False, qmd=False, ollama=False, honcho=False)
+assert core["hermes"] >= 1024 and sum(core.values()) <= 1280, core
+assert plan_result(6143, matrix=False, searxng=False, qmd=False, ollama=True, honcho=False).returncode == 3
+core_ollama = plan(6144, matrix=False, searxng=False, qmd=False, ollama=True, honcho=False)
+assert core_ollama["hermes"] >= 1024 and core_ollama["ollama"] >= 5120, core_ollama
+gpu_small = plan(3584, matrix=False, searxng=False, qmd=False, ollama=True, honcho=False, accel='nvidia', ollama_floor=2304)
+assert gpu_small["hermes"] >= 1024 and gpu_small["ollama"] >= 2048, gpu_small
 
-# Water-fill is monotonic for arbitrary larger budgets until a service reaches its safety cap.
-prev=None
-for budget in (full_threshold, full_threshold+431, full_threshold+1907, full_threshold+7123, full_threshold+22109):
-    alloc=plan_result(budget).alloc
-    assert alloc and sum(alloc.values())<=budget
-    if prev:
-        for name in alloc: assert alloc[name]>=prev[name], (name,budget,prev[name],alloc[name])
-    prev=alloc
+# Once CPU full-stack minima fit, larger budgets remain bounded and positive.
+for budget in (8832, 8952, 9831, 13108, 28672, 61440):
+    alloc = plan(budget)
+    assert alloc and all(v > 0 for v in alloc.values()), (budget, alloc)
+    assert sum(alloc.values()) <= budget, (budget, sum(alloc.values()), alloc)
 
 # The audit must not report HEALTHY when Docker says a currently-running selected
 # container has recorded an OOM kill or is still using a stale live hard ceiling.
@@ -152,7 +155,7 @@ with tempfile.TemporaryDirectory(prefix='lv151-live-limit-') as td_raw:
         encoding='utf-8',
     )
     docker.chmod(0o755)
-    (td / '.latticevale-resource-state').write_text('POLICY_VERSION=12\nMATRIX_PROFILE_GATEWAYS=0\nKANBAN_CONCURRENCY=1\nHERMES_MIN_MIB=1024\nLIMIT_HERMES_MIB=1040\nCPU_HERMES_MILLI=3000\n', encoding='utf-8')
+    (td / '.latticevale-resource-state').write_text('POLICY_VERSION=11\nMATRIX_PROFILE_GATEWAYS=0\nKANBAN_CONCURRENCY=1\nHERMES_MIN_MIB=1024\nLIMIT_HERMES_MIB=1040\nCPU_HERMES_MILLI=3000\n', encoding='utf-8')
     harness = td / 'harness.sh'
     harness.write_text(
         '#!/usr/bin/env bash\n'
@@ -190,5 +193,5 @@ with tempfile.TemporaryDirectory(prefix='lv151-live-limit-') as td_raw:
     overridden = subprocess.run(['bash', str(harness)], cwd=td, env=env, text=True, capture_output=True, timeout=10)
     assert overridden.returncode == 0, overridden.stdout + overridden.stderr
 
-assert "policy v12" in features.lower()
+assert "policy v11" in features.lower()
 print("v14.5.1 RESOURCE POLICY / OOM FIXTURES: PASS")

@@ -5,18 +5,17 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, VERSION
+assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, VERSION
 
 boot = (ROOT / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 compat = (ROOT / 'compatibility.conf').read_text(encoding='utf-8')
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 audit = (ROOT / 'stack/state-audit.py').read_text(encoding='utf-8')
-arch = (ROOT / 'stack/latticevale_arch.py').read_text(encoding='utf-8')
 
 m = re.search(r'^MANAGED_REPAIR_REFRESH_REVISION=(\d+)$', compat, re.M)
 assert m
 current_refresh_revision = int(m.group(1))
-assert current_refresh_revision == (4 if VERSION == '14.6.0' else (3 if VERSION == '14.5.47' else 2))
+assert current_refresh_revision == 2
 assert 'VERSION.txt alone is' in compat and 'not a managed-refresh trigger' in compat
 
 # Public v14.4.2 shipped refresh revision 1 and adaptive resource policy v2. A direct
@@ -25,7 +24,7 @@ assert 'VERSION.txt alone is' in compat and 'not a managed-refresh trigger' in c
 PUBLIC_14_4_2_REFRESH_REVISION = 1
 PUBLIC_14_4_2_RESOURCE_POLICY = 2
 assert current_refresh_revision > PUBLIC_14_4_2_REFRESH_REVISION
-assert '[POLICY_VERSION]=12' in cfg and '[RESOURCE_POLICY_MODE]=adaptive' in cfg
+assert 'POLICY_VERSION=11' in cfg
 assert PUBLIC_14_4_2_RESOURCE_POLICY < 5
 
 # Ordinary repair refresh gating must use marker validity, refresh revision, or age.
@@ -63,15 +62,9 @@ assert 'Adaptive runtime/RAM policy is already current.' in cfg
 
 # v14.4.6 CPU audit fix remains present; a 14.4.5 -> 14.4.6 repair can adopt this file
 # without a managed image/source refresh when its current adaptive-policy state is healthy.
-if VERSION == '14.6.0':
-    assert 'def visible_cpu_count() -> int:' in arch
-    assert 'os.sched_getaffinity(0)' in arch
-    assert 'cpus = visible_cpu_count()' in arch
-    assert 'probe_hardware' in audit and 'classify_backends' in audit
-else:
-    assert 'def visible_cpu_count() -> int:' in audit
-    assert 'os.sched_getaffinity(0)' in audit
-    assert 'current_cpus = visible_cpu_count()' in audit
+assert 'def visible_cpu_count() -> int:' in audit
+assert 'os.sched_getaffinity(0)' in audit
+assert 'current_cpus = visible_cpu_count()' in audit
 
 # Current documentation must make both upgrade paths explicit.
 docs = '\n'.join([

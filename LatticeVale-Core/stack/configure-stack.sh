@@ -14,9 +14,138 @@ python3 -m json.tool install-options.json >/dev/null
 # normally emits these values, but repair runs may encounter an older, truncated,
 # or hand-edited file. Validate path-bearing names and control fields before any
 # filesystem or Docker mutation.
-[[ -f compatibility.conf && ! -L compatibility.conf ]] || { echo 'Missing canonical compatibility.conf. Rerun the Windows installer.' >&2; exit 2; }
-[[ -f latticevale_arch.py && ! -L latticevale_arch.py ]] || { echo 'Missing canonical architecture library. Rerun the Windows installer.' >&2; exit 2; }
-python3 latticevale_arch.py validate-options install-options.json --compat compatibility.conf
+python3 - install-options.json <<'PY_OPTIONS_VALIDATE'
+import ipaddress,json,re,sys
+from pathlib import Path
+p=Path(sys.argv[1])
+try:
+    d=json.loads(p.read_text(encoding='utf-8'))
+except Exception as exc:
+    raise SystemExit(f'Invalid install-options.json: {exc}')
+if not isinstance(d,dict):
+    raise SystemExit('Invalid install-options.json: top level must be an object.')
+
+bool_keys=(
+    'dashboard','multiAgent','kanban','matrix','tailscale','installWindowsTailscale',
+    'tailscaleDashboard','tailscaleMatrix','searxng','qmd','honcho','hermesLocalAI',
+    'obsidian','unattendedUpdates','autoStart','windowsShortcuts','keepWslServicesRunning','containerResourceLimits','resetCheckpoints',
+    'forceProviderSetup','forceProfileSetup','rebuildMatrixIdentity','repairMaintenance','forceManagedUpdate','universalRepairMigration',
+)
+for key in bool_keys:
+    if key in d and not isinstance(d[key],bool):
+        raise SystemExit(f'Invalid install-options.json: {key} must be true or false.')
+if 'schema' in d and (isinstance(d['schema'],bool) or not isinstance(d['schema'],int) or not 1 <= d['schema'] <= 20):
+    raise SystemExit('Invalid install-options.json: schema must be an integer from 1 through 20.')
+if 'repairOriginSchema' in d and (isinstance(d['repairOriginSchema'],bool) or not isinstance(d['repairOriginSchema'],int) or not 0 <= d['repairOriginSchema'] <= 20):
+    raise SystemExit('Invalid install-options.json: repairOriginSchema must be an integer from 0 through 20.')
+
+workers=d.get('workers',[])
+if not isinstance(workers,list):
+    raise SystemExit('Invalid install-options.json: workers must be an array.')
+if len(workers)>8:
+    raise SystemExit('Invalid install-options.json: at most 8 additional profiles are supported.')
+seen=set()
+name_re=re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')
+for i,w in enumerate(workers,1):
+    if not isinstance(w,dict):
+        raise SystemExit(f'Invalid install-options.json: worker {i} must be an object.')
+    name=w.get('name')
+    if not isinstance(name,str) or name=='default' or not name_re.fullmatch(name) or name in seen:
+        raise SystemExit(f'Invalid install-options.json: worker {i} has an unsafe, reserved, or duplicate name.')
+    seen.add(name)
+    if 'description' in w and not isinstance(w['description'],str):
+        raise SystemExit(f'Invalid install-options.json: worker {name} description must be text.')
+    if 'clone' in w and not isinstance(w['clone'],bool):
+        raise SystemExit(f'Invalid install-options.json: worker {name} clone must be true or false.')
+
+    if 'modelMode' in w and w['modelMode'] not in ('clone-default','profile-selected'):
+        raise SystemExit(f'Invalid install-options.json: worker {name} modelMode is invalid.')
+    mx=w.get('matrix')
+    if mx is not None:
+        if not isinstance(mx,dict):
+            raise SystemExit(f'Invalid install-options.json: worker {name} matrix must be an object.')
+        if 'enabled' in mx and not isinstance(mx['enabled'],bool):
+            raise SystemExit(f'Invalid install-options.json: worker {name} matrix.enabled must be true or false.')
+        if mx.get('enabled') is True and name == 'hermes':
+            raise SystemExit('Invalid install-options.json: a secondary Matrix-enabled profile cannot be named hermes because @hermes:hermes.local belongs to the default profile.')
+        localpart=mx.get('localpart',name)
+        if not isinstance(localpart,str) or localpart != name:
+            raise SystemExit(f'Invalid install-options.json: worker {name} Matrix localpart must match the profile name.')
+        mode=mx.get('roomMode','create')
+        if mode not in ('create','existing'):
+            raise SystemExit(f'Invalid install-options.json: worker {name} matrix.roomMode must be create or existing.')
+        room_name=mx.get('roomName',f'LatticeVale {name}')
+        if not isinstance(room_name,str) or not room_name.strip() or len(room_name)>120 or '\n' in room_name or '\r' in room_name:
+            raise SystemExit(f'Invalid install-options.json: worker {name} Matrix room name is invalid.')
+        room_id=mx.get('roomId','')
+        if not isinstance(room_id,str):
+            raise SystemExit(f'Invalid install-options.json: worker {name} matrix.roomId must be text.')
+        if mode=='existing' and mx.get('enabled') and not re.fullmatch(r'![^:\s]+:[^\s]+',room_id):
+            raise SystemExit(f'Invalid install-options.json: worker {name} existing Matrix room ID is invalid.')
+
+
+text_backend=d.get('localTextBackend','ollama')
+if text_backend not in ('ollama','directml'):
+    raise SystemExit('Invalid install-options.json: localTextBackend must be ollama or directml.')
+directml_model=d.get('directmlTextModel','Qwen/Qwen2.5-1.5B-Instruct')
+if not isinstance(directml_model,str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}',directml_model):
+    raise SystemExit('Invalid install-options.json: directmlTextModel must be a safe Hugging Face owner/model repository ID.')
+
+backend=d.get('ollamaBackend','managed')
+if backend not in ('managed','windows-native'):
+    raise SystemExit('Invalid install-options.json: ollamaBackend must be managed or windows-native.')
+accel=d.get('ollamaAcceleration')
+if accel is not None and accel not in ('auto','cpu','nvidia','amd'):
+    raise SystemExit('Invalid install-options.json: ollamaAcceleration must be auto, cpu, nvidia, or amd.')
+
+model_re=re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$')
+for key in ('localTextModel','localEmbeddingModel'):
+    value=d.get(key)
+    if value is not None and (not isinstance(value,str) or not model_re.fullmatch(value)):
+        raise SystemExit(f'Invalid install-options.json: {key} is not a safe Ollama model/tag.')
+
+for key in ('hermesApiPort','dashboardLocalPort','matrixLocalPort','searxngLocalPort','honchoLocalPort',
+            'tailscaleDashboardPort','tailscaleMatrixPort','dashboardBridgePort','matrixBridgePort','windowsOllamaBridgePort','windowsOllamaTargetPort','directmlPort'):
+    if key in d and (isinstance(d[key],bool) or not isinstance(d[key],int) or not 1 <= d[key] <= 65535):
+        raise SystemExit(f'Invalid install-options.json: {key} must be an integer TCP port from 1 to 65535.')
+
+for key in ('timezone','installerVersion','installerMode','repairOriginVersion','questionnaireMode','obsidianVaultWindowsPath','obsidianVaultWslPath','windowsOllamaBridgeTaskName','windowsOllamaTransport','windowsOllamaTargetAddress','windowsOllamaHostAddress','directmlAdapterName','directmlGpuVendor'):
+    if key in d and not isinstance(d[key],str):
+        raise SystemExit(f'Invalid install-options.json: {key} must be text.')
+if d.get('directmlGpuVendor','') not in ('','amd','nvidia','intel','qualcomm'):
+    raise SystemExit('Invalid install-options.json: directmlGpuVendor must be amd, nvidia, intel, qualcomm, or empty.')
+if isinstance(d.get('directmlAdapterName',''),str) and ('\n' in d.get('directmlAdapterName','') or '\r' in d.get('directmlAdapterName','') or len(d.get('directmlAdapterName','')) > 160):
+    raise SystemExit('Invalid install-options.json: directmlAdapterName is too long or contains a newline.')
+if 'questionnaireMode' in d and d['questionnaireMode'] not in ('quick','custom','explicit'):
+    raise SystemExit('Invalid install-options.json: questionnaireMode must be quick, custom, or explicit.')
+if backend == 'windows-native':
+    transport=d.get('windowsOllamaTransport','windows-gateway-relay')
+    if transport not in ('windows-gateway-relay','wsl-localhost-relay','wsl-host-relay'):
+        raise SystemExit('Invalid install-options.json: windowsOllamaTransport must be windows-gateway-relay, wsl-localhost-relay, or wsl-host-relay.')
+    target=str(d.get('windowsOllamaTargetAddress','127.0.0.1')).strip().lower()
+    if target == 'localhost': target='127.0.0.1'
+    try: target_ip=ipaddress.ip_address(target)
+    except ValueError: raise SystemExit('Invalid install-options.json: windowsOllamaTargetAddress must be IPv4 loopback.')
+    if target_ip.version != 4 or not target_ip.is_loopback:
+        raise SystemExit('Invalid install-options.json: windowsOllamaTargetAddress must remain on IPv4 loopback.')
+    host_address=str(d.get('windowsOllamaHostAddress','')).strip()
+    if transport in ('windows-gateway-relay','wsl-host-relay'):
+        try: host_ip=ipaddress.ip_address(host_address)
+        except ValueError: raise SystemExit('Invalid install-options.json: windowsOllamaHostAddress must be a non-loopback IPv4 address for the selected Windows-host transport.')
+        if host_ip.version != 4 or host_ip.is_loopback or host_ip.is_link_local:
+            raise SystemExit('Invalid install-options.json: windowsOllamaHostAddress must be a non-loopback, non-link-local IPv4 address for the selected Windows-host transport.')
+for key in ('kanbanMaxInProgress','kanbanMaxInProgressPerProfile'):
+    if key in d and (isinstance(d[key],bool) or not isinstance(d[key],int) or not 1 <= d[key] <= 8):
+        raise SystemExit(f'Invalid install-options.json: {key} must be an integer from 1 to 8.')
+if d.get('obsidian'):
+    wp=d.get('obsidianVaultWindowsPath','')
+    lp=d.get('obsidianVaultWslPath','')
+    if not re.fullmatch(r'[A-Za-z]:\\[^\r\n]+', wp):
+        raise SystemExit('Invalid install-options.json: obsidianVaultWindowsPath must be a Windows-local drive path.')
+    if not lp.startswith('/') or lp == '/' or '\n' in lp or '\r' in lp or '/..' in lp:
+        raise SystemExit('Invalid install-options.json: obsidianVaultWslPath must be an absolute WSL path to a mounted local Windows drive.')
+print('Persisted installer options validated.')
+PY_OPTIONS_VALIDATE
 
 opt_bool() { jq -r ".${1} // false" install-options.json; }
 opt_text() { jq -r ".${1} // empty" install-options.json; }
@@ -234,45 +363,8 @@ local_text_openai_base_url() {
   if directml_text_enabled; then directml_openai_base_url; else ollama_openai_base_url; fi
 }
 
-canonical_directml_admission_mib() {
-  local v=0
-  if [[ -s data/latticevale/backend-capabilities.json && ! -L data/latticevale/backend-capabilities.json ]]; then
-    v="$(jq -r '.adapterSelection.selected.directmlAdmission.capacityMiB // 0' data/latticevale/backend-capabilities.json 2>/dev/null || printf 0)"
-  fi
-  # Migration-only fallback for older managed stacks before 14.6 derived state has
-  # been regenerated. New policy calculations prefer canonical hardware state.
-  if [[ ! "$v" =~ ^[0-9]+$ || "$v" -le 0 ]]; then
-    v="$(jq -r '.directmlVramMiB // 0' install-options.json 2>/dev/null || printf 0)"
-  fi
-  [[ "$v" =~ ^[0-9]+$ ]] || v=0
-  printf '%s' "$v"
-}
-canonical_directml_admission_source() {
-  local v
-  v="$(jq -r '.adapterSelection.selected.directmlAdmission.source // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
-  [[ -n "$v" ]] || v=legacy-install-options
-  printf '%s' "$v"
-}
-
-canonical_directml_admission_confidence() {
-  local v
-  v="$(jq -r '.adapterSelection.selected.directmlAdmission.confidence // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
-  [[ -n "$v" ]] || v=legacy
-  printf '%s' "$v"
-}
-
-
-adaptive_directml_context_length() {
-  local mem_mib vram_mib
-  mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-  vram_mib="$(canonical_directml_admission_mib)"
-  [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -gt 0 ]] || return 1
-  [[ "$vram_mib" =~ ^[0-9]+$ ]] || vram_mib=0
-  python3 runtime-policy.py directml-context "$mem_mib" "$vram_mib"
-}
-
 local_text_context_length() {
-  if directml_text_enabled; then adaptive_directml_context_length; else choose_ollama_context_length; fi
+  if directml_text_enabled; then printf '%s' 8192; else choose_ollama_context_length; fi
 }
 
 ollama_backend() {
@@ -391,22 +483,9 @@ nvidia_container_runtime_ready() {
   timeout --foreground --kill-after=3s 10s docker info --format '{{json .Runtimes}}' 2>/dev/null | grep -q '"nvidia"'
 }
 
-vulkan_dri_runtime_ready() {
-  # Ollama's experimental Vulkan path can use DRM render nodes for AMD/Intel and
-  # other Mesa-supported devices. Device presence is only a candidate signal;
-  # model startup + `ollama ps` below remains the authoritative offload proof.
-  local dev
-  shopt -s nullglob
-  for dev in /dev/dri/renderD*; do
-    [[ -c "$dev" ]] && { shopt -u nullglob; return 0; }
-  done
-  shopt -u nullglob
-  return 1
-}
-
 ollama_gpu_inventory() {
   # Emit one "index|name|MiB" row per GPU visible to the managed Ollama runtime.
-  # Resource policy v12 deliberately inventories individual adapters instead of
+  # Resource policy v11 deliberately inventories individual adapters instead of
   # treating aggregate VRAM as one interchangeable pool: Ollama normally prefers a
   # single fitting GPU and spreads only when it needs multiple devices.
   local accel="$1" smi line idx name mib vf card vendor raw
@@ -466,33 +545,71 @@ PY_GPU_METRICS
 }
 
 resource_gpu_coordination() {
-  local accel="$1" count="$2" min_mib="$3" max_mib="$4" directml_vendor directml_selected=false
+  # Return per-GPU OLLAMA_GPU_OVERHEAD MiB and the DirectML VRAM percentage.
+  # When both managed Ollama and DirectML use the same vendor, reserve a real VRAM
+  # envelope from Ollama instead of allowing both backends to independently assume
+  # most of the same adapter. Similar-size GPU sets use a half-and-half envelope;
+  # highly heterogeneous sets key the fixed reserve to the smallest GPU so a tiny
+  # secondary adapter cannot cause the large DirectML adapter to be overcommitted.
+  local accel="$1" count="$2" min_mib="$3" max_mib="$4" directml_vendor overhead=0 directml_pct=75
+  if [[ "$accel" != nvidia && "$accel" != amd ]]; then printf '0:75:false\n'; return 0; fi
   directml_vendor="$(opt_text directmlGpuVendor 2>/dev/null || true)"
-  resource_directml_selected && directml_selected=true
-  python3 runtime-policy.py gpu-coordination "$accel" "$count" "$min_mib" "$max_mib" "$directml_vendor" "$directml_selected"
+  if resource_directml_selected && [[ "$directml_vendor" == "$accel" ]] && (( count > 0 && min_mib > 0 && max_mib > 0 )); then
+    if (( max_mib*2 <= min_mib*3 )); then
+      overhead=$((max_mib/2))
+      directml_pct=50
+    else
+      overhead=$((min_mib*3/4))
+      directml_pct=$((overhead*100/max_mib))
+      (( directml_pct > 50 )) && directml_pct=50
+      (( directml_pct < 5 )) && directml_pct=5
+    fi
+    overhead=$((((overhead+255)/256)*256))
+    # Never reserve the entire smallest GPU. This is mostly defensive for odd
+    # virtual/integrated reports; DirectML admission will still fail closed if its
+    # policy-selected percentage provides less than the 1 GiB safe minimum.
+    if (( overhead >= min_mib )); then overhead=$((((min_mib*3/4)/256)*256)); fi
+    (( overhead < 256 )) && overhead=256
+    printf '%s:%s:true\n' "$overhead" "$directml_pct"
+  else
+    printf '0:75:false\n'
+  fi
 }
 
 resource_ram_profile() {
-  python3 runtime-policy.py profile ram "$1"
+  local mem_mib="$1"
+  if (( mem_mib <= 8192 )); then printf compact
+  elif (( mem_mib <= 16384 )); then printf balanced
+  else printf large
+  fi
 }
 
 resource_cpu_profile() {
-  python3 runtime-policy.py profile cpu "$1"
-}
-
-resource_host_memory_budget() {
-  # Compatibility wrapper around the canonical 14.6 resource-policy engine.
-  # Generation, verification, diagnostics and state audit all consume this API.
-  local mem_mib="$1" accel="${2:-cpu}" managed_ollama="${3:-false}" directml_selected="${4:-false}"
-  python3 runtime-policy.py host-budget "$mem_mib" "$accel" "$managed_ollama" "$directml_selected"
+  local cpus="$1"
+  if (( cpus <= 4 )); then printf compact
+  elif (( cpus <= 8 )); then printf balanced
+  else printf high
+  fi
 }
 
 resource_ram_context_recommendation() {
-  python3 runtime-policy.py context ram "$1"
+  local mem_mib="$1"
+  if (( mem_mib <= 8192 )); then printf 4096
+  elif (( mem_mib <= 16384 )); then printf 16384
+  elif (( mem_mib <= 32768 )); then printf 32768
+  else printf 65536
+  fi
 }
 
 resource_gpu_context_recommendation() {
-  python3 runtime-policy.py context gpu "$1"
+  # Mirror Ollama's current VRAM-aware default bands, but cap the managed local
+  # policy at 64k because larger contexts sharply multiply KV-cache use and this
+  # stack prioritizes coexistence with Windows applications/games.
+  local usable_mib="$1"
+  if (( usable_mib < 24576 )); then printf 4096
+  elif (( usable_mib < 49152 )); then printf 32768
+  else printf 65536
+  fi
 }
 
 ollama_gpu_fingerprint() {
@@ -503,8 +620,6 @@ ollama_gpu_fingerprint() {
     [[ -n "$smi" ]] && extra="$(timeout --foreground --kill-after=2s 8s "$smi" --query-gpu=driver_version --format=csv,noheader,nounits 2>/dev/null | sort -u | tr '\n' ',' || true)"
   elif [[ "$accel" == amd ]]; then
     extra="$(uname -r 2>/dev/null || true):$(cat /sys/module/amdgpu/version 2>/dev/null || true)"
-  elif [[ "$accel" == vulkan ]]; then
-    extra="$(for d in /dev/dri/renderD*; do [[ -e "$d" ]] && stat -Lc '%n:%t:%T:%g:%Y' "$d" 2>/dev/null; done | sort | tr '\n' ',')"
   fi
   printf '%s' "$accel|$metrics|$extra" | sha256sum | awk '{print $1}'
 }
@@ -541,21 +656,15 @@ resolve_ollama_acceleration() {
       printf '%s' nvidia ;;
     amd)
       [[ "$(uname -m)" == x86_64 ]] || { echo 'Ollama AMD/ROCm acceleration currently requires an x86_64 WSL distro.' >&2; return 1; }
-      [[ -c /dev/kfd && -d /dev/dri ]] || { echo 'Ollama AMD/ROCm acceleration was explicitly selected, but /dev/kfd and /dev/dri are not both available in this WSL distro. Expose a supported AMD ROCm device or rerun and choose Auto/CPU/Vulkan.' >&2; return 1; }
+      [[ -c /dev/kfd && -d /dev/dri ]] || { echo 'Ollama AMD/ROCm acceleration was explicitly selected, but /dev/kfd and /dev/dri are not both available in this WSL distro. Expose a supported AMD ROCm device or rerun and choose Auto/CPU.' >&2; return 1; }
       metrics="$(ollama_gpu_metrics amd 2>/dev/null || true)"
       [[ -n "$metrics" ]] || { echo 'Ollama AMD/ROCm acceleration was selected, but LatticeVale could not inventory per-GPU VRAM. Refusing GPU-sized resource assumptions.' >&2; return 1; }
       printf '%s' amd ;;
-    vulkan)
-      vulkan_dri_runtime_ready || { echo 'Ollama Vulkan acceleration was explicitly selected, but no /dev/dri/renderD* device is visible in this WSL distro. Use DirectML, native Windows Ollama, a vendor runtime, Auto, or CPU.' >&2; return 1; }
-      printf '%s' vulkan ;;
     auto)
       if nvidia_container_runtime_ready && metrics="$(ollama_gpu_metrics nvidia 2>/dev/null || true)" && [[ -n "$metrics" ]]; then
         if ollama_gpu_fallback_matches nvidia "$metrics"; then printf '%s' cpu; else printf '%s' nvidia; fi
       elif [[ "$(uname -m)" == x86_64 && -c /dev/kfd && -d /dev/dri ]] && metrics="$(ollama_gpu_metrics amd 2>/dev/null || true)" && [[ -n "$metrics" ]]; then
         if ollama_gpu_fallback_matches amd "$metrics"; then printf '%s' cpu; else printf '%s' amd; fi
-      elif vulkan_dri_runtime_ready; then
-        metrics='0:0:0:0'
-        if ollama_gpu_fallback_matches vulkan "$metrics"; then printf '%s' cpu; else printf '%s' vulkan; fi
       else printf '%s' cpu
       fi ;;
     *) echo "Unsupported Ollama acceleration policy: $requested" >&2; return 1 ;;
@@ -592,8 +701,19 @@ resource_kanban_concurrency() {
 }
 
 resource_hermes_floor_mib() {
-  python3 runtime-policy.py hermes-floor "$1" "$2"
+  local matrix_gateways="$1" kanban_concurrency="$2" extra_gateways extra_kanban floor
+  # The 1024 MiB baseline is the real-world-proven shape for the default gateway,
+  # Dashboard/API overhead, up to one secondary Matrix gateway, and up to three
+  # concurrent Kanban tasks. Scale only beyond that baseline so ordinary one/two-
+  # profile installs retain the known-good v5-v7 balance while larger public setups
+  # receive additional headroom inside the same aggregate budget.
+  extra_gateways=$(( matrix_gateways > 1 ? matrix_gateways - 1 : 0 ))
+  extra_kanban=$(( kanban_concurrency > 3 ? kanban_concurrency - 3 : 0 ))
+  floor=$((1024 + extra_gateways*192 + extra_kanban*96))
+  (( floor > 4096 )) && floor=4096
+  printf '%s' "$floor"
 }
+
 
 ollama_model_manifest_mib() {
   local model="$1"
@@ -651,48 +771,40 @@ resource_directml_selected() {
 }
 
 resource_ollama_context_length() {
-  local accel="${1:-cpu}" context mem_mib ram_ctx gpu_metrics count min_mib max_mib total_mib coordination overhead directml_pct shared usable_max gpu_ctx
+  local accel="${1:-cpu}" context
   context="$(sed -n 's/^OLLAMA_CONTEXT_LENGTH=//p' .env 2>/dev/null | head -n1 || true)"
   if [[ "$context" =~ ^[0-9]+$ && "$context" -ge 1024 ]]; then
     printf '%s' "$context"
-    return 0
-  fi
-  mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-  [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -gt 0 ]] || return 1
-
-  if resource_directml_selected; then
-    # Size the Ollama fallback/embedding context from the container envelope that
-    # remains after the WSL-host DirectML reserve, not from a fixed hybrid context.
-    local hb reserve dml_reserve budget
-    hb="$(resource_host_memory_budget "$mem_mib" "$accel" true true)" || return 1
-    IFS=: read -r reserve dml_reserve budget <<<"$hb"
-    ram_ctx="$(resource_ram_context_recommendation "$budget")" || return 1
+  elif resource_directml_selected; then
+    # Ollama is the embedding/failure-fallback backend in DirectML mode. Keep its
+    # emergency text context compact even on large hosts so the fallback does not
+    # claim VRAM/RAM intended for the primary DirectML process.
+    printf '4096'
   elif declare -F choose_ollama_context_length >/dev/null 2>&1; then
     choose_ollama_context_length "$accel"
-    return
   else
-    ram_ctx="$(resource_ram_context_recommendation "$mem_mib")" || return 1
+    local mem_mib ram_ctx gpu_metrics count min_mib max_mib total_mib coordination overhead directml_pct shared usable_max gpu_ctx
+    mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
+    [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -gt 0 ]] || return 1
+    ram_ctx="$(resource_ram_context_recommendation "$mem_mib")"
+    if [[ "$accel" == nvidia || "$accel" == amd ]]; then
+      gpu_metrics="$(ollama_gpu_metrics "$accel")" || return 1
+      IFS=: read -r count min_mib max_mib total_mib <<<"$gpu_metrics"
+      coordination="$(resource_gpu_coordination "$accel" "$count" "$min_mib" "$max_mib")" || return 1
+      IFS=: read -r overhead directml_pct shared <<<"$coordination"
+      usable_max=$((max_mib-overhead)); (( usable_max < 0 )) && usable_max=0
+      gpu_ctx="$(resource_gpu_context_recommendation "$usable_max")"
+      (( gpu_ctx < ram_ctx )) && ram_ctx="$gpu_ctx"
+    fi
+    printf '%s' "$ram_ctx"
   fi
-
-  if [[ "$accel" == nvidia || "$accel" == amd ]]; then
-    gpu_metrics="$(ollama_gpu_metrics "$accel")" || return 1
-    IFS=: read -r count min_mib max_mib total_mib <<<"$gpu_metrics"
-    coordination="$(resource_gpu_coordination "$accel" "$count" "$min_mib" "$max_mib")" || return 1
-    IFS=: read -r overhead directml_pct shared <<<"$coordination"
-    usable_max=$((max_mib-overhead)); (( usable_max < 0 )) && usable_max=0
-    gpu_ctx="$(resource_gpu_context_recommendation "$usable_max")" || return 1
-    (( gpu_ctx < ram_ctx )) && ram_ctx="$gpu_ctx"
-  fi
-  printf '%s' "$ram_ctx"
 }
 
 resource_ollama_model_metrics() {
-  local accel="$1" text_model embed_model text_mib=0 embed_mib=0 artifact_mib=0 context floor hybrid=false mem_mib
+  local accel="$1" text_model embed_model text_mib=0 embed_mib=0 artifact_mib=0 context floor transient context_overhead host_model_mib hybrid=false
   local gpu_metrics count=0 min_vram=0 max_vram=0 total_vram=0 coordination overhead_mib=0 directml_pct=75 shared=false usable_max=0 usable_total=0
   managed_ollama_enabled || { printf '0:0:0:0\n'; return 0; }
   resource_directml_selected && hybrid=true
-  mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-  [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || return 1
   text_model="$(opt_text localTextModel)"
   embed_model="$(opt_text localEmbeddingModel)"
   text_mib="$(ollama_model_manifest_mib "$text_model" 2>/dev/null || printf 0)"
@@ -703,22 +815,63 @@ resource_ollama_model_metrics() {
   [[ "$embed_mib" =~ ^[0-9]+$ ]] || embed_mib=0
   artifact_mib=$(( text_mib > embed_mib ? text_mib : embed_mib ))
   context="$(resource_ollama_context_length "$accel")" || return 1
-  [[ "$context" =~ ^[0-9]+$ && "$context" -ge 1024 ]] || return 1
-
-  if [[ "$accel" == nvidia || "$accel" == amd ]]; then
+  [[ "$context" =~ ^[0-9]+$ ]] || return 1
+  if [[ "$accel" == cpu ]]; then
+    if [[ "$hybrid" == true ]]; then
+      floor=3072
+      if (( artifact_mib > 0 )); then
+        transient=$((artifact_mib/8)); (( transient < 512 )) && transient=512
+        context_overhead=$(((context+31)/32)); (( context_overhead < 128 )) && context_overhead=128; (( context_overhead > 768 )) && context_overhead=768
+        floor=$((artifact_mib+transient+context_overhead))
+        floor=$((((floor+255)/256)*256))
+        (( floor < 3072 )) && floor=3072
+      fi
+    else
+      # Policy v11 lowers only the provisional CPU-Ollama floor. Once the selected
+      # model exists on disk, its measured artifact/context requirement remains
+      # authoritative and can raise the floor or make the topology impossible.
+      floor=4096
+      if (( artifact_mib > 0 )); then
+        transient=$((artifact_mib/4)); (( transient < 1024 )) && transient=1024
+        context_overhead=$(((context+15)/16)); (( context_overhead < 256 )) && context_overhead=256; (( context_overhead > 2048 )) && context_overhead=2048
+        floor=$((artifact_mib+transient+context_overhead))
+        floor=$((((floor+255)/256)*256))
+        (( floor < 4096 )) && floor=4096
+      fi
+    fi
+  else
     gpu_metrics="$(ollama_gpu_metrics "$accel")" || return 1
     IFS=: read -r count min_vram max_vram total_vram <<<"$gpu_metrics"
     coordination="$(resource_gpu_coordination "$accel" "$count" "$min_vram" "$max_vram")" || return 1
     IFS=: read -r overhead_mib directml_pct shared <<<"$coordination"
     usable_max=$((max_vram-overhead_mib)); (( usable_max < 0 )) && usable_max=0
     usable_total=$((total_vram-overhead_mib*count)); (( usable_total < 0 )) && usable_total=0
+    host_model_mib=$((artifact_mib/4))
+    if (( artifact_mib > 0 )); then
+      if (( artifact_mib <= usable_max )); then
+        # Ollama normally keeps a fitting model on one GPU.
+        host_model_mib=$((artifact_mib/8))
+      elif (( artifact_mib <= usable_total )); then
+        # If it cannot fit one GPU, Ollama can spread it across available GPUs.
+        host_model_mib=$((artifact_mib/8))
+      else
+        # Preserve RAM for the portion that cannot fit in the measured usable VRAM,
+        # plus conservative host/runtime overhead.
+        host_model_mib=$((artifact_mib-usable_total+artifact_mib/8))
+      fi
+    fi
+    if [[ "$hybrid" == true ]]; then
+      context_overhead=$(((context+63)/64)); (( context_overhead < 128 )) && context_overhead=128; (( context_overhead > 768 )) && context_overhead=768
+      floor=$((1536+host_model_mib+context_overhead))
+      floor=$((((floor+255)/256)*256))
+      (( floor < 1536 )) && floor=1536
+    else
+      context_overhead=$(((context+31)/32)); (( context_overhead < 256 )) && context_overhead=256; (( context_overhead > 2048 )) && context_overhead=2048
+      floor=$((2048+host_model_mib+context_overhead))
+      floor=$((((floor+255)/256)*256))
+      (( floor < 2048 )) && floor=2048
+    fi
   fi
-
-  # Model floor is canonical and adaptive.  Before model download it scales from
-  # live WSL RAM/context; once artifacts exist their measured size and usable GPU
-  # memory replace provisional assumptions. No compact/balanced/known-host table.
-  floor="$(python3 runtime-policy.py ollama-floor "$mem_mib" "$artifact_mib" "$context" "$accel" "$hybrid" "$usable_max" "$usable_total")" || return 1
-  [[ "$floor" =~ ^[0-9]+$ && "$floor" -gt 0 ]] || return 1
   printf '%s:%s:%s:%s\n' "$text_mib" "$embed_mib" "$context" "$floor"
 }
 
@@ -733,7 +886,7 @@ write_resource_policy_report() {
       printf 'LatticeVale Resource Policy Report\n'
       printf 'Resource policy: disabled or not yet generated\n'
       printf 'Adaptive container ceilings: disabled\n'
-      printf 'Generated by: LatticeVale v14.6.0\n'
+      printf 'Generated by: LatticeVale v14.5.42\n'
     } > "$report"
     chmod 0644 "$report"
     return 0
@@ -750,7 +903,7 @@ write_resource_policy_report() {
   fi
   {
     printf 'LatticeVale Resource Policy Report\n'
-    printf 'Generated by: LatticeVale v14.6.0\n'
+    printf 'Generated by: LatticeVale v14.5.42\n'
     printf 'Resource policy: v%s\n' "$(statev POLICY_VERSION)"
     printf 'Hardware fingerprint: %s\n' "$(statev HARDWARE_FINGERPRINT)"
     printf 'Policy fingerprint: %s\n' "$(statev POLICY_FINGERPRINT)"
@@ -766,7 +919,6 @@ write_resource_policy_report() {
     printf 'DirectML enabled: %s\n' "$(statev DIRECTML_SELECTED)"
     printf 'DirectML GPU: %s / %s\n' "$(statev DIRECTML_GPU_VENDOR)" "$(statev DIRECTML_ADAPTER_NAME)"
     printf 'DirectML VRAM limit: %s%%\n' "$(statev DIRECTML_VRAM_LIMIT_PCT)"
-    printf 'DirectML bounded admission capacity: %s MiB (source=%s; confidence=%s)\n' "$(statev DIRECTML_ADMISSION_MIB)" "$(statev DIRECTML_ADMISSION_SOURCE)" "$(statev DIRECTML_ADMISSION_CONFIDENCE)"
     printf 'Shared Ollama/DirectML vendor envelope: %s\n' "$(statev GPU_SHARED_WITH_DIRECTML)"
     printf 'Ollama context length: %s\n' "$(statev OLLAMA_CONTEXT_LENGTH)"
     printf 'Ollama model floor: %s MiB\n' "$(statev OLLAMA_MODEL_FLOOR_MIB)"
@@ -779,12 +931,6 @@ write_resource_policy_report() {
     printf 'Note: this report contains installer-owned resource decisions only; it intentionally excludes secrets.\n'
   } > "$report"
   chmod 0644 "$report"
-}
-
-resource_cpu_limit_string() {
-  local milli="$1"
-  [[ "$milli" =~ ^[0-9]+$ && "$milli" -ge 1 ]] || return 1
-  printf '%d.%03d' "$((milli/1000))" "$((milli%1000))"
 }
 
 write_latticevale_compose_overlay() {
@@ -813,88 +959,192 @@ write_latticevale_compose_overlay() {
   set_env .env LATTICEVALE_OLLAMA_GPU_OVERHEAD_AUTO "$((ollama_gpu_overhead_mib*1048576))"
   set_env .env DIRECTML_VRAM_LIMIT_PCT "$directml_vram_limit_pct"
 
-  # Canonical host-memory budgeting. The verifier calls this exact routine again,
-  # preventing generator/verifier drift across RAM sizes, DirectML, CPU/Vulkan
-  # fallback, CUDA, ROCm, and systems with no Linux-visible GPU device.
-  local reserve_mib directml_reserve_mib budget_mib host_budget managed_ollama_selected=false directml_selected_for_budget=false
-  managed_ollama_enabled && managed_ollama_selected=true
-  directml_text_enabled && directml_selected_for_budget=true
-  host_budget="$(resource_host_memory_budget "$mem_mib" "$accel" "$managed_ollama_selected" "$directml_selected_for_budget")" || return 1
-  IFS=: read -r reserve_mib directml_reserve_mib budget_mib <<<"$host_budget"
+  # LatticeVale v14.3.32 resource policy: calculate one aggregate container-memory
+  # budget from the RAM actually visible inside WSL, reserve headroom for the WSL
+  # kernel/Docker/cache, then distribute only that budget across services that are
+  # actually enabled. This avoids the old per-service percentage scheme whose
+  # theoretical maxima could substantially overcommit a small WSL VM.
+  local reserve_pct reserve_mib budget_mib
+  # v14.5.1 resource policy v9: retain hard aggregate budgeting while sizing managed
+  # Ollama from installed model artifacts + context when measurable. CPU-backed
+  # Ollama on >6-12 GiB WSL VMs uses a bounded 10% non-container reserve so common
+  # local models retain transient headroom without re-starving Hermes.
+  # Other >6-24 GiB shapes keep 20%; <=6 GiB keeps the conservative 30% reserve.
+  if (( mem_mib <= 6144 )); then
+    reserve_pct=30
+  elif (( mem_mib <= 12288 )) && [[ "$accel" == cpu ]] && managed_ollama_enabled && ! directml_text_enabled; then
+    reserve_pct=10
+  elif (( mem_mib <= 24576 )); then
+    reserve_pct=20
+  else
+    reserve_pct=15
+  fi
+  reserve_mib=$((mem_mib*reserve_pct/100))
+  (( reserve_mib < 768 )) && reserve_mib=768
+  (( reserve_mib > 4096 )) && reserve_mib=4096
+  # DirectML runs as a WSL-host process, but the normal non-container reserve
+  # already exists for kernel/cache/host work. Policy v10 treats the DirectML
+  # requirement as a floor on that reserve instead of ADDING a second reserve.
+  # This removes several GiB of double-counted headroom on ordinary 8-12 GiB WSL
+  # VMs while still keeping DirectML outside the Docker budget.
+  local directml_reserve_mib=0
+  if directml_text_enabled; then
+    # DirectML is a WSL-host process, not a cgroup-limited Compose service. Unlike
+    # the v14.5.2 topology it can also use shared GPU/system memory for staging.
+    # Keep a bounded quarter of WSL RAM outside the container budget so model load
+    # cannot consume the last host headroom and destabilize the WSL VM.
+    directml_reserve_mib=$((mem_mib/4))
+    (( directml_reserve_mib < 2048 )) && directml_reserve_mib=2048
+    (( directml_reserve_mib > 4096 )) && directml_reserve_mib=4096
+    (( reserve_mib < directml_reserve_mib )) && reserve_mib=$directml_reserve_mib
+  fi
+  budget_mib=$((mem_mib-reserve_mib))
+  (( budget_mib >= 384 )) || { echo "WSL exposes only ${mem_mib} MiB RAM, leaving too little memory for a safe adaptive LatticeVale container budget." >&2; return 1; }
 
-  # Canonical 14.6 CPU, application tuning, and service-memory planning.  These
-  # calculations live in latticevale_arch.py and are exposed through
-  # runtime-policy.py; configure-stack.sh only transports the resulting values.
-  # This prevents the installer, live verifier, diagnostics, and state-audit from
-  # drifting to different formulas on different qualified PCs.
-  local cpu_plan tuning_plan resource_plan active_count=0
+  local hermes_cpu heavy_cpu medium_cpu light_cpu ollama_cpu topology_cpu_pressure topology_cpu_bonus
   local malloc_arena_max synapse_cache_factor pg_shared_buffers
-  declare -A cpu_limits=()
-  cpu_plan="$(python3 runtime-policy.py cpu-plan "$cpus" "$matrix_profile_gateways" "$kanban_concurrency" "$accel")" || return 1
-  while IFS='=' read -r svc milli; do
-    [[ -n "$svc" && "$milli" =~ ^[0-9]+$ && "$milli" -ge 250 ]] || continue
-    cpu_limits["$svc"]="$milli"
-  done <<<"$cpu_plan"
-  for svc in hermes synapse-db synapse searxng-valkey searxng qmd qmd-indexer ollama honcho-db honcho-redis honcho-api honcho-deriver; do
-    [[ "${cpu_limits[$svc]:-}" =~ ^[0-9]+$ ]] || { echo "Canonical CPU planner omitted required service '$svc'." >&2; return 1; }
-  done
+  hermes_cpu=$(((cpus*3+3)/4)); (( hermes_cpu < 1 )) && hermes_cpu=1; (( hermes_cpu > cpus )) && hermes_cpu=$cpus
+  topology_cpu_pressure=$(( (matrix_profile_gateways > 1 ? matrix_profile_gateways - 1 : 0) + (kanban_concurrency > 3 ? kanban_concurrency - 3 : 0) ))
+  if (( topology_cpu_pressure > 0 )); then
+    topology_cpu_bonus=$(((topology_cpu_pressure+2)/3))
+    hermes_cpu=$((hermes_cpu+topology_cpu_bonus))
+    (( hermes_cpu > cpus )) && hermes_cpu=$cpus
+  fi
+  heavy_cpu=$cpus
+  medium_cpu=$(((cpus+1)/2)); (( medium_cpu < 1 )) && medium_cpu=1
+  light_cpu=$(((cpus+3)/4)); (( light_cpu < 1 )) && light_cpu=1
+  if [[ "$accel" == cpu ]]; then ollama_cpu="$heavy_cpu"; else ollama_cpu="$medium_cpu"; fi
+  # CPU ceilings are CFS quotas, not pinned cores or reservations. They scale from
+  # the processors actually visible to this WSL process: Hermes starts near 75% and
+  # scales toward 100% for profile/Kanban-heavy topologies; CPU-heavy Ollama gets
+  # 100%, medium services ~50%, and light stores ~25% (minimum one CPU).
+  # Policy v9 persists the generated per-service quota too, so clean/repair/start
+  # can prove Docker actually consumed a changed WSL CPU allocation.
+  declare -A cpu_limits=(
+    [hermes]="$hermes_cpu"
+    [synapse-db]="$medium_cpu" [synapse]="$medium_cpu"
+    [searxng-valkey]="$light_cpu" [searxng]="$medium_cpu"
+    [qmd]="$medium_cpu" [qmd-indexer]="$medium_cpu"
+    [ollama]="$ollama_cpu"
+    [honcho-db]="$medium_cpu" [honcho-redis]="$light_cpu"
+    [honcho-api]="$medium_cpu" [honcho-deriver]="$medium_cpu"
+  )
+
+  # Conservative application-level RAM defaults layered on top of hard ceilings.
+  # Synapse documents SYNAPSE_CACHE_FACTOR as its supported cache/RAM tradeoff.
+  # PostgreSQL typically defaults shared_buffers to 128MB; 64MB is appropriate for
+  # these local stores on smaller WSL VMs. MALLOC_ARENA_MAX limits glibc allocator
+  # arenas and reduces RSS growth from fragmentation in long-lived Python services.
+  if (( mem_mib <= 6144 )); then
+    malloc_arena_max=2; synapse_cache_factor=0.25; pg_shared_buffers=64MB
+  elif (( mem_mib <= 12288 )); then
+    malloc_arena_max=2; synapse_cache_factor=0.35; pg_shared_buffers=64MB
+  else
+    malloc_arena_max=4; synapse_cache_factor=0.50; pg_shared_buffers=128MB
+  fi
 
   declare -A mem_limits=()
+  local resource_plan active_count=0
   if [[ "$limits" == true ]]; then
-    resource_plan="$(python3 runtime-policy.py service-plan "$budget_mib" \
+    resource_plan="$(python3 - "$budget_mib" \
       "$(opt_bool matrix)" "$(opt_bool searxng)" "$(opt_bool qmd)" \
-      "$(if managed_ollama_enabled; then printf true; else printf false; fi)" "$(opt_bool honcho)" \
-      "$hermes_floor_mib" "$ollama_floor_mib")" || return 1
+      "$(if managed_ollama_enabled; then printf true; else printf false; fi)" "$(opt_bool honcho)" "$accel" "$hermes_floor_mib" "$ollama_floor_mib" \
+      "$(if (( mem_mib <= 12288 )); then printf true; else printf false; fi)" <<'PY_RESOURCE_PLAN'
+import sys
+budget=int(sys.argv[1])
+matrix=sys.argv[2]=='true'; searxng=sys.argv[3]=='true'; qmd=sys.argv[4]=='true'; ollama=sys.argv[5]=='true'; honcho=sys.argv[6]=='true'; accel=sys.argv[7]
+hermes_floor=int(sys.argv[8]); requested_ollama_floor=int(sys.argv[9]); lowmem=(sys.argv[10]=='true') if len(sys.argv)>10 else False
+if not 1024 <= hermes_floor <= 4096:
+    raise SystemExit('Invalid adaptive Hermes topology floor.')
+# name, weight, preferred minimum MiB, useful ceiling MiB
+# Policy v9 scales the central container floor with persistent secondary Matrix
+# gateways and high Kanban concurrency while keeping the proven common-case floor.
+if lowmem:
+    # <=12 GiB WSL profile: preserve the real-world-proven 1 GiB Hermes floor,
+    # but tighten supporting-service minima/caps so a normal 16 GiB Windows PC
+    # (typically ~8 GiB WSL by default) can run the selected stack without every
+    # idle helper reserving workstation-class headroom.
+    hermes_cap=max(2048,min(4096,hermes_floor+2048))
+    specs=[('hermes',8,hermes_floor,hermes_cap)]
+    if matrix: specs += [('synapse-db',2,160,768),('synapse',2,192,768)]
+    if searxng: specs += [('searxng-valkey',1,64,256),('searxng',2,192,768)]
+    if qmd: specs += [('qmd',2,192,1024),('qmd-indexer',2,192,1024)]
+    if honcho: specs += [('honcho-db',2,192,768),('honcho-redis',1,64,256),('honcho-api',4,384,1024),('honcho-deriver',3,256,1024)]
+else:
+    hermes_cap=max(4096,min(8192,hermes_floor+4096))
+    specs=[('hermes',8,hermes_floor,hermes_cap)]
+    if matrix: specs += [('synapse-db',2,256,2048),('synapse',2,256,1536)]
+    if searxng: specs += [('searxng-valkey',1,128,768),('searxng',2,256,1536)]
+    if qmd: specs += [('qmd',2,256,2048),('qmd-indexer',2,256,2048)]
+    if honcho: specs += [('honcho-db',2,256,2048),('honcho-redis',1,128,768),('honcho-api',4,512,3072),('honcho-deriver',3,384,3072)]
+# Policy v9 retains the corrected Hermes balance while making managed-Ollama viability model-aware, but the central Hermes runtime
+# now has a 1 GiB preferred floor and Honcho API gets 512 MiB. This is based on a
+# real full-stack failure where Hermes repeatedly hit a 544 MiB cgroup limit while
+# WSL still had multiple GiB available. The aggregate still stays within budget.
+# Policy v9 treats these minima as viability requirements instead of proportionally
+# crushing them when the selected service set cannot fit the managed budget.
+if ollama:
+    other_min_total=sum(m for _n,_w,m,_c in specs)
+    ollama_floor=max(2048,requested_ollama_floor)
+    ollama_cap=max(ollama_floor+1024,min(8192,ollama_floor+2048)) if lowmem else max(32768,min(65536,ollama_floor+8192))
+    specs += [('ollama',12,ollama_floor,ollama_cap)]
+mins={n:m for n,w,m,c in specs}; caps={n:c for n,w,m,c in specs}; weights={n:w for n,w,m,c in specs}
+alloc={n:0 for n,_,_,_ in specs}
+min_total=sum(mins.values())
+if min_total > budget:
+    # Policy v9 never turns a selected service set into superficially valid but
+    # implausibly tiny hard ceilings. The enabled set must fit its defined safe
+    # minima inside the managed budget; otherwise the user can increase WSL RAM,
+    # deselect services, use native-Windows Ollama, or disable LatticeVale ceilings.
+    enabled=", ".join(n for n,_,_,_ in specs)
+    print(
+        f"Adaptive resource policy v11 cannot safely fit the selected services: "
+        f"budget={budget}MiB, minimum={min_total}MiB, services={enabled}. "
+        "Increase WSL-visible RAM, deselect components, use native-Windows Ollama where appropriate, "
+        "or disable adaptive container ceilings.",
+        file=sys.stderr,
+    )
+    raise SystemExit(3)
+alloc.update(mins)
+remaining=budget-min_total
+# Weighted water-fill until all remaining budget is assigned or useful caps are hit.
+while remaining >= 16:
+    open_names=[n for n in alloc if alloc[n]+16 <= caps[n]]
+    if not open_names: break
+    total_w=sum(weights[n] for n in open_names)
+    progressed=False
+    for n in sorted(open_names,key=lambda x:weights[x],reverse=True):
+        if remaining < 16: break
+        share=max(16,int((remaining*weights[n]/total_w)//16)*16)
+        add=min(share,caps[n]-alloc[n],remaining)
+        add=(add//16)*16
+        if add>=16:
+            alloc[n]+=add; remaining-=add; progressed=True
+    if not progressed: break
+for n,_,_,_ in specs:
+    print(f'{n}={alloc[n]}')
+PY_RESOURCE_PLAN
+)" || return 1
     while IFS='=' read -r svc mib; do
-      [[ -n "$svc" && "$mib" =~ ^[0-9]+$ && "$mib" -gt 0 ]] || continue
-      mem_limits["$svc"]="$mib"
-      active_count=$((active_count+1))
+      [[ -n "$svc" && "$mib" =~ ^[0-9]+$ ]] || continue
+      mem_limits["$svc"]="$mib"; active_count=$((active_count+1))
     done <<<"$resource_plan"
-    (( active_count > 0 )) || { echo 'Canonical service-memory planner produced no active services.' >&2; return 1; }
+    (( active_count > 0 )) || { echo 'Adaptive resource planner produced no active services.' >&2; return 1; }
   fi
 
-  # Application tuning is derived from the live CPU/RAM envelope and, when limits
-  # are enabled, the actual service allocations just produced above.  No host-size
-  # bucket or known-machine topology chooses allocator/database/cache settings.
-  local synapse_tune_mib="${mem_limits[synapse]:-0}" database_tune_mib=0 candidate_db_mib
-  for candidate_db_mib in "${mem_limits[synapse-db]:-0}" "${mem_limits[honcho-db]:-0}"; do
-    [[ "$candidate_db_mib" =~ ^[0-9]+$ && "$candidate_db_mib" -gt 0 ]] || continue
-    if (( database_tune_mib == 0 || candidate_db_mib < database_tune_mib )); then database_tune_mib="$candidate_db_mib"; fi
-  done
-  tuning_plan="$(python3 runtime-policy.py tuning "$mem_mib" "$cpus" "$synapse_tune_mib" "$database_tune_mib")" || return 1
-  IFS=: read -r malloc_arena_max synapse_cache_factor pg_shared_buffers <<<"$tuning_plan"
-  [[ "$malloc_arena_max" =~ ^[0-9]+$ && "$synapse_cache_factor" =~ ^0\.[0-9]+$ && "$pg_shared_buffers" =~ ^[0-9]+MB$ ]] || {
-    echo 'Canonical runtime tuning planner returned invalid values.' >&2
-    return 1
-  }
-
-  local ollama_runtime_plan ollama_max_loaded_models ollama_num_parallel ollama_keep_alive
-  local directml_context_length=0 directml_cpu_threads=0 directml_generation_tokens=0 directml_vram_mib=0 directml_admission_source=unavailable directml_admission_confidence=none
-  ollama_runtime_plan="$(python3 runtime-policy.py ollama-runtime "$mem_mib" "$cpus" "$accel" "$directml_selected_for_budget")" || return 1
-  IFS=: read -r ollama_max_loaded_models ollama_num_parallel ollama_keep_alive <<<"$ollama_runtime_plan"
-  if [[ "$directml_selected_for_budget" == true ]]; then
-    directml_vram_mib="$(canonical_directml_admission_mib)"
-    [[ "$directml_vram_mib" =~ ^[0-9]+$ ]] || directml_vram_mib=0
-    directml_admission_source="$(canonical_directml_admission_source)"
-    directml_admission_confidence="$(canonical_directml_admission_confidence)"
-    directml_context_length="$(python3 runtime-policy.py directml-context "$mem_mib" "$directml_vram_mib")" || return 1
-    directml_cpu_threads="$(python3 runtime-policy.py directml-cpu "$cpus")" || return 1
-    directml_generation_tokens="$(python3 runtime-policy.py directml-generation "$directml_context_length")" || return 1
-  fi
-
-  # Policy v12 canonicalization: after hardware/topology/model planning completes,
+  # Policy v11 canonicalization: after hardware/topology/model planning completes,
   # freeze every installer-owned resource decision into one associative policy object.
   # Compose, persisted state, diagnostics, and later consistency checks consume these
   # exact values; none of those emitters independently re-derive service ceilings.
   declare -A resource_policy=(
-    [POLICY_VERSION]=12
+    [POLICY_VERSION]=11
     [CPUS]="$cpus" [CPU_PROFILE]="$cpu_profile"
     [MEM_MIB]="$mem_mib" [RAM_PROFILE]="$ram_profile"
     [RESERVE_MIB]="$reserve_mib" [DIRECTML_HOST_RESERVE_MIB]="$directml_reserve_mib"
-    [RESOURCE_POLICY_MODE]=adaptive
+    [LOW_MEMORY_PROFILE]="$(if (( mem_mib <= 12288 )); then printf 1; else printf 0; fi)"
     [BUDGET_MIB]="$budget_mib" [MATRIX_PROFILE_GATEWAYS]="$matrix_profile_gateways"
     [KANBAN_CONCURRENCY]="$kanban_concurrency" [HERMES_MIN_MIB]="$hermes_floor_mib"
-    [OLLAMA_ACCELERATION]="$accel" [MANAGED_OLLAMA_SELECTED]="$(if managed_ollama_enabled; then printf true; else printf false; fi)" [GPU_COUNT]="$gpu_count"
+    [OLLAMA_ACCELERATION]="$accel" [GPU_COUNT]="$gpu_count"
     [GPU_MIN_MIB]="$gpu_min_mib" [GPU_MAX_MIB]="$gpu_max_mib" [GPU_TOTAL_MIB]="$gpu_total_mib"
     [GPU_HETEROGENEOUS]="$(if (( gpu_count > 1 && gpu_min_mib != gpu_max_mib )); then printf true; else printf false; fi)"
     [OLLAMA_GPU_OVERHEAD_MIB]="$ollama_gpu_overhead_mib" [DIRECTML_VRAM_LIMIT_PCT]="$directml_vram_limit_pct"
@@ -902,11 +1152,8 @@ write_latticevale_compose_overlay() {
     [DIRECTML_SELECTED]="$(if resource_directml_selected; then printf true; else printf false; fi)"
     [DIRECTML_GPU_VENDOR]="$(opt_text directmlGpuVendor 2>/dev/null || true)"
     [DIRECTML_ADAPTER_NAME]="$(opt_text directmlAdapterName 2>/dev/null || true)"
-    [DIRECTML_ADMISSION_MIB]="$directml_vram_mib" [DIRECTML_ADMISSION_SOURCE]="$directml_admission_source" [DIRECTML_ADMISSION_CONFIDENCE]="$directml_admission_confidence"
     [OLLAMA_TEXT_ARTIFACT_MIB]="$ollama_text_mib" [OLLAMA_EMBED_ARTIFACT_MIB]="$ollama_embed_mib"
     [OLLAMA_CONTEXT_LENGTH]="$ollama_context" [OLLAMA_MODEL_FLOOR_MIB]="$ollama_floor_mib"
-    [OLLAMA_MAX_LOADED_MODELS]="$ollama_max_loaded_models" [OLLAMA_NUM_PARALLEL]="$ollama_num_parallel" [OLLAMA_KEEP_ALIVE]="$ollama_keep_alive"
-    [DIRECTML_CONTEXT_LENGTH]="$directml_context_length" [DIRECTML_CPU_THREADS]="$directml_cpu_threads" [DIRECTML_MAX_NEW_TOKENS]="$directml_generation_tokens"
     [MALLOC_ARENA_MAX]="$malloc_arena_max" [SYNAPSE_CACHE_FACTOR]="$synapse_cache_factor"
     [POSTGRES_SHARED_BUFFERS]="$pg_shared_buffers"
   )
@@ -915,16 +1162,11 @@ write_latticevale_compose_overlay() {
     [[ -n "${mem_limits[$resource_state_svc]:-}" ]] || continue
     resource_state_key="${resource_state_svc^^}"; resource_state_key="${resource_state_key//-/_}"
     resource_policy["LIMIT_${resource_state_key}_MIB"]="${mem_limits[$resource_state_svc]}"
-    resource_policy["CPU_${resource_state_key}_MILLI"]="${cpu_limits[$resource_state_svc]}"
+    resource_policy["CPU_${resource_state_key}_MILLI"]="${cpu_limits[$resource_state_svc]}000"
   done
-  local hardware_material policy_material canonical_hardware_fingerprint
-  canonical_hardware_fingerprint="$(jq -r '.hardwareFingerprint // empty' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
-  if [[ "$canonical_hardware_fingerprint" =~ ^[0-9a-f]{64}$ ]]; then
-    resource_policy[HARDWARE_FINGERPRINT]="$canonical_hardware_fingerprint"
-  else
-    hardware_material="CPUS=${resource_policy[CPUS]}|MEM_MIB=${resource_policy[MEM_MIB]}|OLLAMA_ACCELERATION=${resource_policy[OLLAMA_ACCELERATION]}|GPU_COUNT=${resource_policy[GPU_COUNT]}|GPU_MIN_MIB=${resource_policy[GPU_MIN_MIB]}|GPU_MAX_MIB=${resource_policy[GPU_MAX_MIB]}|GPU_TOTAL_MIB=${resource_policy[GPU_TOTAL_MIB]}|DIRECTML_SELECTED=${resource_policy[DIRECTML_SELECTED]}|DIRECTML_GPU_VENDOR=${resource_policy[DIRECTML_GPU_VENDOR]}|DIRECTML_ADAPTER_NAME=${resource_policy[DIRECTML_ADAPTER_NAME]}"
-    resource_policy[HARDWARE_FINGERPRINT]="$(printf '%s' "$hardware_material" | sha256sum | awk '{print $1}')"
-  fi
+  local hardware_material policy_material
+  hardware_material="CPUS=${resource_policy[CPUS]}|MEM_MIB=${resource_policy[MEM_MIB]}|OLLAMA_ACCELERATION=${resource_policy[OLLAMA_ACCELERATION]}|GPU_COUNT=${resource_policy[GPU_COUNT]}|GPU_MIN_MIB=${resource_policy[GPU_MIN_MIB]}|GPU_MAX_MIB=${resource_policy[GPU_MAX_MIB]}|GPU_TOTAL_MIB=${resource_policy[GPU_TOTAL_MIB]}|DIRECTML_SELECTED=${resource_policy[DIRECTML_SELECTED]}|DIRECTML_GPU_VENDOR=${resource_policy[DIRECTML_GPU_VENDOR]}|DIRECTML_ADAPTER_NAME=${resource_policy[DIRECTML_ADAPTER_NAME]}"
+  resource_policy[HARDWARE_FINGERPRINT]="$(printf '%s' "$hardware_material" | sha256sum | awk '{print $1}')"
   policy_material="$(for resource_state_key in "${!resource_policy[@]}"; do printf '%s=%s\n' "$resource_state_key" "${resource_policy[$resource_state_key]}"; done | LC_ALL=C sort)"
   resource_policy[POLICY_FINGERPRINT]="$(printf '%s\n' "$policy_material" | sha256sum | awk '{print $1}')"
 
@@ -935,21 +1177,21 @@ write_latticevale_compose_overlay() {
     {
       echo 'services:'
       if [[ "$limits" == true ]]; then
-        printf '  hermes:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HERMES_MILLI]}")" "${resource_policy[LIMIT_HERMES_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
+        printf '  hermes:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$((${resource_policy[CPU_HERMES_MILLI]}/1000))" "${resource_policy[LIMIT_HERMES_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
         if [[ "$(opt_bool matrix)" == true ]]; then
-          printf '  synapse-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "shared_buffers=%s"]\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SYNAPSE_DB_MILLI]}")" "${resource_policy[LIMIT_SYNAPSE_DB_MIB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
-          printf '  synapse:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n      SYNAPSE_CACHE_FACTOR: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SYNAPSE_MILLI]}")" "${resource_policy[LIMIT_SYNAPSE_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}" "${resource_policy[SYNAPSE_CACHE_FACTOR]}"
+          printf '  synapse-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "shared_buffers=%s"]\n' "$((${resource_policy[CPU_SYNAPSE_DB_MILLI]}/1000))" "${resource_policy[LIMIT_SYNAPSE_DB_MIB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
+          printf '  synapse:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n      SYNAPSE_CACHE_FACTOR: "%s"\n' "$((${resource_policy[CPU_SYNAPSE_MILLI]}/1000))" "${resource_policy[LIMIT_SYNAPSE_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}" "${resource_policy[SYNAPSE_CACHE_FACTOR]}"
         fi
         if [[ "$(opt_bool searxng)" == true ]]; then
-          printf '  searxng-valkey:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SEARXNG_VALKEY_MILLI]}")" "${resource_policy[LIMIT_SEARXNG_VALKEY_MIB]}"
-          printf '  searxng:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SEARXNG_MILLI]}")" "${resource_policy[LIMIT_SEARXNG_MIB]}"
+          printf '  searxng-valkey:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$((${resource_policy[CPU_SEARXNG_VALKEY_MILLI]}/1000))" "${resource_policy[LIMIT_SEARXNG_VALKEY_MIB]}"
+          printf '  searxng:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$((${resource_policy[CPU_SEARXNG_MILLI]}/1000))" "${resource_policy[LIMIT_SEARXNG_MIB]}"
         fi
         if [[ "$(opt_bool qmd)" == true ]]; then
-          printf '  qmd:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_QMD_MILLI]}")" "${resource_policy[LIMIT_QMD_MIB]}"
-          printf '  qmd-indexer:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_QMD_INDEXER_MILLI]}")" "${resource_policy[LIMIT_QMD_INDEXER_MIB]}"
+          printf '  qmd:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$((${resource_policy[CPU_QMD_MILLI]}/1000))" "${resource_policy[LIMIT_QMD_MIB]}"
+          printf '  qmd-indexer:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$((${resource_policy[CPU_QMD_INDEXER_MILLI]}/1000))" "${resource_policy[LIMIT_QMD_INDEXER_MIB]}"
         fi
         if managed_ollama_enabled; then
-          printf '  ollama:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_OLLAMA_MILLI]}")" "${resource_policy[LIMIT_OLLAMA_MIB]}"
+          printf '  ollama:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$((${resource_policy[CPU_OLLAMA_MILLI]}/1000))" "${resource_policy[LIMIT_OLLAMA_MIB]}"
           if [[ "$accel" == nvidia ]]; then
             printf '    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n'
           elif [[ "$accel" == amd ]]; then
@@ -966,27 +1208,13 @@ write_latticevale_compose_overlay() {
               echo '    group_add:'
               for gid in "${amd_gids[@]}"; do printf '      - "%s"\n' "$gid"; done
             fi
-        elif [[ "$accel" == vulkan ]]; then
-            printf '    environment:\n      OLLAMA_VULKAN: "1"\n    devices:\n      - /dev/dri:/dev/dri\n'
-            local dev gid vk_gids=() seen_vk_gids=' '
-            for dev in /dev/dri/card* /dev/dri/renderD*; do
-              [[ -e "$dev" ]] || continue
-              gid="$(stat -c '%g' -- "$dev" 2>/dev/null || true)"
-              [[ "$gid" =~ ^[0-9]+$ ]] || continue
-              [[ "$seen_vk_gids" == *" $gid "* ]] && continue
-              vk_gids+=("$gid"); seen_vk_gids+="$gid "
-            done
-            if (( ${#vk_gids[@]} > 0 )); then
-              echo '    group_add:'
-              for gid in "${vk_gids[@]}"; do printf '      - "%s"\n' "$gid"; done
-            fi
           fi
         fi
         if [[ "$(opt_bool honcho)" == true ]]; then
-          printf '  honcho-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=%s"]\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_DB_MILLI]}")" "${resource_policy[LIMIT_HONCHO_DB_MIB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
-          printf '  honcho-redis:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_REDIS_MILLI]}")" "${resource_policy[LIMIT_HONCHO_REDIS_MIB]}"
-          printf '  honcho-api:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_API_MILLI]}")" "${resource_policy[LIMIT_HONCHO_API_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
-          printf '  honcho-deriver:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_DERIVER_MILLI]}")" "${resource_policy[LIMIT_HONCHO_DERIVER_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
+          printf '  honcho-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=%s"]\n' "$((${resource_policy[CPU_HONCHO_DB_MILLI]}/1000))" "${resource_policy[LIMIT_HONCHO_DB_MIB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
+          printf '  honcho-redis:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$((${resource_policy[CPU_HONCHO_REDIS_MILLI]}/1000))" "${resource_policy[LIMIT_HONCHO_REDIS_MIB]}"
+          printf '  honcho-api:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$((${resource_policy[CPU_HONCHO_API_MILLI]}/1000))" "${resource_policy[LIMIT_HONCHO_API_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
+          printf '  honcho-deriver:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$((${resource_policy[CPU_HONCHO_DERIVER_MILLI]}/1000))" "${resource_policy[LIMIT_HONCHO_DERIVER_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
         fi
       elif managed_ollama_enabled; then
         echo '  ollama:'
@@ -1006,20 +1234,6 @@ write_latticevale_compose_overlay() {
             echo '    group_add:'
             for gid in "${amd_gids[@]}"; do printf '      - "%s"\n' "$gid"; done
           fi
-      elif [[ "$accel" == vulkan ]]; then
-          printf '    environment:\n      OLLAMA_VULKAN: "1"\n    devices:\n      - /dev/dri:/dev/dri\n'
-          local dev gid vk_gids=() seen_vk_gids=' '
-          for dev in /dev/dri/card* /dev/dri/renderD*; do
-            [[ -e "$dev" ]] || continue
-            gid="$(stat -c '%g' -- "$dev" 2>/dev/null || true)"
-            [[ "$gid" =~ ^[0-9]+$ ]] || continue
-            [[ "$seen_vk_gids" == *" $gid "* ]] && continue
-            vk_gids+=("$gid"); seen_vk_gids+="$gid "
-          done
-          if (( ${#vk_gids[@]} > 0 )); then
-            echo '    group_add:'
-            for gid in "${vk_gids[@]}"; do printf '      - "%s"\n' "$gid"; done
-          fi
         fi
       fi
     } > compose.latticevale.yaml
@@ -1031,7 +1245,7 @@ write_latticevale_compose_overlay() {
   set_env .env COMPOSE_FILE "$compose_files"
   if [[ "$limits" == true ]]; then
     {
-      # Keep POLICY_VERSION=12 first for human readability and compatibility with
+      # Keep POLICY_VERSION=11 first for human readability and compatibility with
       # older repair diagnostics, while every value still comes from the canonical object.
       printf 'POLICY_VERSION=%s\n' "${resource_policy[POLICY_VERSION]}"
       for resource_state_key in "${!resource_policy[@]}"; do
@@ -1040,8 +1254,7 @@ write_latticevale_compose_overlay() {
       done | LC_ALL=C sort
     } > .latticevale-resource-state
     chmod 0600 .latticevale-resource-state
-    python3 runtime-policy.py write --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json || { echo 'Canonical runtime-policy.json generation/validation failed.' >&2; return 1; }
-    echo "Adaptive container ceilings (policy v12): WSL CPUs=${resource_policy[CPUS]} (${resource_policy[CPU_PROFILE]}), RAM=${resource_policy[MEM_MIB]}MiB (${resource_policy[RAM_PROFILE]}), reserved=${resource_policy[RESERVE_MIB]}MiB (DirectML host reserve=${resource_policy[DIRECTML_HOST_RESERVE_MIB]}MiB), container budget=${resource_policy[BUDGET_MIB]}MiB across ${active_count} enabled services; Hermes topology floor=${resource_policy[HERMES_MIN_MIB]}MiB for ${resource_policy[MATRIX_PROFILE_GATEWAYS]} secondary Matrix gateway(s) and Kanban concurrency ${resource_policy[KANBAN_CONCURRENCY]}; managed Ollama model-aware floor=${resource_policy[OLLAMA_MODEL_FLOOR_MIB]}MiB (text artifact=${resource_policy[OLLAMA_TEXT_ARTIFACT_MIB]}MiB, embedding artifact=${resource_policy[OLLAMA_EMBED_ARTIFACT_MIB]}MiB, context=${resource_policy[OLLAMA_CONTEXT_LENGTH]}); Linux-native Ollama GPU inventory=${resource_policy[GPU_COUNT]} adapter(s), min/max/aggregate=${resource_policy[GPU_MIN_MIB]}/${resource_policy[GPU_MAX_MIB]}/${resource_policy[GPU_TOTAL_MIB]}MiB, heterogeneous=${resource_policy[GPU_HETEROGENEOUS]}, DirectML admission=${resource_policy[DIRECTML_ADMISSION_MIB]}MiB source=${resource_policy[DIRECTML_ADMISSION_SOURCE]} confidence=${resource_policy[DIRECTML_ADMISSION_CONFIDENCE]}, OLLAMA_GPU_OVERHEAD=${resource_policy[OLLAMA_GPU_OVERHEAD_MIB]}MiB per GPU, DirectML VRAM limit=${resource_policy[DIRECTML_VRAM_LIMIT_PCT]}%, shared-vendor=${resource_policy[GPU_SHARED_WITH_DIRECTML]}; hardware fingerprint=${resource_policy[HARDWARE_FINGERPRINT]}; policy fingerprint=${resource_policy[POLICY_FINGERPRINT]}; user compose.override.yaml is applied last."
+    echo "Adaptive container ceilings (policy v11): WSL CPUs=${resource_policy[CPUS]} (${resource_policy[CPU_PROFILE]}), RAM=${resource_policy[MEM_MIB]}MiB (${resource_policy[RAM_PROFILE]}), reserved=${resource_policy[RESERVE_MIB]}MiB (DirectML host reserve=${resource_policy[DIRECTML_HOST_RESERVE_MIB]}MiB), container budget=${resource_policy[BUDGET_MIB]}MiB across ${active_count} enabled services; Hermes topology floor=${resource_policy[HERMES_MIN_MIB]}MiB for ${resource_policy[MATRIX_PROFILE_GATEWAYS]} secondary Matrix gateway(s) and Kanban concurrency ${resource_policy[KANBAN_CONCURRENCY]}; managed Ollama model-aware floor=${resource_policy[OLLAMA_MODEL_FLOOR_MIB]}MiB (text artifact=${resource_policy[OLLAMA_TEXT_ARTIFACT_MIB]}MiB, embedding artifact=${resource_policy[OLLAMA_EMBED_ARTIFACT_MIB]}MiB, context=${resource_policy[OLLAMA_CONTEXT_LENGTH]}); GPU inventory=${resource_policy[GPU_COUNT]} adapter(s), min/max/aggregate=${resource_policy[GPU_MIN_MIB]}/${resource_policy[GPU_MAX_MIB]}/${resource_policy[GPU_TOTAL_MIB]}MiB, heterogeneous=${resource_policy[GPU_HETEROGENEOUS]}, OLLAMA_GPU_OVERHEAD=${resource_policy[OLLAMA_GPU_OVERHEAD_MIB]}MiB per GPU, DirectML VRAM limit=${resource_policy[DIRECTML_VRAM_LIMIT_PCT]}%, shared-vendor=${resource_policy[GPU_SHARED_WITH_DIRECTML]}; hardware fingerprint=${resource_policy[HARDWARE_FINGERPRINT]}; policy fingerprint=${resource_policy[POLICY_FINGERPRINT]}; user compose.override.yaml is applied last."
   else
     rm -f .latticevale-resource-state
     echo 'Adaptive container ceilings: disabled; any existing user compose.override.yaml remains authoritative.'
@@ -1052,41 +1265,62 @@ write_latticevale_compose_overlay() {
 
 verify_adaptive_runtime_policy() {
   [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
-  [[ -s .latticevale-resource-state && ! -L .latticevale-resource-state ]] || return 1
-  [[ -s data/latticevale/hardware-capabilities.json && ! -L data/latticevale/hardware-capabilities.json ]] || return 1
-  [[ -s data/latticevale/backend-capabilities.json && ! -L data/latticevale/backend-capabilities.json ]] || return 1
-  [[ -s data/latticevale/runtime-policy.json && ! -L data/latticevale/runtime-policy.json ]] || return 1
-
-  # Hardware provenance is live input, not durable configuration.  Refuse to call a
-  # policy current when the WSL CPU/RAM visible now differs from the capability
-  # document that the canonical policy was derived from.  The repair path refreshes
-  # hardware-capabilities.json before regenerating the policy.
-  local cpus mem_mib hardware_cpus hardware_mem policy_fingerprint hardware_fingerprint compose_selector overlay
+  local cpus mem_mib compose_selector overlay accel ollama_metrics current_text_mib current_embed_mib current_ollama_context current_ollama_floor
+  local matrix_gateways kanban_concurrency hermes_floor directml_reserve=0 lowmem=0 ram_profile cpu_profile
+  local gpu_metrics gpu_count=0 gpu_min=0 gpu_max=0 gpu_total=0 gpu_coord overhead=0 directml_pct=75 shared=false heterogeneous=false
+  local directml_selected=false directml_vendor directml_adapter hardware_material hardware_fingerprint policy_fingerprint actual_policy_fingerprint
   cpus="$(nproc 2>/dev/null || true)"
   mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
   [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 && "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || return 1
-  hardware_cpus="$(jq -r '.wsl.cpuCount // 0' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
-  hardware_mem="$(jq -r '.wsl.memoryMiB // 0' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
-  [[ "$hardware_cpus" == "$cpus" && "$hardware_mem" == "$mem_mib" ]] || return 1
-
-  # All formula-level validation is canonical.  This validates schema, options,
-  # host/DirectML reserve, container budget, CPU quotas, service memory plan,
-  # allocator/database tuning, GPU coordination, and every provenance fingerprint.
-  python3 runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json >/dev/null || return 1
-
-  policy_fingerprint="$(jq -r '.policyFingerprint // empty' data/latticevale/runtime-policy.json 2>/dev/null || true)"
-  hardware_fingerprint="$(jq -r '.hardwareFingerprint // empty' data/latticevale/runtime-policy.json 2>/dev/null || true)"
-  [[ "$policy_fingerprint" =~ ^[0-9a-f]{64}$ && "$hardware_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
-
+  [[ -s .latticevale-resource-state && ! -L .latticevale-resource-state ]] || return 1
+  statev() { sed -n "s/^$1=//p" .latticevale-resource-state 2>/dev/null | head -n1; }
+  ram_profile="$(resource_ram_profile "$mem_mib")"; cpu_profile="$(resource_cpu_profile "$cpus")"
+  (( mem_mib <= 12288 )) && lowmem=1
+  matrix_gateways="$(resource_matrix_profile_gateways)" || return 1
+  kanban_concurrency="$(resource_kanban_concurrency)" || return 1
+  hermes_floor="$(resource_hermes_floor_mib "$matrix_gateways" "$kanban_concurrency")" || return 1
+  if resource_directml_selected; then
+    directml_selected=true
+    if (( mem_mib <= 8192 )); then directml_reserve=1536
+    elif (( mem_mib <= 12288 )); then directml_reserve=1792
+    elif (( mem_mib <= 16384 )); then directml_reserve=2048
+    elif (( mem_mib <= 24576 )); then directml_reserve=2560
+    else directml_reserve=3072
+    fi
+  fi
+  accel=cpu; if managed_ollama_enabled; then accel="$(resolve_ollama_acceleration)" || return 1; fi
+  if [[ "$accel" == nvidia || "$accel" == amd ]]; then
+    gpu_metrics="$(ollama_gpu_metrics "$accel")" || return 1
+    IFS=: read -r gpu_count gpu_min gpu_max gpu_total <<<"$gpu_metrics"
+    gpu_coord="$(resource_gpu_coordination "$accel" "$gpu_count" "$gpu_min" "$gpu_max")" || return 1
+    IFS=: read -r overhead directml_pct shared <<<"$gpu_coord"
+  fi
+  (( gpu_count > 1 && gpu_min != gpu_max )) && heterogeneous=true
+  directml_vendor="$(opt_text directmlGpuVendor 2>/dev/null || true)"
+  directml_adapter="$(opt_text directmlAdapterName 2>/dev/null || true)"
+  hardware_material="CPUS=$cpus|MEM_MIB=$mem_mib|OLLAMA_ACCELERATION=$accel|GPU_COUNT=$gpu_count|GPU_MIN_MIB=$gpu_min|GPU_MAX_MIB=$gpu_max|GPU_TOTAL_MIB=$gpu_total|DIRECTML_SELECTED=$directml_selected|DIRECTML_GPU_VENDOR=$directml_vendor|DIRECTML_ADAPTER_NAME=$directml_adapter"
+  hardware_fingerprint="$(printf '%s' "$hardware_material" | sha256sum | awk '{print $1}')"
+  policy_fingerprint="$(statev POLICY_FINGERPRINT)"
+  actual_policy_fingerprint="$(grep -v '^POLICY_FINGERPRINT=' .latticevale-resource-state | LC_ALL=C sort | sha256sum | awk '{print $1}')"
+  [[ -n "$policy_fingerprint" && "$policy_fingerprint" == "$actual_policy_fingerprint" ]] || return 1
+  ollama_metrics="$(resource_ollama_model_metrics "$accel")" || return 1
+  IFS=: read -r current_text_mib current_embed_mib current_ollama_context current_ollama_floor <<<"$ollama_metrics"
+  [[ "$(statev POLICY_VERSION)" == 11 && "$(statev CPUS)" == "$cpus" && "$(statev CPU_PROFILE)" == "$cpu_profile" && \
+     "$(statev MEM_MIB)" == "$mem_mib" && "$(statev RAM_PROFILE)" == "$ram_profile" && \
+     "$(statev DIRECTML_HOST_RESERVE_MIB)" == "$directml_reserve" && "$(statev LOW_MEMORY_PROFILE)" == "$lowmem" && \
+     "$(statev MATRIX_PROFILE_GATEWAYS)" == "$matrix_gateways" && "$(statev KANBAN_CONCURRENCY)" == "$kanban_concurrency" && \
+     "$(statev HERMES_MIN_MIB)" == "$hermes_floor" && "$(statev OLLAMA_ACCELERATION)" == "$accel" && \
+     "$(statev GPU_COUNT)" == "$gpu_count" && "$(statev GPU_MIN_MIB)" == "$gpu_min" && "$(statev GPU_MAX_MIB)" == "$gpu_max" && \
+     "$(statev GPU_TOTAL_MIB)" == "$gpu_total" && "$(statev GPU_HETEROGENEOUS)" == "$heterogeneous" && "$(statev OLLAMA_GPU_OVERHEAD_MIB)" == "$overhead" && \
+     "$(statev DIRECTML_VRAM_LIMIT_PCT)" == "$directml_pct" && "$(statev GPU_SHARED_WITH_DIRECTML)" == "$shared" && \
+     "$(statev DIRECTML_SELECTED)" == "$directml_selected" && "$(statev DIRECTML_GPU_VENDOR)" == "$directml_vendor" && \
+     "$(statev DIRECTML_ADAPTER_NAME)" == "$directml_adapter" && "$(statev HARDWARE_FINGERPRINT)" == "$hardware_fingerprint" && \
+     "$(statev OLLAMA_TEXT_ARTIFACT_MIB)" == "$current_text_mib" && "$(statev OLLAMA_EMBED_ARTIFACT_MIB)" == "$current_embed_mib" && \
+     "$(statev OLLAMA_CONTEXT_LENGTH)" == "$current_ollama_context" && "$(statev OLLAMA_MODEL_FLOOR_MIB)" == "$current_ollama_floor" ]] || return 1
   [[ -s compose.latticevale.yaml && ! -L compose.latticevale.yaml ]] || return 1
   [[ -s resource-policy-report.txt && ! -L resource-policy-report.txt ]] || return 1
   grep -Fq "Policy fingerprint: $policy_fingerprint" resource-policy-report.txt || return 1
   grep -Fq "Hardware fingerprint: $hardware_fingerprint" resource-policy-report.txt || return 1
-
-  # Compose verification here is structural consumption only.  Formula correctness
-  # belongs to the canonical validator above; verify_live_resource_policy_limits()
-  # separately proves Docker consumed the effective Compose limits after user
-  # compose.override.yaml is applied last.
   overlay="$(cat compose.latticevale.yaml 2>/dev/null)" || return 1
   grep -q 'MALLOC_ARENA_MAX:' <<<"$overlay" || return 1
   if [[ "$(opt_bool matrix)" == true ]]; then
@@ -1192,7 +1426,7 @@ repair_runtime_policy_reconcile() {
 }
 
 choose_ollama_context_length() {
-  # Policy v12 sizes the automatic context from both WSL RAM and the *usable* VRAM
+  # Policy v11 sizes the automatic context from both WSL RAM and the *usable* VRAM
   # of the largest eligible managed-Ollama GPU.  Compact (<=8 GiB) hosts use 4096,
   # and GPU-backed installs take the smaller RAM/VRAM recommendation.  User-owned
   # OLLAMA_CONTEXT_LENGTH values are still preserved by the caller.
@@ -1370,16 +1604,13 @@ managed_ollama_processor_class() {
 
 verify_or_rebudget_managed_ollama_acceleration() {
   local accel="$1" model="$2" requested processor metrics old_auto current_context cpu_context
-  [[ "$accel" == nvidia || "$accel" == amd || "$accel" == vulkan ]] || return 0
+  [[ "$accel" == nvidia || "$accel" == amd ]] || return 0
   echo "Verifying managed Ollama $accel offload with Ollama's live PROCESSOR report."
   processor="$(managed_ollama_processor_class "$model")"
   case "$processor" in
     gpu)
       clear_ollama_gpu_fallback
       set_env .env LATTICEVALE_OLLAMA_GPU_OFFLOAD_VERIFIED "$accel"
-      health_backend="$(case "$accel" in nvidia) printf cuda;; amd) printf rocm;; vulkan) printf vulkan;; esac)"
-      [[ -n "$health_backend" ]] && python3 latticevale_arch.py record-health "$health_backend" verified-working OLLAMA_GPU_RUNTIME_VERIFIED --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --detail "Ollama PROCESSOR report confirmed GPU offload" >/dev/null 2>&1 || true
-      python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json >/dev/null 2>&1 || true
       write_resource_policy_report
       echo "Managed Ollama runtime verification passed: $model is using GPU offload."
       return 0
@@ -1391,12 +1622,8 @@ verify_or_rebudget_managed_ollama_acceleration() {
         return 1
       fi
       metrics="$(ollama_gpu_metrics "$accel" 2>/dev/null || true)"
-      [[ "$accel" == vulkan && -z "$metrics" ]] && metrics='0:0:0:0'
       [[ -n "$metrics" ]] || { echo 'Ollama fell back to CPU and the GPU fingerprint could not be recorded safely.' >&2; return 1; }
       mark_ollama_gpu_fallback "$accel" "$metrics" || return 1
-      health_backend="$(case "$accel" in nvidia) printf cuda;; amd) printf rocm;; vulkan) printf vulkan;; esac)"
-      [[ -n "$health_backend" ]] && python3 latticevale_arch.py record-health "$health_backend" failed OLLAMA_GPU_EXECUTION_FELL_BACK_TO_CPU --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --detail "Ollama PROCESSOR report showed CPU execution" >/dev/null 2>&1 || true
-      python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json >/dev/null 2>&1 || true
       set_env .env LATTICEVALE_OLLAMA_ACCELERATION cpu
       set_env .env LATTICEVALE_OLLAMA_GPU_OFFLOAD_VERIFIED cpu
       old_auto="$(sed -n 's/^LATTICEVALE_OLLAMA_CONTEXT_AUTO=//p' .env | head -n1)"
@@ -3175,16 +3402,10 @@ PY_HONCHO_TIMEOUT
 stage_prepare_config() {
 assert_docker_namespace_safe
 mkdir -p backups config/searxng config/honcho data/hermes data/qmd/config data/qmd/cache data/synapse data/synapse-db \
-  data/honcho-db data/honcho-redis data/searxng-valkey data/latticevale secrets vault vendor workspace
+  data/honcho-db data/honcho-redis data/searxng-valkey secrets vault vendor workspace
 managed_ollama_enabled && mkdir -p data/ollama
 chmod 0700 secrets data/hermes data/synapse
-chmod 0750 workspace data/qmd data/qmd/config data/qmd/cache data/latticevale
-
-# 14.6 canonical architecture state: detect once and classify once.  DirectML is
-# intentionally independent of Linux-native GPU enumeration; /dev/dxg is authoritative
-# for its WSL bridge while CUDA/ROCm/Vulkan retain their own capability probes.
-python3 hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json || return 1
-python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json || return 1
+chmod 0750 workspace data/qmd data/qmd/config data/qmd/cache
 
 # Never chmod/chown through an external vault target. A Windows-backed DrvFS/9p
 # directory can reject POSIX mode changes, and a stale bind/symlink would redirect
@@ -3251,14 +3472,9 @@ RESOURCE_CONTEXT_ACCEL=cpu
 if managed_ollama_enabled; then
   RESOURCE_CONTEXT_ACCEL="$(resolve_ollama_acceleration)" || return 1
 fi
-OLLAMA_AUTO_CONTEXT_LENGTH="$(resource_ollama_context_length "$RESOURCE_CONTEXT_ACCEL")" || return 1
-OLLAMA_MEM_MIB="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-OLLAMA_VISIBLE_CPUS="$(nproc 2>/dev/null || true)"
-[[ "$OLLAMA_MEM_MIB" =~ ^[0-9]+$ && "$OLLAMA_VISIBLE_CPUS" =~ ^[0-9]+$ && "$OLLAMA_VISIBLE_CPUS" -ge 1 ]] || { echo 'Could not determine live WSL resources for adaptive Ollama runtime settings.' >&2; return 1; }
-OLLAMA_RUNTIME_PLAN="$(python3 runtime-policy.py ollama-runtime "$OLLAMA_MEM_MIB" "$OLLAMA_VISIBLE_CPUS" "$RESOURCE_CONTEXT_ACCEL" "$(if directml_text_enabled; then printf true; else printf false; fi)")" || return 1
-IFS=: read -r OLLAMA_AUTO_MAX_LOADED_MODELS OLLAMA_AUTO_NUM_PARALLEL OLLAMA_AUTO_KEEP_ALIVE <<<"$OLLAMA_RUNTIME_PLAN"
-[[ "$OLLAMA_AUTO_MAX_LOADED_MODELS" =~ ^[0-9]+$ && "$OLLAMA_AUTO_NUM_PARALLEL" =~ ^[0-9]+$ && "$OLLAMA_AUTO_KEEP_ALIVE" =~ ^[0-9]+s$ ]] || { echo 'Canonical Ollama runtime planner returned invalid settings.' >&2; return 1; }
-OLLAMA_MEM_GIB="$(awk -v m="$OLLAMA_MEM_MIB" 'BEGIN {printf "%.1f", m/1024}')"
+OLLAMA_AUTO_CONTEXT_LENGTH="$(if directml_text_enabled; then printf 4096; else choose_ollama_context_length "$RESOURCE_CONTEXT_ACCEL"; fi)" || return 1
+OLLAMA_AUTO_KEEP_ALIVE="$(if directml_text_enabled; then printf '0s'; else printf '30s'; fi)"
+OLLAMA_MEM_GIB="$(awk '/^MemTotal:/ {printf "%.1f", $2/1024/1024; exit}' /proc/meminfo 2>/dev/null || printf '?')"
 NATIVE_WINDOWS_HOST_IP=127.0.0.1
 if windows_native_ollama_enabled; then
   printf 'BACKEND=windows-native\nTRANSPORT=%s\nBRIDGE_TASK_NAME=%s\nBRIDGE_PORT=%s\nHOST_ADDRESS=%s\nTARGET_ADDRESS=%s\nTARGET_PORT=%s\nWSL_NETWORKING_MODE=%s\nWSL_NETWORKING_MODE_OWNER=%s\n' \
@@ -3276,7 +3492,7 @@ if windows_native_ollama_enabled; then
 else
   [[ ! -x ./native-ollama-relay.sh ]] || ./native-ollama-relay.sh stop >/dev/null 2>&1 || true
   rm -f .windows-native-info
-  echo "Ollama memory policy: WSL memory=${OLLAMA_MEM_GIB} GiB; context=${OLLAMA_AUTO_CONTEXT_LENGTH}; max-loaded-models=${OLLAMA_AUTO_MAX_LOADED_MODELS}; parallel=${OLLAMA_AUTO_NUM_PARALLEL}; keep-alive=${OLLAMA_AUTO_KEEP_ALIVE}."
+  echo "Ollama memory policy: WSL memory=${OLLAMA_MEM_GIB} GiB; context=${OLLAMA_AUTO_CONTEXT_LENGTH}; max-loaded-models=1; parallel=1; keep-alive=${OLLAMA_AUTO_KEEP_ALIVE}."
 fi
 env_was_new=false
 if [[ ! -f .env ]]; then
@@ -3297,8 +3513,8 @@ LATTICEVALE_OLLAMA_IMAGE_AUTO=ollama/ollama:0.32.14
 LATTICEVALE_HONCHO_SOURCE_AUTO=$HONCHO_SOURCE_COMMIT
 OLLAMA_CONTEXT_LENGTH=$OLLAMA_AUTO_CONTEXT_LENGTH
 LATTICEVALE_OLLAMA_CONTEXT_AUTO=$OLLAMA_AUTO_CONTEXT_LENGTH
-OLLAMA_MAX_LOADED_MODELS=$OLLAMA_AUTO_MAX_LOADED_MODELS
-OLLAMA_NUM_PARALLEL=$OLLAMA_AUTO_NUM_PARALLEL
+OLLAMA_MAX_LOADED_MODELS=1
+OLLAMA_NUM_PARALLEL=1
 OLLAMA_KEEP_ALIVE=$OLLAMA_AUTO_KEEP_ALIVE
 OLLAMA_GPU_OVERHEAD=0
 LATTICEVALE_OLLAMA_GPU_OVERHEAD_AUTO=0
@@ -3307,7 +3523,7 @@ OLLAMA_EMBED_MODEL=$(opt_text localEmbeddingModel)
 LATTICEVALE_LOCAL_TEXT_BACKEND=$(local_text_backend)
 DIRECTML_TEXT_MODEL=$(directml_text_model)
 DIRECTML_PORT=$DIRECTML_PORT
-DIRECTML_CONTEXT_LENGTH=$(adaptive_directml_context_length)
+DIRECTML_CONTEXT_LENGTH=8192
 DIRECTML_VRAM_LIMIT_PCT=75
 HONCHO_POSTGRES_PASSWORD=$(random_hex 24)
 SYNAPSE_POSTGRES_PASSWORD=$(random_hex 24)
@@ -3389,8 +3605,8 @@ else
   fi
   set_env .env LATTICEVALE_OLLAMA_CONTEXT_AUTO "$OLLAMA_AUTO_CONTEXT_LENGTH"
   remove_env_keys .env FOUNDRY_OLLAMA_CONTEXT_AUTO
-  set_env .env OLLAMA_MAX_LOADED_MODELS "$OLLAMA_AUTO_MAX_LOADED_MODELS"
-  set_env .env OLLAMA_NUM_PARALLEL "$OLLAMA_AUTO_NUM_PARALLEL"
+  set_env .env OLLAMA_MAX_LOADED_MODELS 1
+  set_env .env OLLAMA_NUM_PARALLEL 1
   set_env .env OLLAMA_KEEP_ALIVE "$OLLAMA_AUTO_KEEP_ALIVE"
   grep -q '^OLLAMA_GPU_OVERHEAD=' .env || set_env .env OLLAMA_GPU_OVERHEAD 0
   grep -q '^LATTICEVALE_OLLAMA_GPU_OVERHEAD_AUTO=' .env || set_env .env LATTICEVALE_OLLAMA_GPU_OVERHEAD_AUTO 0
@@ -3399,7 +3615,7 @@ else
   set_env .env LATTICEVALE_LOCAL_TEXT_BACKEND "$(local_text_backend)"
   set_env .env DIRECTML_TEXT_MODEL "$(directml_text_model)"
   set_env .env DIRECTML_PORT "$DIRECTML_PORT"
-  set_env .env DIRECTML_CONTEXT_LENGTH "$(adaptive_directml_context_length)"
+  set_env .env DIRECTML_CONTEXT_LENGTH 8192
   set_env .env DIRECTML_VRAM_LIMIT_PCT 75
   set_env .env QMD_VERSION 2.5.3
   set_env .env STACK_UID "$(id -u)"
@@ -3929,7 +4145,7 @@ reconcile_model_aware_ollama_resources() {
   write_latticevale_compose_overlay "$accel" true || return 1
   after="$(sha256sum .latticevale-resource-state 2>/dev/null | awk '{print $1}' || true)"
   if [[ "$before" != "$after" ]]; then
-    echo 'Managed Ollama model artifacts are now measurable; reconciling the model-aware policy v12 ceiling before model inference/embedding verification.'
+    echo 'Managed Ollama model artifacts are now measurable; reconciling the model-aware policy v11 ceiling before model inference/embedding verification.'
     timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --no-build ollama || return 1
     wait_managed_ollama_healthy 60 || return 1
     state_mark reconcile pending 'model-aware Ollama resource fingerprint changed after model download; complete stack requires Compose reconciliation'
@@ -5670,7 +5886,7 @@ if [[ "$(opt_bool matrix)" == true ]]; then
   wait_matrix_backend_from_hermes 60
 fi
 verify_live_resource_policy_limits || {
-  echo 'Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v12.' >&2
+  echo 'Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v11.' >&2
   return 1
 }
 return 0
@@ -5792,33 +6008,15 @@ visible_mem_mib="$(awk '/^MemTotal:/ {printf "%.0f", $2/1024}' /proc/meminfo 2>/
 [[ -n "$visible_mem_mib" ]] && echo "  WSL RAM:  $((visible_mem_mib/1024)) GiB (${visible_mem_mib} MiB visible)"
 echo "  Resource policy: $(if [[ "$(opt_bool containerResourceLimits)" == true ]]; then printf '%s' 'adaptive ceilings'; else printf '%s' 'LatticeVale ceilings disabled'; fi)"
 if local_ai_enabled; then
-  configured_text_backend="$(local_text_backend)"
-  active_text_backend="$(jq -r '.selection.activeTextBackend // .selection.textBackend // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
-  runtime_fallback_active="$(jq -r '.selection.runtimeFallbackActive // false' data/latticevale/backend-capabilities.json 2>/dev/null || printf false)"
-  [[ -n "$active_text_backend" ]] || active_text_backend="$configured_text_backend"
-  echo "  Text backend policy: $configured_text_backend"
-  if [[ "$runtime_fallback_active" == true || "$active_text_backend" != "$configured_text_backend" ]]; then
-    runtime_reason="$(jq -r '.capabilities.directml.reasonCode // .selection.selectionReasonCode // "runtime-fallback"' data/latticevale/backend-capabilities.json 2>/dev/null || printf runtime-fallback)"
-    echo "  Text backend runtime: $active_text_backend (safe fallback active; reason=$runtime_reason)"
-  else
-    echo "  Text backend runtime: $active_text_backend"
-  fi
+  echo "  Text backend: $(local_text_backend)"
   if directml_text_enabled; then
-    dml_admission_mib="$(canonical_directml_admission_mib)"
-    dml_admission_source="$(canonical_directml_admission_source)"
-    dml_admission_confidence="$(canonical_directml_admission_confidence)"
-    echo "  DirectML model: $(directml_text_model) (port $DIRECTML_PORT; adaptive context; serial inference; 300s idle unload)"
-    if [[ "$dml_admission_mib" =~ ^[0-9]+$ && "$dml_admission_mib" -ge 256 ]]; then
-      echo "  DirectML bounded admission capacity: ${dml_admission_mib} MiB (source=${dml_admission_source:-unknown}; confidence=${dml_admission_confidence:-unknown})"
-    else
-      echo '  DirectML bounded admission capacity: unavailable; model admission will fail closed to the configured fallback.'
-    fi
+    echo "  DirectML model: $(directml_text_model) (port $DIRECTML_PORT; 8192-token cap; serial inference; 300s idle unload)"
     echo "  Ollama fallback model: $(opt_text localTextModel)"
   else
     echo "  Ollama text model: $(opt_text localTextModel)"
   fi
   echo "  Ollama acceleration/fallback configuration: $(sed -n 's/^LATTICEVALE_OLLAMA_ACCELERATION=//p' .env | head -n1)"
-  echo '  Run ./manage.sh status after model use for policy/backend health and actual Ollama CPU/GPU execution evidence.'
+  echo '  Run ./manage.sh status after model use for DirectML/fallback health and Ollama loaded-model offload evidence.'
 else
   echo '  Ollama: not selected'
 fi
@@ -5840,9 +6038,6 @@ return 0
 # effective only after the WSL VM restarts; recalculating here means the next normal
 # LatticeVale start automatically follows the resources WSL now exposes.
 if [[ "${1:-}" == --refresh-resource-policy ]]; then
-  mkdir -p data/latticevale
-  python3 hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json || exit 1
-  python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json || exit 1
   if [[ "$(opt_bool containerResourceLimits)" == true ]] && verify_adaptive_runtime_policy; then
     exit 0
   fi

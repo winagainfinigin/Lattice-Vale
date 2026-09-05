@@ -1,11 +1,3 @@
-# Third-party notices
-
-> **Current release: v14.6.0.** This file distinguishes first-party LatticeVale source from separately obtained upstream runtimes, images, models, drivers, and services. The 14.6.0 architecture/documentation consolidation adds no bundled opaque third-party artifact.
-
-v14.6.0 adds no redistributed third-party binary, model, GPU driver, container image archive, or hosted service. Its canonical hardware/backend/resource architecture is first-party source and consumes the same separately obtained WSL, DirectML, CUDA, ROCm, Vulkan, Docker/Ollama, and native-Windows interfaces already documented below. Historical v13 documentation remains repository-only under the release-content policy and does not alter third-party licensing.
-
-v14.5.47 adds no redistributed third-party binary, model, GPU driver, or Vulkan runtime. It reuses the existing WSL DirectX bridge/torch-directml path and may pass an already-present WSL `/dev/dri` device to the standard pinned Ollama image with Vulkan enabled. NVIDIA Container Toolkit and AMD ROCm behavior remain as previously documented. Windows/vendor display drivers remain separately obtained and licensed.
-
 v14.5.46 adds no redistributed third-party binary, model, or GPU driver. It may install/reuse the already-documented DirectML Ubuntu prerequisites and isolated PyTorch/DirectML environment when DirectML is selected, and may install/reuse the already-documented NVIDIA Container Toolkit when verified NVIDIA WSL acceleration is selected. AMD managed Ollama continues to use the separately pulled pinned ROCm image when the host exposes supported devices. Windows/vendor display drivers remain separately obtained and licensed.
 
 v14.5.43 adds no new third-party runtime dependency, redistributed binary, image, model, hosted migration service, or telemetry. Universal repair migration uses only existing installer-owned files/state, backup/checkpoint logic, and the same managed dependency sources already documented below.
@@ -16,7 +8,7 @@ Its canonical policy fingerprints/report, deterministic sharded test runner, pat
 
 v14.5.3 adds an **optional** DirectML path. LatticeVale does not redistribute DirectML, PyTorch, torchvision, Transformers, Safetensors, SentencePiece, or Hugging Face model weights. When selected, the installer creates an isolated environment and downloads `torch-directml==0.2.5.dev240914`, its `torch==2.4.1` / `torchvision==0.19.1` compatibility dependencies, and the listed Python/model dependencies from their upstream sources. Their upstream licenses apply independently. Ollama remains an independent required dependency for Honcho embeddings and fallback.
 
-## Historical third-party notices
+# Third-party notices
 
 v14.5.2 adds no new third-party runtime dependency and changes no third-party pin; Option 7 is implemented entirely with existing first-party installer/helper logic and already-present system/Docker commands. v14.5.1 adds no new third-party runtime dependency and changes no third-party pin. It modifies only first-party adaptive memory/audit behavior. v14.5.0 added no new third-party runtime dependency, binary, image, model, hosted service, or paid API requirement. Its new read-only planner/config-state reader/free-operation audit use only Python standard-library functionality and existing LatticeVale state/audit surfaces.
 

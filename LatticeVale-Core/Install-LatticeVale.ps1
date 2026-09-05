@@ -254,12 +254,10 @@ set -u
 arch="$(uname -m 2>/dev/null || true)"
 kfd=0
 dri=0
-render=0
 dxg=0
 nvidia=0
 [[ -e /dev/kfd ]] && kfd=1
 [[ -d /dev/dri ]] && dri=1
-for dev in /dev/dri/renderD*; do [[ -c "$dev" ]] && { render=1; break; }; done
 [[ -e /dev/dxg ]] && dxg=1
 if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
   nvidia=1
@@ -269,7 +267,6 @@ fi
 printf 'arch=%s\n' "$arch"
 printf 'kfd=%s\n' "$kfd"
 printf 'dri=%s\n' "$dri"
-printf 'render=%s\n' "$render"
 printf 'dxg=%s\n' "$dxg"
 printf 'nvidia=%s\n' "$nvidia"
 '@
@@ -279,12 +276,10 @@ printf 'nvidia=%s\n' "$nvidia"
         Arch = ''
         KfdPresent = $false
         DriPresent = $false
-        DriRenderPresent = $false
         DxgPresent = $false
         NvidiaSmiReady = $false
         AmdDockerReady = $false
         NvidiaWslReady = $false
-        VulkanDockerReady = $false
     }
     if (-not $probe.Success) { return [pscustomobject]$state }
     $state.ProbeSucceeded = $true
@@ -294,14 +289,12 @@ printf 'nvidia=%s\n' "$nvidia"
             'arch' { $state.Arch = $Matches[2].Trim() }
             'kfd' { $state.KfdPresent = ($Matches[2] -eq '1') }
             'dri' { $state.DriPresent = ($Matches[2] -eq '1') }
-            'render' { $state.DriRenderPresent = ($Matches[2] -eq '1') }
             'dxg' { $state.DxgPresent = ($Matches[2] -eq '1') }
             'nvidia' { $state.NvidiaSmiReady = ($Matches[2] -eq '1') }
         }
     }
     $state.AmdDockerReady = ($state.Arch -eq 'x86_64' -and $state.KfdPresent -and $state.DriPresent)
     $state.NvidiaWslReady = ($state.DxgPresent -and $state.NvidiaSmiReady)
-    $state.VulkanDockerReady = [bool]$state.DriRenderPresent
     return [pscustomobject]$state
 }
 
@@ -312,8 +305,7 @@ function Write-OllamaGpuPrerequisiteSummary([object]$GpuState) {
     }
     $amdState = if ($GpuState.AmdDockerReady) { 'ready' } else { "unavailable (/dev/kfd=$($GpuState.KfdPresent), /dev/dri=$($GpuState.DriPresent), arch=$($GpuState.Arch))" }
     $nvidiaState = if ($GpuState.NvidiaWslReady) { 'ready' } else { "unavailable (/dev/dxg=$($GpuState.DxgPresent), nvidia-smi=$($GpuState.NvidiaSmiReady))" }
-    $vulkanState = if ($GpuState.VulkanDockerReady) { 'candidate render device present; final model offload is verified at runtime' } else { 'unavailable (no /dev/dri/renderD* device)' }
-    Write-Info "Selected-distro Ollama GPU probe: AMD Docker/ROCm=$amdState; NVIDIA WSL=$nvidiaState; Vulkan=$vulkanState."
+    Write-Info "Selected-distro Ollama GPU probe: AMD Docker/ROCm=$amdState; NVIDIA WSL=$nvidiaState."
     if ($GpuState.DxgPresent -and -not $GpuState.AmdDockerReady) {
         Write-Info 'WSL exposes /dev/dxg, but that alone is not treated as current Ollama Docker ROCm readiness; LatticeVale does not infer AMD container support from the Windows GPU.'
     }
@@ -364,18 +356,14 @@ function Test-DirectMLWslPath(
     return [pscustomobject]$result
 }
 
-function Get-DirectMLWslPrerequisites([string]$Name, [string]$User, [string]$AdapterName = '') {
+function Get-DirectMLWslPrerequisites([string]$Name, [string]$User) {
     $dxg = Test-DirectMLWslPath $Name $User '/dev/dxg' '-e'
     $d3d12 = Test-DirectMLWslPath $Name $User '/usr/lib/wsl/lib/libd3d12.so' '-e'
     $d3d12core = Test-DirectMLWslPath $Name $User '/usr/lib/wsl/lib/libd3d12core.so' '-e'
     $dxcore = Test-DirectMLWslPath $Name $User '/usr/lib/wsl/lib/libdxcore.so' '-e'
 
-    $detectedBuild = 0
-    try { [void][int]::TryParse([string](Get-CimInstance Win32_OperatingSystem -ErrorAction Stop).BuildNumber, [ref]$detectedBuild) } catch { $detectedBuild = [Environment]::OSVersion.Version.Build }
     $state = [ordered]@{
         ProbeSucceeded = [bool]$dxg.ProbeSucceeded
-        WindowsBuild = $detectedBuild
-        WindowsBuildSupported = [bool]($detectedBuild -ge 22000)
         DxgPresent = [bool]$dxg.Present
         DxgRootRetried = [bool]$dxg.RootRetried
         D3d12Present = [bool]$d3d12.Present
@@ -399,11 +387,7 @@ function Get-DirectMLWslPrerequisites([string]$Name, [string]$User, [string]$Ada
         if ($pythonProbe.ProbeSucceeded -and $pythonProbe.Present) {
             $state.TensorProbeAvailable = $true
             $code = 'import torch,torch_directml; d=torch_directml.device(); x=(torch.tensor([1.0]).to(d)+2.0).cpu().item(); raise SystemExit(0 if abs(float(x)-3.0)<0.001 else 1)'
-            if ([string]::IsNullOrWhiteSpace($AdapterName)) {
-                $tensor = Invoke-WslDirectCapture $Name $User $python @('-c', $code) 90
-            } else {
-                $tensor = Invoke-WslDirectCapture $Name $User 'env' @("MESA_D3D12_DEFAULT_ADAPTER_NAME=$AdapterName", $python, '-c', $code) 90
-            }
+            $tensor = Invoke-WslDirectCapture $Name $User $python @('-c', $code) 90
             if ($tensor.Success) {
                 $state.TensorProbeSucceeded = $true
             } else {
@@ -425,348 +409,24 @@ function Get-LatticeValeGpuVendor([string]$Name) {
     return 'other'
 }
 
-function Get-LatticeValeGpuStableId([string]$Vendor, [string]$Name, [string]$PnpDeviceId) {
-    $vendorNorm = ([string]$Vendor).Trim().ToLowerInvariant()
-    $nameNorm = ([string]$Name).Trim().ToLowerInvariant()
-    $pnpNorm = ([string]$PnpDeviceId).Trim().ToLowerInvariant()
-    $material = if (-not [string]::IsNullOrWhiteSpace($pnpNorm)) { "pnp|$pnpNorm" } else { "fallback|$vendorNorm|$nameNorm" }
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $bytes = [Text.Encoding]::UTF8.GetBytes($material)
-        $hash = $sha.ComputeHash($bytes)
-    } finally {
-        $sha.Dispose()
-    }
-    $hex = -join ($hash | ForEach-Object { $_.ToString('x2') })
-    return "gpu-$($hex.Substring(0,16))"
-}
-
-function Convert-LatticeValeGpuMemoryToMiB([string]$Value) {
-    if ([string]::IsNullOrWhiteSpace($Value)) { return 0 }
-    $text = $Value.Trim()
-    if ($text -match '(?i)([0-9][0-9,]*)\s*(?:MiB|MB)\b') { return [int64](($Matches[1] -replace ',','')) }
-    if ($text -match '(?i)([0-9]+(?:\.[0-9]+)?)\s*(?:GiB|GB)\b') { return [int64]([math]::Floor([double]$Matches[1] * 1024)) }
-    if ($text -match '(?i)([0-9][0-9,]*)\s*(?:KiB|KB)\b') { return [int64]([math]::Floor(([double](($Matches[1] -replace ',',''))) / 1024)) }
-    if ($text -match '(?i)([0-9][0-9,]*)\s*(?:bytes?|B)\b') { return [int64]([math]::Floor(([double](($Matches[1] -replace ',',''))) / 1MB)) }
-    return 0
-}
-
-function Convert-LatticeValeRegistryMemoryValueToMiB([object]$Value) {
-    if ($null -eq $Value) { return 0 }
-    try {
-        if ($Value -is [byte[]]) {
-            $bytes = [byte[]]$Value
-            if ($bytes.Length -ge 8) { return [int64]([math]::Floor(([double][BitConverter]::ToUInt64($bytes, 0)) / 1MB)) }
-            if ($bytes.Length -ge 4) { return [int64]([math]::Floor(([double][BitConverter]::ToUInt32($bytes, 0)) / 1MB)) }
-            return 0
-        }
-        # REG_DWORD values are exposed by PowerShell as signed Int32 on some
-        # systems. Reinterpret the underlying 32 bits instead of rejecting values
-        # whose high bit is set. The old DWORD remains only a lower-bound source;
-        # the 64-bit qwMemorySize/DXDiag sources are preferred for modern GPUs.
-        if ($Value -is [int32]) {
-            $raw = [uint64][uint32]([int64]$Value -band 0xFFFFFFFFL)
-        } elseif ($Value -is [uint32]) {
-            $raw = [uint64]$Value
-        } elseif ($Value -is [int64] -and [int64]$Value -lt 0) {
-            return 0
-        } else {
-            $raw = [uint64]$Value
-        }
-        if ($raw -gt 0) { return [int64]([math]::Floor(([double]$raw) / 1MB)) }
-    } catch { }
-    return 0
-}
-
-function Test-LatticeValeGpuPnpPrefix([string]$FullPnp, [string]$CandidatePrefix) {
-    if ([string]::IsNullOrWhiteSpace($FullPnp) -or [string]::IsNullOrWhiteSpace($CandidatePrefix)) { return $false }
-    $full = $FullPnp.Trim().ToLowerInvariant()
-    $prefix = $CandidatePrefix.Trim().ToLowerInvariant()
-    if ($prefix.StartsWith('enum\')) { $prefix = $prefix.Substring(5) }
-    if ($full.StartsWith('enum\')) { $full = $full.Substring(5) }
-    return $full.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
-}
-
-function Get-LatticeValeDxDiagGpuMemoryInventory {
-    if ($null -ne $script:LatticeValeDxDiagGpuMemoryInventoryCache) { return @($script:LatticeValeDxDiagGpuMemoryInventoryCache) }
-    $records = [System.Collections.Generic.List[object]]::new()
-    $xmlTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("latticevale-dxdiag-{0}.xml" -f ([guid]::NewGuid().ToString('N')))
-    $textTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("latticevale-dxdiag-{0}.txt" -f ([guid]::NewGuid().ToString('N')))
-    try {
-        $dxdiag = Join-Path $env:WINDIR 'System32\dxdiag.exe'
-        if (-not (Test-Path -LiteralPath $dxdiag -PathType Leaf)) { return @() }
-
-        # XML is locale-independent and preferred, but some WDDM/driver builds omit
-        # memory fields from /x while still emitting them in the normal text report.
-        # Probe both representations and let the per-adapter merger conservatively
-        # combine them. This is especially important when torch-directml in WSL can
-        # execute tensors but does not expose gpu_memory().
-        try {
-            $dxRun = Invoke-NativeProcessCapture $dxdiag @('/whql:off','/x', $xmlTemp) 45
-            if ($dxRun.Success -and (Test-Path -LiteralPath $xmlTemp -PathType Leaf)) {
-                [xml]$xml = Get-Content -LiteralPath $xmlTemp -Raw -ErrorAction Stop
-                foreach ($node in @($xml.SelectNodes('//DisplayDevice'))) {
-                    $name = ([string]$node.CardName).Trim()
-                    if ([string]::IsNullOrWhiteSpace($name)) { $name = ([string]$node.Description).Trim() }
-                    if ([string]::IsNullOrWhiteSpace($name)) { continue }
-                    $records.Add([pscustomobject]@{
-                        Name = $name
-                        PnpPrefix = ([string]$node.DeviceKey).Trim()
-                        DedicatedMiB = [int64](Convert-LatticeValeGpuMemoryToMiB ([string]$node.DedicatedMemory))
-                        SharedMiB = [int64](Convert-LatticeValeGpuMemoryToMiB ([string]$node.SharedMemory))
-                        DisplayMiB = [int64](Convert-LatticeValeGpuMemoryToMiB ([string]$node.DisplayMemory))
-                        Source = 'windows-dxdiag-xml'
-                    })
-                }
-            }
-        } catch {
-            Write-Verbose "DXDiag XML GPU-memory probe was unavailable: $($_.Exception.Message)"
-        }
-
-        try {
-            $dxTextRun = Invoke-NativeProcessCapture $dxdiag @('/whql:off','/t', $textTemp) 45
-            if ($dxTextRun.Success -and (Test-Path -LiteralPath $textTemp -PathType Leaf)) {
-                $current = $null
-                foreach ($line in @(Get-Content -LiteralPath $textTemp -ErrorAction Stop)) {
-                    if ($line -match '^\s*Card name:\s*(.+?)\s*$') {
-                        if ($null -ne $current) { $records.Add([pscustomobject]$current) }
-                        $current = [ordered]@{ Name=$Matches[1].Trim(); PnpPrefix=''; DedicatedMiB=0L; SharedMiB=0L; DisplayMiB=0L; Source='windows-dxdiag-text' }
-                        continue
-                    }
-                    if ($null -eq $current) { continue }
-                    if ($line -match '^\s*Device Key:\s*(.+?)\s*$') { $current.PnpPrefix = $Matches[1].Trim(); continue }
-                    if ($line -match '^\s*Dedicated Memory:\s*(.+?)\s*$') { $current.DedicatedMiB = [int64](Convert-LatticeValeGpuMemoryToMiB $Matches[1]); continue }
-                    if ($line -match '^\s*Shared Memory:\s*(.+?)\s*$') { $current.SharedMiB = [int64](Convert-LatticeValeGpuMemoryToMiB $Matches[1]); continue }
-                    if ($line -match '^\s*Display Memory:\s*(.+?)\s*$') { $current.DisplayMiB = [int64](Convert-LatticeValeGpuMemoryToMiB $Matches[1]); continue }
-                }
-                if ($null -ne $current) { $records.Add([pscustomobject]$current) }
-            }
-        } catch {
-            Write-Verbose "DXDiag text GPU-memory probe was unavailable: $($_.Exception.Message)"
-        }
-    } catch {
-        Write-Warning "DXGI/dxdiag GPU-memory inventory was unavailable: $($_.Exception.Message)"
-    } finally {
-        Remove-Item -LiteralPath $xmlTemp,$textTemp -Force -ErrorAction SilentlyContinue
-    }
-    $script:LatticeValeDxDiagGpuMemoryInventoryCache = $records.ToArray()
-    return @($script:LatticeValeDxDiagGpuMemoryInventoryCache)
-}
-
-function Get-LatticeValeDxDiagGpuMemoryMap {
-    # Compatibility helper retained for older fixtures/callers. Only dedicated
-    # memory is returned here; shared/display memory is never mislabeled as VRAM.
-    if ($null -ne $script:LatticeValeDxDiagGpuMemoryCache) { return $script:LatticeValeDxDiagGpuMemoryCache }
-    $map = @{}
-    foreach ($entry in @(Get-LatticeValeDxDiagGpuMemoryInventory)) {
-        if ([int64]$entry.DedicatedMiB -ge 1 -and ((-not $map.ContainsKey([string]$entry.Name)) -or [int64]$map[[string]$entry.Name] -lt [int64]$entry.DedicatedMiB)) {
-            $map[[string]$entry.Name] = [int64]$entry.DedicatedMiB
-        }
-    }
-    $script:LatticeValeDxDiagGpuMemoryCache = $map
-    return $map
-}
-
-function Get-LatticeValeRegistryGpuMemoryInventory {
-    if ($null -ne $script:LatticeValeRegistryGpuMemoryInventoryCache) { return @($script:LatticeValeRegistryGpuMemoryInventoryCache) }
-    $records = [System.Collections.Generic.List[object]]::new()
-    $paths = @(
-        'HKLM:\SYSTEM\CurrentControlSet\Control\Class\{4D36E968-E325-11CE-BFC1-08002BE10318}\0*',
-        'HKLM:\SYSTEM\CurrentControlSet\Control\Video\*\0*'
-    )
-    foreach ($path in $paths) {
-        try {
-            foreach ($entry in @(Get-ItemProperty -Path $path -ErrorAction SilentlyContinue)) {
-                $matching = ([string]$entry.MatchingDeviceId).Trim()
-                $adapterString = ([string]$entry.'HardwareInformation.AdapterString').Trim()
-                $driverDesc = ([string]$entry.DriverDesc).Trim()
-                $qwordMiB = Convert-LatticeValeRegistryMemoryValueToMiB $entry.'HardwareInformation.qwMemorySize'
-                $legacyMiB = Convert-LatticeValeRegistryMemoryValueToMiB $entry.'HardwareInformation.MemorySize'
-                $mib = if ($qwordMiB -gt 0) { $qwordMiB } else { $legacyMiB }
-                if ($mib -le 0) { continue }
-                $records.Add([pscustomobject]@{
-                    MatchingDeviceId = $matching
-                    Name = if (-not [string]::IsNullOrWhiteSpace($adapterString)) { $adapterString } else { $driverDesc }
-                    DedicatedMiB = [int64]$mib
-                    Source = if ($qwordMiB -gt 0) { 'windows-registry-qword' } else { 'windows-registry-dword-lower-bound' }
-                })
-            }
-        } catch { }
-    }
-    $script:LatticeValeRegistryGpuMemoryInventoryCache = $records.ToArray()
-    return @($script:LatticeValeRegistryGpuMemoryInventoryCache)
-}
-
-function Get-LatticeValeGpuMemoryInfo([object]$Gpu, [object[]]$DxDiag, [object[]]$Registry) {
-    $name = ([string]$Gpu.Name).Trim()
-    $pnp = ([string]$Gpu.PNPDeviceID).Trim()
-    $dxMatches = @($DxDiag | Where-Object { Test-LatticeValeGpuPnpPrefix $pnp ([string]$_.PnpPrefix) })
-    if ($dxMatches.Count -eq 0) {
-        $nameMatches = @($DxDiag | Where-Object { ([string]$_.Name).Equals($name, [StringComparison]::OrdinalIgnoreCase) })
-        if ($nameMatches.Count -eq 1) { $dxMatches = $nameMatches }
-        elseif ($nameMatches.Count -gt 1) {
-            # /x and /t can both describe the same adapter. If every same-name
-            # record reports the same positive capacity, accepting those records is
-            # still unambiguous. Otherwise leave DXDiag unmatched rather than bind
-            # memory to the wrong same-name adapter on a multi-GPU host.
-            $positive = @($nameMatches | ForEach-Object { [int64]$_.DedicatedMiB } | Where-Object { $_ -gt 0 } | Select-Object -Unique)
-            if ($positive.Count -eq 1) { $dxMatches = $nameMatches }
-        }
-    }
-    $regMatches = @($Registry | Where-Object { Test-LatticeValeGpuPnpPrefix $pnp ([string]$_.MatchingDeviceId) })
-    if ($regMatches.Count -eq 0) {
-        $nameMatches = @($Registry | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_.Name) -and ([string]$_.Name).Equals($name, [StringComparison]::OrdinalIgnoreCase) })
-        if ($nameMatches.Count -eq 1) { $regMatches = $nameMatches }
-    }
-
-    $dedicated = 0L
-    $shared = 0L
-    $display = 0L
-    $source = 'unknown'
-    $confidence = 'unknown'
-
-    # DXDiag XML/text and the 64-bit registry value are full-capacity sources.
-    # The old DWORD and Win32_VideoController.AdapterRAM fields can truncate on
-    # modern >4 GiB GPUs, so lower-bound evidence may fill a gap but may never cap
-    # a stronger full-capacity measurement.
-    $dxDedicated = @($dxMatches | ForEach-Object { [int64]$_.DedicatedMiB } | Where-Object { $_ -gt 0 })
-    $dxShared = @($dxMatches | ForEach-Object { [int64]$_.SharedMiB } | Where-Object { $_ -gt 0 })
-    $dxDisplay = @($dxMatches | ForEach-Object { [int64]$_.DisplayMiB } | Where-Object { $_ -gt 0 })
-    $regHigh = @($regMatches | Where-Object { $_.Source -eq 'windows-registry-qword' } | ForEach-Object { [int64]$_.DedicatedMiB } | Where-Object { $_ -gt 0 })
-    $regLower = @($regMatches | Where-Object { $_.Source -ne 'windows-registry-qword' } | ForEach-Object { [int64]$_.DedicatedMiB } | Where-Object { $_ -gt 0 })
-
-    if ($dxShared.Count -gt 0) { $shared = [int64](($dxShared | Measure-Object -Minimum).Minimum) }
-    if ($dxDisplay.Count -gt 0) { $display = [int64](($dxDisplay | Measure-Object -Minimum).Minimum) }
-
-    if ($dxDedicated.Count -gt 0 -and $regHigh.Count -gt 0) {
-        $dedicated = [int64][math]::Min(($dxDedicated | Measure-Object -Minimum).Minimum, ($regHigh | Measure-Object -Minimum).Minimum)
-        $source = 'windows-dxdiag+registry-qword-conservative'
-        $confidence = 'high'
-    } elseif ($dxDedicated.Count -gt 0) {
-        $dedicated = [int64](($dxDedicated | Measure-Object -Minimum).Minimum)
-        $dxSources = @($dxMatches | Where-Object { [int64]$_.DedicatedMiB -gt 0 } | ForEach-Object { [string]$_.Source } | Select-Object -Unique)
-        $source = if ($dxSources.Count -eq 1) { $dxSources[0] } else { 'windows-dxdiag-multi-view-conservative' }
-        $confidence = 'high'
-    } elseif ($regHigh.Count -gt 0) {
-        $dedicated = [int64](($regHigh | Measure-Object -Minimum).Minimum)
-        $source = 'windows-registry-qword'
-        $confidence = 'high'
-    } elseif ($regLower.Count -gt 0) {
-        # Multiple lower-bound observations can safely use the largest proven
-        # lower bound. They are never represented as an exact capacity.
-        $dedicated = [int64](($regLower | Measure-Object -Maximum).Maximum)
-        $source = 'windows-registry-dword-lower-bound'
-        $confidence = 'low'
-    }
-
-    if ($dedicated -le 0) {
-        try {
-            if ([uint64]$Gpu.AdapterRAM -gt 0) {
-                $dedicated = [int64]([math]::Floor(([double][uint64]$Gpu.AdapterRAM) / 1MB))
-                $source = 'windows-cim-adapterram-lower-bound'
-                $confidence = 'low'
-            }
-        } catch { }
-    }
-
-    $lowerBound = $source -in @('windows-registry-dword-lower-bound','windows-cim-adapterram-lower-bound')
-    # A low dedicated aperture plus meaningful shared memory is characteristic of
-    # UMA/integrated adapters. A lower-bound-only dedicated value is not enough to
-    # reclassify the adapter as discrete; the canonical WSL policy will bound shared
-    # admission against live WSL RAM.
-    $memoryModel = if ($shared -ge 1024 -and ($dedicated -lt 1024 -or $lowerBound)) { 'shared-or-uma' } elseif ($dedicated -ge 1024) { 'dedicated' } elseif ($shared -ge 1024) { 'shared-or-uma' } elseif ($dedicated -gt 0) { 'dedicated-low' } else { 'unknown' }
-    return [pscustomobject]@{
-        DedicatedMiB = [int64][math]::Max(0, $dedicated)
-        SharedMiB = [int64][math]::Max(0, $shared)
-        DisplayMiB = [int64][math]::Max(0, $display)
-        MemoryModel = $memoryModel
-        MemorySource = $source
-        MemoryConfidence = $confidence
-        MemoryIsLowerBound = [bool]$lowerBound
-    }
-}
-
 function Get-WindowsGpuInventory {
-    if ($null -ne $script:LatticeValeWindowsGpuInventoryCache) { return @($script:LatticeValeWindowsGpuInventoryCache) }
     $items = [System.Collections.Generic.List[object]]::new()
-    $dxMemory = @(Get-LatticeValeDxDiagGpuMemoryInventory)
-    $registryMemory = @(Get-LatticeValeRegistryGpuMemoryInventory)
     try {
         foreach ($gpu in @(Get-CimInstance Win32_VideoController -ErrorAction Stop)) {
             $name = ([string]$gpu.Name).Trim()
             if ([string]::IsNullOrWhiteSpace($name)) { continue }
             if ($name -match 'Microsoft Basic|Remote Display|Indirect Display') { continue }
             $vendor = Get-LatticeValeGpuVendor $name
-            $memory = Get-LatticeValeGpuMemoryInfo $gpu $dxMemory $registryMemory
-            $pnpDeviceId = [string]$gpu.PNPDeviceID
             $items.Add([pscustomobject]@{
                 Name = $name
                 Vendor = $vendor
-                StableId = Get-LatticeValeGpuStableId $vendor $name $pnpDeviceId
-                PnpDeviceId = $pnpDeviceId
-                VramMiB = [int64]$memory.DedicatedMiB
-                DedicatedVramMiB = [int64]$memory.DedicatedMiB
-                DedicatedMemoryMiB = [int64]$memory.DedicatedMiB
-                SharedMemoryMiB = [int64]$memory.SharedMiB
-                DisplayMemoryMiB = [int64]$memory.DisplayMiB
-                MemoryModel = [string]$memory.MemoryModel
-                MemorySource = [string]$memory.MemorySource
-                MemoryConfidence = [string]$memory.MemoryConfidence
-                MemoryIsLowerBound = [bool]$memory.MemoryIsLowerBound
-                DriverVersion = [string]$gpu.DriverVersion
-                DriverDate = if ($gpu.DriverDate) { ([DateTime]$gpu.DriverDate).ToUniversalTime().ToString('o') } else { '' }
+                PnpDeviceId = [string]$gpu.PNPDeviceID
             })
         }
     } catch {
         Write-Warning "Windows GPU inventory probe failed: $($_.Exception.Message)"
     }
-    $script:LatticeValeWindowsGpuInventoryCache = $items.ToArray()
-    return @($script:LatticeValeWindowsGpuInventoryCache)
-}
-
-function Get-LatticeValeWindowsHardwareSnapshot([string]$InstallerVersion = '') {
-    $windowsGpuSnapshot = @(Get-WindowsGpuInventory | ForEach-Object {
-        [ordered]@{
-            name = [string]$_.Name
-            vendor = [string]$_.Vendor
-            stableId = [string]$_.StableId
-            pnpDeviceId = [string]$_.PnpDeviceId
-            vramMiB = [int64]$_.VramMiB
-            dedicatedMemoryMiB = [int64]$_.DedicatedMemoryMiB
-            sharedMemoryMiB = [int64]$_.SharedMemoryMiB
-            displayMemoryMiB = [int64]$_.DisplayMemoryMiB
-            memoryModel = [string]$_.MemoryModel
-            memorySource = [string]$_.MemorySource
-            memoryConfidence = [string]$_.MemoryConfidence
-            memoryIsLowerBound = [bool]$_.MemoryIsLowerBound
-            driverVersion = [string]$_.DriverVersion
-            driverDate = [string]$_.DriverDate
-        }
-    })
-    $physicalMemoryMiB = 0
-    try { $physicalMemoryMiB = [int64]([math]::Floor(([double](Get-CimInstance Win32_ComputerSystem -ErrorAction Stop).TotalPhysicalMemory) / 1MB)) } catch { }
-    $nativeOllama = $null
-    try {
-        $native = Get-WindowsNativeOllamaState
-        $nativeOllama = [ordered]@{
-            installed = [bool]$native.Installed
-            processRunning = [bool]$native.ProcessRunning
-            apiReady = [bool]$native.ApiReady
-            version = [string]$native.Version
-            endpoint = [string]$native.Endpoint
-        }
-    } catch { }
-    return [ordered]@{
-        schema = 2
-        generatedAt = [DateTime]::UtcNow.ToString('o')
-        installerVersion = $InstallerVersion
-        windowsBuild = [int][Environment]::OSVersion.Version.Build
-        windowsVersion = [Environment]::OSVersion.Version.ToString()
-        architecture = [Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
-        physicalMemoryMiB = $physicalMemoryMiB
-        gpus = $windowsGpuSnapshot
-        nativeOllama = $nativeOllama
-    }
+    return $items.ToArray()
 }
 
 function Get-LatticeValeWslGpuComponentInventory([string]$Name, [string]$User) {
@@ -813,7 +473,7 @@ printf 'nvidia_ctk=%s\n' "$nvidia_ctk"
 
 function Get-LatticeValeGpuAccelerationPlan([string]$Name, [string]$User) {
     $inventory = @(Get-WindowsGpuInventory)
-    $recognized = @($inventory)
+    $recognized = @($inventory | Where-Object { $_.Vendor -in @('amd','nvidia','intel','qualcomm') })
     $vendors = @($recognized | ForEach-Object { $_.Vendor } | Select-Object -Unique)
     $directml = Get-DirectMLWslPrerequisites $Name $User
     $ollama = Get-OllamaWslGpuPrerequisites $Name $User
@@ -831,11 +491,7 @@ function Get-LatticeValeGpuAccelerationPlan([string]$Name, [string]$User) {
         $backend = 'ollama'
         $ollamaAcceleration = 'amd'
         $reason = 'An AMD GPU is detected and the selected WSL distro exposes /dev/kfd plus /dev/dri. Managed Ollama ROCm is the preferred verified container path.'
-    } elseif (($recognized.Count -gt 0) -and $ollama.VulkanDockerReady) {
-        $backend = 'ollama'
-        $ollamaAcceleration = 'vulkan'
-        $reason = 'The selected WSL distro exposes a DRM render node and the detected GPU is suitable for Ollama Vulkan. LatticeVale will use the standard Ollama image and accept this path only after a real model reports GPU execution.'
-    } elseif (($recognized.Count -gt 0) -and $directml.WindowsBuildSupported -and $directml.ProbeSucceeded -and $directml.DxgPresent -and $directml.BridgeLibrariesReady) {
+    } elseif (($recognized.Count -gt 0) -and $directml.ProbeSucceeded -and $directml.DxgPresent -and $directml.BridgeLibrariesReady) {
         $backend = 'directml'
         $ollamaAcceleration = 'auto'
         if ($vendors -contains 'amd') {
@@ -847,7 +503,7 @@ function Get-LatticeValeGpuAccelerationPlan([string]$Name, [string]$User) {
         } else {
             $reason = 'A DirectX 12 GPU and healthy WSL DirectML bridge were detected. DirectML is recommended because the vendor-specific managed Ollama GPU path is not currently verified.'
         }
-    } elseif (($vendors -contains 'nvidia') -and $directml.WindowsBuildSupported -and $directml.ProbeSucceeded -and $directml.DxgPresent) {
+    } elseif (($vendors -contains 'nvidia') -and $directml.ProbeSucceeded -and $directml.DxgPresent) {
         $backend = 'directml'
         $ollamaAcceleration = 'auto'
         $reason = 'An NVIDIA GPU is visible through /dev/dxg but the CUDA/nvidia-smi WSL path is not verified. DirectML is the best available GPU attempt; Ollama remains the fallback.'
@@ -862,7 +518,7 @@ function Get-LatticeValeGpuAccelerationPlan([string]$Name, [string]$User) {
         RecommendedTextBackend = $backend
         RecommendedOllamaAcceleration = $ollamaAcceleration
         TextBackendDefault = $(if ($backend -eq 'directml') { 2 } else { 1 })
-        OllamaAccelerationDefault = $(switch ($ollamaAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; 'vulkan' {5}; default {1} })
+        OllamaAccelerationDefault = $(switch ($ollamaAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default {1} })
         Reason = $reason
     }
 }
@@ -872,7 +528,7 @@ function Write-LatticeValeGpuAccelerationPlan([object]$Plan) {
     if ($gpuNames.Count -gt 0) {
         Write-Info ('Detected Windows GPU(s): ' + ($gpuNames -join '; '))
     } else {
-        Write-Info 'No usable Windows display adapter inventory was detected; CPU-safe defaults remain available.'
+        Write-Info 'No recognized AMD/NVIDIA/Intel/Qualcomm Windows display adapter was detected; CPU-safe defaults remain available.'
     }
     $backendLabel = if ($Plan.RecommendedTextBackend -eq 'directml') { 'PyTorch DirectML gateway' } else { 'Ollama' }
     Write-Info "GPU-aware recommendation: $backendLabel. $($Plan.Reason)"
@@ -894,21 +550,9 @@ function Select-LatticeValeDirectMLGpu(
     [string]$Name,
     [string]$User,
     [string]$SavedAdapterName = '',
-    [string]$SavedVendor = '',
-    [int64]$SavedVramMiB = 0,
-    [string]$SavedStableId = '',
-    [string]$SavedPnpDeviceId = ''
+    [string]$SavedVendor = ''
 ) {
-    $wslState = Get-DirectMLWslPrerequisites $Name $User $SavedAdapterName
-    if (-not $wslState.WindowsBuildSupported) {
-        Write-Warning "PyTorch DirectML in WSL2 requires Windows 11 build 22000 or later. Detected Windows build $($wslState.WindowsBuild)."
-        $choice = Read-MenuExplicit 'DirectML is not supported by this Windows build. Choose how to continue' @(
-            'Use Ollama instead (recommended)',
-            'Keep DirectML selected for a future Windows upgrade; Ollama remains fallback'
-        )
-        if ($choice -eq 1) { return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor=''; VramMiB=0; StableId=''; PnpDeviceId='' } }
-        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$SavedAdapterName; Vendor=$SavedVendor; VramMiB=$SavedVramMiB; StableId=$SavedStableId; PnpDeviceId=$SavedPnpDeviceId }
-    }
+    $wslState = Get-DirectMLWslPrerequisites $Name $User
     if (-not $wslState.ProbeSucceeded) {
         Write-Warning "The DirectML /dev/dxg probe could not complete inside the selected Ubuntu distro. This is a probe failure, not proof that /dev/dxg is absent.$(if ($wslState.Detail) { ' ' + $wslState.Detail } else { '' })"
         $choice = Read-MenuExplicit 'DirectML WSL GPU support could not be verified. Choose how to continue' @(
@@ -916,9 +560,9 @@ function Select-LatticeValeDirectMLGpu(
             'Keep DirectML selected; Resume / repair will probe again'
         )
         if ($choice -eq 1) {
-            return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor=''; VramMiB=0; StableId=''; PnpDeviceId='' }
+            return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor='' }
         }
-        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$SavedAdapterName; Vendor=$SavedVendor; VramMiB=$SavedVramMiB; StableId=$SavedStableId; PnpDeviceId=$SavedPnpDeviceId }
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$SavedAdapterName; Vendor=$SavedVendor }
     }
     if (-not $wslState.DxgPresent) {
         Write-Warning 'The selected Ubuntu distro was probed directly and /dev/dxg is not present. PyTorch DirectML in WSL2 requires the Windows GPU bridge.'
@@ -927,9 +571,9 @@ function Select-LatticeValeDirectMLGpu(
             'Keep DirectML selected; Resume / repair will probe again after WSL GPU support is fixed'
         )
         if ($choice -eq 1) {
-            return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor=''; VramMiB=0; StableId=''; PnpDeviceId='' }
+            return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor='' }
         }
-        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$SavedAdapterName; Vendor=$SavedVendor; VramMiB=$SavedVramMiB; StableId=$SavedStableId; PnpDeviceId=$SavedPnpDeviceId }
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$SavedAdapterName; Vendor=$SavedVendor }
     }
 
     $libraryState = "libd3d12=$($wslState.D3d12Present), libd3d12core=$($wslState.D3d12CorePresent), libdxcore=$($wslState.DxCorePresent)"
@@ -948,57 +592,45 @@ function Select-LatticeValeDirectMLGpu(
     }
 
     $inventory = @(Get-WindowsGpuInventory)
-    $supported = @($inventory)
+    $supported = @($inventory | Where-Object { $_.Vendor -in @('amd','nvidia','intel','qualcomm') })
     if ($supported.Count -gt 0) {
-        Write-Info ('Windows GPU detection: ' + (($supported | ForEach-Object { "$($_.Name) [$($_.Vendor)]$(if ([int64]$_.VramMiB -ge 256) { "; $($_.VramMiB) MiB dedicated" } else { "; VRAM unknown" })" }) -join '; '))
+        Write-Info ('Windows GPU detection: ' + (($supported | ForEach-Object { "$($_.Name) [$($_.Vendor)]" }) -join '; '))
     }
 
-    $saved = @()
-    $savedMatchReason = ''
-    if (-not [string]::IsNullOrWhiteSpace($SavedStableId)) {
-        $saved = @($supported | Where-Object { $_.StableId -eq $SavedStableId })
-        if ($saved.Count -eq 1) { $savedMatchReason = 'stable GPU ID' }
-    }
-    if ($saved.Count -ne 1 -and -not [string]::IsNullOrWhiteSpace($SavedPnpDeviceId)) {
-        $saved = @($supported | Where-Object { ([string]$_.PnpDeviceId).Equals($SavedPnpDeviceId, [StringComparison]::OrdinalIgnoreCase) })
-        if ($saved.Count -eq 1) { $savedMatchReason = 'Windows PNP device ID' }
-    }
-    if ($saved.Count -ne 1 -and -not [string]::IsNullOrWhiteSpace($SavedAdapterName)) {
+    if (-not [string]::IsNullOrWhiteSpace($SavedAdapterName)) {
         $saved = @($supported | Where-Object { $_.Name -eq $SavedAdapterName })
-        if ($saved.Count -eq 1) { $savedMatchReason = 'legacy adapter name' }
-    }
-    if ($saved.Count -eq 1) {
-        Write-Info "DirectML adapter preserved by ${savedMatchReason}: $($saved[0].Name) [$($saved[0].Vendor)]."
-        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$saved[0].Name; Vendor=$saved[0].Vendor; VramMiB=[int64]$saved[0].VramMiB; StableId=[string]$saved[0].StableId; PnpDeviceId=[string]$saved[0].PnpDeviceId }
+        if ($saved.Count -eq 1) {
+            Write-Info "DirectML adapter preserved: $($saved[0].Name) [$($saved[0].Vendor)]."
+            return [pscustomobject]@{ UseDirectML=$true; AdapterName=$saved[0].Name; Vendor=$saved[0].Vendor }
+        }
     }
 
     if ($supported.Count -eq 1) {
         Write-Info "DirectML adapter auto-selected: $($supported[0].Name) [$($supported[0].Vendor)]."
-        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$supported[0].Name; Vendor=$supported[0].Vendor; VramMiB=[int64]$supported[0].VramMiB; StableId=[string]$supported[0].StableId; PnpDeviceId=[string]$supported[0].PnpDeviceId }
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$supported[0].Name; Vendor=$supported[0].Vendor }
     }
 
     if ($supported.Count -gt 1) {
-        $labels = @($supported | ForEach-Object { "$($_.Name) [$($_.Vendor)]$(if ([int64]$_.VramMiB -ge 256) { "; $($_.VramMiB) MiB dedicated" } else { "; VRAM unknown" })" })
+        $labels = @($supported | ForEach-Object { "$($_.Name) [$($_.Vendor)]" })
         $idx = Read-MenuExplicit 'Multiple DirectML-capable Windows GPUs were detected. Choose the adapter LatticeVale should use' $labels
         $picked = $supported[$idx - 1]
-        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$picked.Name; Vendor=$picked.Vendor; VramMiB=[int64]$picked.VramMiB; StableId=[string]$picked.StableId; PnpDeviceId=[string]$picked.PnpDeviceId }
+        return [pscustomobject]@{ UseDirectML=$true; AdapterName=$picked.Name; Vendor=$picked.Vendor }
     }
 
-    Write-Warning 'Windows GPU inventory did not yield a selectable display adapter. DirectML can still be kept for later if the WSL bridge/runtime becomes identifiable.'
+    Write-Warning 'Windows GPU vendor detection did not find a recognized AMD, NVIDIA, Intel, or Qualcomm display adapter.'
     $manual = Read-MenuExplicit 'Select your GPU vendor, or use Ollama instead' @(
         'AMD / Radeon',
         'NVIDIA / GeForce',
         'Intel / Arc / Iris',
         'Qualcomm / Adreno',
-        'Other DirectX 12 display adapter',
         'Use Ollama instead'
     )
-    if ($manual -eq 6) {
-        return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor=''; VramMiB=0; StableId=''; PnpDeviceId='' }
+    if ($manual -eq 5) {
+        return [pscustomobject]@{ UseDirectML=$false; AdapterName=''; Vendor='' }
     }
-    $vendor = @('amd','nvidia','intel','qualcomm','other')[$manual - 1]
+    $vendor = @('amd','nvidia','intel','qualcomm')[$manual - 1]
     Write-Info "DirectML vendor recorded from explicit user selection: $vendor. Runtime adapter enumeration will still fail closed if no matching DirectML device is available."
-    return [pscustomobject]@{ UseDirectML=$true; AdapterName=''; Vendor=$vendor; VramMiB=0; StableId=''; PnpDeviceId='' }
+    return [pscustomobject]@{ UseDirectML=$true; AdapterName=''; Vendor=$vendor }
 }
 
 function Get-WindowsNativeOllamaState {
@@ -3433,36 +3065,21 @@ function Get-OptionTcpPort([object]$Object, [string]$Name, [int]$Default) {
 
 function Invoke-BundledStackAudit([string]$Name, [string]$User, [string]$LinuxHome, [switch]$Json) {
     $auditSource = Join-Path $PSScriptRoot 'stack\state-audit.py'
-    $archSource = Join-Path $PSScriptRoot 'stack\latticevale_arch.py'
-    $compatSource = Join-Path $PSScriptRoot 'compatibility.conf'
-    if (-not (Test-Path -LiteralPath $auditSource -PathType Leaf) -or -not (Test-Path -LiteralPath $archSource -PathType Leaf) -or -not (Test-Path -LiteralPath $compatSource -PathType Leaf)) { return $null }
+    if (-not (Test-Path -LiteralPath $auditSource -PathType Leaf)) { return $null }
     $stageName = "latticevale-audit-$([guid]::NewGuid().ToString('N'))"
     $stageLinux = "/tmp/$stageName"
     $mkdirProbe = Invoke-WslDirectCapture $Name 'root' 'install' @('-d', '-m', '0755', $stageLinux)
     if (-not $mkdirProbe.Success) { return $null }
-    $snapshotTemp = $null
     try {
         Copy-LocalFileToWslRoot $Name $auditSource "$stageLinux/state-audit.py" '0644'
-        Copy-LocalFileToWslRoot $Name $archSource "$stageLinux/latticevale_arch.py" '0644'
-        Copy-LocalFileToWslRoot $Name $compatSource "$stageLinux/compatibility.conf" '0644'
-        $windowsSnapshot = Get-LatticeValeWindowsHardwareSnapshot $bundleVersion
-        $snapshotJson = $windowsSnapshot | ConvertTo-Json -Depth 8 -Compress
-        $snapshotTemp = Join-Path ([System.IO.Path]::GetTempPath()) ("latticevale-windows-hardware-{0}.json" -f ([guid]::NewGuid().ToString('N')))
-        [System.IO.File]::WriteAllText($snapshotTemp, $snapshotJson + "`n", [System.Text.UTF8Encoding]::new($false))
-        Copy-LocalFileToWslRoot $Name $snapshotTemp "$stageLinux/windows-hardware.json" '0644'
-        $auditArguments = @(
-            "$stageLinux/state-audit.py", '--stack', "$LinuxHome/hermes-stack",
-            '--compat', "$stageLinux/compatibility.conf",
-            '--windows-snapshot', "$stageLinux/windows-hardware.json"
-        )
+        $auditArguments = @("$stageLinux/state-audit.py", '--stack', "$LinuxHome/hermes-stack")
         if ($Json) { $auditArguments += '--json' }
-        $probe = Invoke-WslDirectCapture $Name $User 'python3' $auditArguments 75
+        $probe = Invoke-WslDirectCapture $Name $User 'python3' $auditArguments 60
         if (-not $probe.Success -and [string]::IsNullOrWhiteSpace($probe.Text)) { return $null }
         return $probe.Text
     } catch {
         return $null
     } finally {
-        if ($snapshotTemp) { Remove-Item -LiteralPath $snapshotTemp -Force -ErrorAction SilentlyContinue }
         [void](Invoke-WslDirectCapture $Name 'root' 'rm' @('-rf', $stageLinux))
     }
 }
@@ -3530,12 +3147,12 @@ function Get-LatticeValeCompatibility {
         }
         if ($key) { $values[$key] = $value }
     }
-    foreach ($required in @('SUPPORTED_UBUNTU_VERSIONS','MIN_WINDOWS_BUILD','MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE','MIN_HOST_PARTITION_FREE_GIB','MIN_MANAGED_REPAIR_FREE_GIB','MANAGED_REPAIR_REFRESH_DAYS','MANAGED_REPAIR_REFRESH_REVISION','MIN_UNIVERSAL_REPAIR_MAJOR','INSTALL_OPTIONS_SCHEMA','HARDWARE_CAPABILITIES_SCHEMA','BACKEND_CAPABILITIES_SCHEMA','BACKEND_HEALTH_SCHEMA','RUNTIME_POLICY_SCHEMA','DIAGNOSTICS_SCHEMA','WSL_PROBE_TIMEOUT_SECONDS')) {
+    foreach ($required in @('SUPPORTED_UBUNTU_VERSIONS','MIN_WINDOWS_BUILD','MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE','MIN_HOST_PARTITION_FREE_GIB','MIN_MANAGED_REPAIR_FREE_GIB','MANAGED_REPAIR_REFRESH_DAYS','MANAGED_REPAIR_REFRESH_REVISION','MIN_UNIVERSAL_REPAIR_MAJOR','INSTALL_OPTIONS_SCHEMA','WSL_PROBE_TIMEOUT_SECONDS')) {
         if (-not $values.ContainsKey($required) -or [string]::IsNullOrWhiteSpace([string]$values[$required])) {
             throw "compatibility.conf is missing required value '$required'."
         }
     }
-    $windowsBuild = 0; $totalGiB = 0; $freeGiB = 0; $repairFreeGiB = 0; $repairRefreshDays = 0; $repairRefreshRevision = 0; $universalRepairMajor = 0; $installOptionsSchema = 0; $hardwareCapabilitiesSchema = 0; $backendCapabilitiesSchema = 0; $backendHealthSchema = 0; $runtimePolicySchema = 0; $diagnosticsSchema = 0; $probeTimeout = 0
+    $windowsBuild = 0; $totalGiB = 0; $freeGiB = 0; $repairFreeGiB = 0; $repairRefreshDays = 0; $repairRefreshRevision = 0; $universalRepairMajor = 0; $installOptionsSchema = 0; $probeTimeout = 0
     if (-not [int]::TryParse([string]$values['MIN_WINDOWS_BUILD'], [ref]$windowsBuild) -or $windowsBuild -lt 1) { throw 'Invalid MIN_WINDOWS_BUILD in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE'], [ref]$totalGiB) -or $totalGiB -lt 1) { throw 'Invalid MIN_HOST_PARTITION_TOTAL_GIB_EXCLUSIVE in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MIN_HOST_PARTITION_FREE_GIB'], [ref]$freeGiB) -or $freeGiB -lt 1) { throw 'Invalid MIN_HOST_PARTITION_FREE_GIB in compatibility.conf.' }
@@ -3544,11 +3161,6 @@ function Get-LatticeValeCompatibility {
     if (-not [int]::TryParse([string]$values['MANAGED_REPAIR_REFRESH_REVISION'], [ref]$repairRefreshRevision) -or $repairRefreshRevision -lt 1 -or $repairRefreshRevision -gt 1000000) { throw 'Invalid MANAGED_REPAIR_REFRESH_REVISION in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['MIN_UNIVERSAL_REPAIR_MAJOR'], [ref]$universalRepairMajor) -or $universalRepairMajor -lt 0 -or $universalRepairMajor -gt 99) { throw 'Invalid MIN_UNIVERSAL_REPAIR_MAJOR in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['INSTALL_OPTIONS_SCHEMA'], [ref]$installOptionsSchema) -or $installOptionsSchema -lt 1 -or $installOptionsSchema -gt 1000) { throw 'Invalid INSTALL_OPTIONS_SCHEMA in compatibility.conf.' }
-    if (-not [int]::TryParse([string]$values['HARDWARE_CAPABILITIES_SCHEMA'], [ref]$hardwareCapabilitiesSchema) -or $hardwareCapabilitiesSchema -lt 1 -or $hardwareCapabilitiesSchema -gt 1000) { throw 'Invalid HARDWARE_CAPABILITIES_SCHEMA in compatibility.conf.' }
-    if (-not [int]::TryParse([string]$values['BACKEND_CAPABILITIES_SCHEMA'], [ref]$backendCapabilitiesSchema) -or $backendCapabilitiesSchema -lt 1 -or $backendCapabilitiesSchema -gt 1000) { throw 'Invalid BACKEND_CAPABILITIES_SCHEMA in compatibility.conf.' }
-    if (-not [int]::TryParse([string]$values['BACKEND_HEALTH_SCHEMA'], [ref]$backendHealthSchema) -or $backendHealthSchema -lt 1 -or $backendHealthSchema -gt 1000) { throw 'Invalid BACKEND_HEALTH_SCHEMA in compatibility.conf.' }
-    if (-not [int]::TryParse([string]$values['RUNTIME_POLICY_SCHEMA'], [ref]$runtimePolicySchema) -or $runtimePolicySchema -lt 1 -or $runtimePolicySchema -gt 1000) { throw 'Invalid RUNTIME_POLICY_SCHEMA in compatibility.conf.' }
-    if (-not [int]::TryParse([string]$values['DIAGNOSTICS_SCHEMA'], [ref]$diagnosticsSchema) -or $diagnosticsSchema -lt 1 -or $diagnosticsSchema -gt 1000) { throw 'Invalid DIAGNOSTICS_SCHEMA in compatibility.conf.' }
     if (-not [int]::TryParse([string]$values['WSL_PROBE_TIMEOUT_SECONDS'], [ref]$probeTimeout) -or $probeTimeout -lt 5 -or $probeTimeout -gt 120) { throw 'Invalid WSL_PROBE_TIMEOUT_SECONDS in compatibility.conf.' }
     $versions = @(([string]$values['SUPPORTED_UBUNTU_VERSIONS'] -split '\s+') | Where-Object { $_ })
     if ($versions.Count -eq 0) { throw 'SUPPORTED_UBUNTU_VERSIONS is empty in compatibility.conf.' }
@@ -3562,11 +3174,6 @@ function Get-LatticeValeCompatibility {
         ManagedRepairRefreshRevision = $repairRefreshRevision
         MinUniversalRepairMajor = $universalRepairMajor
         InstallOptionsSchema = $installOptionsSchema
-        HardwareCapabilitiesSchema = $hardwareCapabilitiesSchema
-        BackendCapabilitiesSchema = $backendCapabilitiesSchema
-        BackendHealthSchema = $backendHealthSchema
-        RuntimePolicySchema = $runtimePolicySchema
-        DiagnosticsSchema = $diagnosticsSchema
         WslProbeTimeoutSeconds = $probeTimeout
     }
     return $script:HermesCompatibility
@@ -6393,8 +6000,7 @@ switch ($stackState) {
             'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',
             'Advanced recovery - reset checkpoints or explicitly rebuild installer-owned identities',
             'Update / repair installer-managed software - force this bundle''s declared component versions/channels and managed package/image/source layer now, then run normal repair',
-            'Cleanup / reclaim disk space - choose safe cleanup categories without changing the current LatticeVale runtime/data configuration',
-            'Diagnostics / compatibility test - read-only Windows + WSL + GPU/backend + stack verification; make no changes'
+            'Cleanup / reclaim disk space - choose safe cleanup categories without changing the current LatticeVale runtime/data configuration'
         )
         switch ($modeChoice) {
             1 {
@@ -6535,15 +6141,6 @@ switch ($stackState) {
                 }
                 Invoke-LatticeValeCleanupMaintenance $DistroName $stackLinuxPath $cleanupScopes $DistroStoragePath
                 Write-Host "`nCleanup maintenance complete. Normal installer/repair stages were not run." -ForegroundColor Green
-                exit 0
-            }
-            8 {
-                $installMode = 'diagnostics'
-                Write-Host "`nLATTICEVALE 14.6 READ-ONLY COMPATIBILITY DIAGNOSTICS" -ForegroundColor Cyan
-                $gpuPlan = Get-LatticeValeGpuAccelerationPlan $DistroName $linuxUser
-                Write-LatticeValeGpuAccelerationPlan $gpuPlan
-                [void](Show-LatticeValeReadOnlyVerification $DistroName $linuxUser $linuxHome $existingOptions)
-                Write-Info 'No installer-managed files, packages, services, WSL settings, or application data were changed.'
                 exit 0
             }
         }
@@ -6694,12 +6291,8 @@ if ($reusePriorChoices) {
     if ($directmlTextModel -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { $directmlTextModel = 'Qwen/Qwen2.5-1.5B-Instruct' }
     $directmlPort = (Get-OptionTcpPort $existingOptions 'directmlPort' 11436)
     $directmlAdapterName = [string](Get-OptionValue $existingOptions 'directmlAdapterName' '')
-    $gpuPreferenceId = [string](Get-OptionValue $existingOptions 'gpuPreferenceId' '')
-    $gpuPreferencePnpDeviceId = [string](Get-OptionValue $existingOptions 'gpuPreferencePnpDeviceId' '')
     $directmlGpuVendor = [string](Get-OptionValue $existingOptions 'directmlGpuVendor' '')
-    if ($directmlGpuVendor -notin @('','amd','nvidia','intel','qualcomm','other')) { $directmlGpuVendor = '' }
-    $directmlVramMiB = [int64](Get-OptionValue $existingOptions 'directmlVramMiB' 0)
-    if ($directmlVramMiB -lt 0 -or $directmlVramMiB -gt 1048576) { $directmlVramMiB = 0 }
+    if ($directmlGpuVendor -notin @('','amd','nvidia','intel','qualcomm')) { $directmlGpuVendor = '' }
     $ollamaBackend = [string](Get-OptionValue $existingOptions 'ollamaBackend' 'managed')
     if ($ollamaBackend -notin @('managed','windows-native')) { $ollamaBackend = 'managed' }
     $windowsOllamaBridgePort = (Get-OptionTcpPort $existingOptions 'windowsOllamaBridgePort' 11435)
@@ -6725,7 +6318,7 @@ if ($reusePriorChoices) {
     $savedAccelerationProperty = $existingOptions.PSObject.Properties['ollamaAcceleration']
     $persistOllamaAcceleration = ($null -ne $savedAccelerationProperty)
     $ollamaAcceleration = [string](Get-OptionValue $existingOptions 'ollamaAcceleration' 'cpu')
-    if ($ollamaAcceleration -notin @('auto','cpu','nvidia','amd','vulkan')) { $ollamaAcceleration = 'cpu' }
+    if ($ollamaAcceleration -notin @('auto','cpu','nvidia','amd')) { $ollamaAcceleration = 'cpu' }
 
     if ($ollamaBackend -eq 'windows-native' -and ($honcho -or $hermesLocalAI)) {
         $nativeBackendUsable = ($windowsOllamaState.ApiReady -and $windowsNativeBridgeState -and $windowsNativeBridgeState.Ready)
@@ -6776,9 +6369,9 @@ if ($reusePriorChoices) {
     } elseif (-not $persistOllamaAcceleration -and ($honcho -or $hermesLocalAI) -and $ollamaBackend -eq 'managed') {
         Write-Info 'Legacy same-line repair: preserving the existing Ollama image/runtime choice. Use "Change installed components" if you want to opt into managed GPU acceleration.'
     }
-    if ($ollamaBackend -eq 'managed' -and $persistOllamaAcceleration -and ($honcho -or $hermesLocalAI) -and $ollamaAcceleration -in @('amd','nvidia','vulkan')) {
+    if ($ollamaBackend -eq 'managed' -and $persistOllamaAcceleration -and ($honcho -or $hermesLocalAI) -and $ollamaAcceleration -in @('amd','nvidia')) {
         $gpuState = Get-OllamaWslGpuPrerequisites $DistroName $linuxUser
-        $forcedReady = if ($ollamaAcceleration -eq 'amd') { $gpuState.AmdDockerReady } elseif ($ollamaAcceleration -eq 'vulkan') { $gpuState.VulkanDockerReady } else { $gpuState.NvidiaWslReady }
+        $forcedReady = if ($ollamaAcceleration -eq 'amd') { $gpuState.AmdDockerReady } else { $gpuState.NvidiaWslReady }
         if (-not $forcedReady) {
             Write-Warning "The saved forced Ollama acceleration policy '$ollamaAcceleration' is not currently usable in the selected Ubuntu distro. LatticeVale will not guess a replacement or let prepare_config fail later."
             Write-OllamaGpuPrerequisiteSummary $gpuState
@@ -6956,21 +6549,15 @@ if ($reusePriorChoices) {
                 $localTextBackend = if ($textBackendChoice -eq 2) { 'directml' } else { 'ollama' }
                 if ($localTextBackend -eq 'directml') {
                     Write-Info 'DirectML accelerates Hermes and Honcho text inference through one WSL-host gateway. Ollama remains required for Honcho embeddings and as the automatic text fallback.'
-                    $directmlGpu = Select-LatticeValeDirectMLGpu $DistroName $linuxUser $directmlAdapterName $directmlGpuVendor $directmlVramMiB $gpuPreferenceId $gpuPreferencePnpDeviceId
+                    $directmlGpu = Select-LatticeValeDirectMLGpu $DistroName $linuxUser $directmlAdapterName $directmlGpuVendor
                     if (-not $directmlGpu.UseDirectML) {
                         $localTextBackend = 'ollama'
                         $directmlAdapterName = ''
                         $directmlGpuVendor = ''
-                        $directmlVramMiB = 0
-                        $gpuPreferenceId = ''
-                        $gpuPreferencePnpDeviceId = ''
                         Write-Info 'Local text inference changed to Ollama because DirectML was not selected for the detected GPU environment.'
                     } else {
                         $directmlAdapterName = [string]$directmlGpu.AdapterName
                         $directmlGpuVendor = [string]$directmlGpu.Vendor
-                        $directmlVramMiB = [int64]$directmlGpu.VramMiB
-                        $gpuPreferenceId = [string]$directmlGpu.StableId
-                        $gpuPreferencePnpDeviceId = [string]$directmlGpu.PnpDeviceId
                     }
                     if ($localTextBackend -eq 'directml') {
                     while ($true) {
@@ -7036,16 +6623,14 @@ if ($reusePriorChoices) {
                 if ($ollamaBackend -eq 'managed') {
                     $gpuState = Get-OllamaWslGpuPrerequisites $DistroName $linuxUser
                     Write-OllamaGpuPrerequisiteSummary $gpuState
-                    $accelDefault = switch ($ollamaAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; 'vulkan' {5}; default { $gpuPlan.OllamaAccelerationDefault } }
+                    $accelDefault = switch ($ollamaAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default { $gpuPlan.OllamaAccelerationDefault } }
                     $nvidiaAccelLabel = 'NVIDIA GPU' + $(if ($gpuPlan.RecommendedOllamaAcceleration -eq 'nvidia') { ' [recommended for detected hardware]' } else { '' })
                     $amdAccelLabel = 'AMD GPU via ROCm' + $(if ($gpuPlan.RecommendedOllamaAcceleration -eq 'amd') { ' [recommended for detected hardware]' } else { '' })
-                    $vulkanAccelLabel = 'Vulkan GPU via WSL DRM render device (AMD/Intel/other compatible Mesa hardware; runtime offload verified)' + $(if ($gpuPlan.RecommendedOllamaAcceleration -eq 'vulkan') { ' [recommended for detected hardware]' } else { '' })
                     while ($true) {
-                        $accelChoice = Read-Menu 'Ollama hardware acceleration' @('Auto-detect supported acceleration; CPU fallback','CPU only',$nvidiaAccelLabel,$amdAccelLabel,$vulkanAccelLabel) $accelDefault
+                        $accelChoice = Read-Menu 'Ollama hardware acceleration' @('Auto-detect supported acceleration; CPU fallback','CPU only',$nvidiaAccelLabel,$amdAccelLabel) $accelDefault
                         if ($accelChoice -eq 3 -and -not $gpuState.NvidiaWslReady) { Write-Warning 'NVIDIA WSL prerequisites are not currently verified.'; continue }
                         if ($accelChoice -eq 4 -and -not $gpuState.AmdDockerReady) { Write-Warning 'AMD/ROCm WSL prerequisites are not currently verified.'; continue }
-                        if ($accelChoice -eq 5 -and -not $gpuState.VulkanDockerReady) { Write-Warning 'Vulkan mode requires at least one WSL DRM render node under /dev/dri/renderD*.'; continue }
-                        $ollamaAcceleration = @('auto','cpu','nvidia','amd','vulkan')[$accelChoice - 1]
+                        $ollamaAcceleration = @('auto','cpu','nvidia','amd')[$accelChoice - 1]
                         $persistOllamaAcceleration = $true
                         break
                     }
@@ -7221,12 +6806,8 @@ if ($reusePriorChoices) {
         if ($directmlTextModel -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$') { $directmlTextModel = 'Qwen/Qwen2.5-1.5B-Instruct' }
         $directmlPort = (Get-OptionTcpPort $old 'directmlPort' 11436)
         $directmlAdapterName = [string](Get-OptionValue $old 'directmlAdapterName' '')
-    $gpuPreferenceId = [string](Get-OptionValue $old 'gpuPreferenceId' '')
-    $gpuPreferencePnpDeviceId = [string](Get-OptionValue $old 'gpuPreferencePnpDeviceId' '')
         $directmlGpuVendor = [string](Get-OptionValue $old 'directmlGpuVendor' '')
-        if ($directmlGpuVendor -notin @('','amd','nvidia','intel','qualcomm','other')) { $directmlGpuVendor = '' }
-        $directmlVramMiB = [int64](Get-OptionValue $old 'directmlVramMiB' 0)
-        if ($directmlVramMiB -lt 0 -or $directmlVramMiB -gt 1048576) { $directmlVramMiB = 0 }
+        if ($directmlGpuVendor -notin @('','amd','nvidia','intel','qualcomm')) { $directmlGpuVendor = '' }
         if ($honcho -or $hermesLocalAI) {
             $gpuPlan = Get-LatticeValeGpuAccelerationPlan $DistroName $linuxUser
             Write-LatticeValeGpuAccelerationPlan $gpuPlan
@@ -7241,21 +6822,15 @@ if ($reusePriorChoices) {
             $localTextBackend = if ($textBackendChoice -eq 2) { 'directml' } else { 'ollama' }
             if ($localTextBackend -eq 'directml') {
                 Write-Info 'DirectML is used for Hermes and Honcho text inference when healthy. Ollama remains installed/linked for automatic fallback and Honcho embeddings, so one backend failure does not strand the stack.'
-                $directmlGpu = Select-LatticeValeDirectMLGpu $DistroName $linuxUser $directmlAdapterName $directmlGpuVendor $directmlVramMiB $gpuPreferenceId $gpuPreferencePnpDeviceId
+                $directmlGpu = Select-LatticeValeDirectMLGpu $DistroName $linuxUser $directmlAdapterName $directmlGpuVendor
                 if (-not $directmlGpu.UseDirectML) {
                     $localTextBackend = 'ollama'
                     $directmlAdapterName = ''
                     $directmlGpuVendor = ''
-                    $directmlVramMiB = 0
-                    $gpuPreferenceId = ''
-                    $gpuPreferencePnpDeviceId = ''
                     Write-Info 'Local text inference changed to Ollama because DirectML was not selected for the detected GPU environment.'
                 } else {
                     $directmlAdapterName = [string]$directmlGpu.AdapterName
                     $directmlGpuVendor = [string]$directmlGpu.Vendor
-                    $directmlVramMiB = [int64]$directmlGpu.VramMiB
-                    $gpuPreferenceId = [string]$directmlGpu.StableId
-                    $gpuPreferencePnpDeviceId = [string]$directmlGpu.PnpDeviceId
                 }
                 if ($localTextBackend -eq 'directml') {
                 while ($true) {
@@ -7413,7 +6988,7 @@ if ($reusePriorChoices) {
         $ollamaAcceleration = 'cpu'
         if (($honcho -or $hermesLocalAI) -and $ollamaBackend -eq 'managed') {
             $savedAcceleration = [string](Get-OptionValue $old 'ollamaAcceleration' '')
-            $accelDefault = if ($savedAcceleration) { switch ($savedAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; 'vulkan' {5}; default {1} } } else { $gpuPlan.OllamaAccelerationDefault }
+            $accelDefault = if ($savedAcceleration) { switch ($savedAcceleration) { 'cpu' {2}; 'nvidia' {3}; 'amd' {4}; default {1} } } else { $gpuPlan.OllamaAccelerationDefault }
             $gpuState = Get-OllamaWslGpuPrerequisites $DistroName $linuxUser
             Write-OllamaGpuPrerequisiteSummary $gpuState
             $nvidiaLabel = if ($gpuState.NvidiaWslReady) {
@@ -7428,33 +7003,22 @@ if ($reusePriorChoices) {
                 'AMD GPU via ROCm [currently unavailable for this Ollama Docker path: x86_64 + /dev/kfd + /dev/dri were not all verified]'
             }
             if ($gpuPlan.RecommendedOllamaAcceleration -eq 'amd') { $amdLabel += ' [recommended for detected hardware]' }
-            $vulkanLabel = if ($gpuState.VulkanDockerReady) {
-                'Vulkan GPU (WSL exposes a DRM render node; standard Ollama image; real model offload is verified before this policy is accepted)'
-            } else {
-                'Vulkan GPU [currently unavailable: no /dev/dri/renderD* device is visible in the selected distro]'
-            }
-            if ($gpuPlan.RecommendedOllamaAcceleration -eq 'vulkan') { $vulkanLabel += ' [recommended for detected hardware]' }
             while ($true) {
                 $accelChoice = Read-Menu 'Ollama hardware acceleration' @(
                     'Auto-detect supported acceleration from the selected distro; use CPU when no supported GPU path is verified',
                     'CPU only (no GPU runtime/device changes)',
                     $nvidiaLabel,
-                    $amdLabel,
-                    $vulkanLabel
+                    $amdLabel
                 ) $accelDefault
                 if ($accelChoice -eq 3 -and -not $gpuState.NvidiaWslReady) {
                     Write-Warning 'NVIDIA mode was not accepted because the selected Ubuntu distro did not pass the WSL NVIDIA prerequisite probe. Choose Auto/CPU, or correct WSL GPU support and rerun.'
                     continue
                 }
                 if ($accelChoice -eq 4 -and -not $gpuState.AmdDockerReady) {
-                    Write-Warning 'AMD/ROCm mode was not accepted because the selected Ubuntu distro does not currently expose the devices required by this Ollama Docker path. Choose Auto/CPU/Vulkan, link a detected native Windows Ollama instance, or configure a supported AMD WSL container path and rerun.'
+                    Write-Warning 'AMD/ROCm mode was not accepted because the selected Ubuntu distro does not currently expose the devices required by this Ollama Docker path. Choose Auto/CPU, link a detected native Windows Ollama instance, or configure a supported AMD WSL container path and rerun.'
                     continue
                 }
-                if ($accelChoice -eq 5 -and -not $gpuState.VulkanDockerReady) {
-                    Write-Warning 'Vulkan mode was not accepted because no WSL DRM render node is visible under /dev/dri/renderD*. Choose Auto/CPU/DirectML/native Windows Ollama, or repair the WSL GPU device path and rerun.'
-                    continue
-                }
-                $ollamaAcceleration = @('auto','cpu','nvidia','amd','vulkan')[$accelChoice - 1]
+                $ollamaAcceleration = @('auto','cpu','nvidia','amd')[$accelChoice - 1]
                 break
             }
             Write-Info "Ollama acceleration policy: $ollamaAcceleration"
@@ -7683,13 +7247,6 @@ $options = [ordered]@{
     directmlPort = $directmlPort
     directmlAdapterName = if ($localTextBackend -eq 'directml') { $directmlAdapterName } else { '' }
     directmlGpuVendor = if ($localTextBackend -eq 'directml') { $directmlGpuVendor } else { '' }
-    directmlVramMiB = if ($localTextBackend -eq 'directml') { [int64]$directmlVramMiB } else { 0 }
-    gpuPreferenceMode = if ($localTextBackend -eq 'directml' -and (-not [string]::IsNullOrWhiteSpace($gpuPreferenceId) -or -not [string]::IsNullOrWhiteSpace($gpuPreferencePnpDeviceId) -or -not [string]::IsNullOrWhiteSpace($directmlAdapterName))) { 'explicit' } else { 'auto' }
-    gpuPreferenceId = if ($localTextBackend -eq 'directml') { $gpuPreferenceId } else { '' }
-    gpuPreferencePnpDeviceId = if ($localTextBackend -eq 'directml') { $gpuPreferencePnpDeviceId } else { '' }
-    gpuPreferenceName = if ($localTextBackend -eq 'directml') { $directmlAdapterName } else { '' }
-    gpuPreferenceVendor = if ($localTextBackend -eq 'directml') { $directmlGpuVendor } else { '' }
-    inferenceBackendPreference = if ($localTextBackend -eq 'directml') { 'directml' } elseif ($ollamaBackend -eq 'windows-native') { 'windows-native' } else { 'auto' }
     localTextModel = $localTextModel
     localEmbeddingModel = $localEmbeddingModel
     ollamaBackend = $ollamaBackend
@@ -7737,7 +7294,7 @@ Write-Host "  WSL implementation: $(if ($wslInfo.Modern) { 'Store/MSIX' } else {
 @(
     "Dashboard: $dashboard", "Multi-agent: $multiAgent", "Kanban: $kanban", "Matrix: $matrix",
     "Windows Tailscale integration: $tailscale", "Shared WSL networking policy: $wslNetworkingModePolicy ($wslNetworkingModeOwner)", "Tailscale Dashboard exposure: $tailscaleDashboard$(if ($tailscaleDashboard) { " (HTTPS $tailscaleDashboardPort)" } else { '' })", "Tailscale Matrix exposure: $tailscaleMatrix$(if ($tailscaleMatrix) { " (HTTPS $tailscaleMatrixPort)" } else { '' })", "SearXNG: $searxng", "QMD: $qmd", "Honcho (fully local): $honcho",
-    "Hermes local AI: $hermesLocalAI$(if ($hermesLocalAI) { " (text backend=$localTextBackend)" } else { '' })", "DirectML text model: $(if (($honcho -or $hermesLocalAI) -and $localTextBackend -eq 'directml') { "$directmlTextModel (WSL-host port $directmlPort; GPU=$(if ($directmlAdapterName) { $directmlAdapterName } else { $directmlGpuVendor }); VRAM=$(if ($directmlVramMiB -ge 256) { "$directmlVramMiB MiB" } else { "unknown" }))" } else { 'n/a' })", "Ollama fallback text model: $(if ($honcho -or $hermesLocalAI) { $localTextModel } else { 'n/a' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
+    "Hermes local AI: $hermesLocalAI$(if ($hermesLocalAI) { " (text backend=$localTextBackend)" } else { '' })", "DirectML text model: $(if (($honcho -or $hermesLocalAI) -and $localTextBackend -eq 'directml') { "$directmlTextModel (WSL-host port $directmlPort; GPU=$(if ($directmlAdapterName) { $directmlAdapterName } else { $directmlGpuVendor }))" } else { 'n/a' })", "Ollama fallback text model: $(if ($honcho -or $hermesLocalAI) { $localTextModel } else { 'n/a' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if ($honcho -or $hermesLocalAI) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
     "Local ports: Hermes API=$hermesApiPort$(if ($dashboard) { ", Dashboard=$dashboardLocalPort" } else { '' })$(if ($matrix) { ", Matrix=$matrixLocalPort" } else { '' })$(if ($searxng) { ", SearXNG=$searxngLocalPort" } else { '' })$(if ($honcho) { ", Honcho=$honchoLocalPort" } else { '' })",
     "Windows bridge ports: $(if ($tailscaleDashboard) { "Dashboard=$dashboardBridgePort " } else { '' })$(if ($tailscaleMatrix) { "Matrix=$matrixBridgePort" } else { '' })",
     "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Unattended updates: $unattended", "Repair maintenance: $repairMaintenance", "Universal repair migration: $universalRepairMigration", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
@@ -7894,18 +7451,13 @@ if (-not $mkdirProbe.Success) {
 try {
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'compatibility.conf') "$stageLinux/compatibility.conf" '0600'
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'linux\bootstrap.sh') "$stageLinux/linux/bootstrap.sh" '0600'
-    foreach ($file in @('compose.yaml','Dockerfile.qmd','patch-qmd-bind.py','configure-stack.sh','manage.sh','state-audit.py','latticevale_readonly.py','latticevale_arch.py','hardware-capabilities.py','backend-capabilities.py','runtime-policy.py','diagnostics.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
+    foreach ($file in @('compose.yaml','Dockerfile.qmd','patch-qmd-bind.py','configure-stack.sh','manage.sh','state-audit.py','latticevale_readonly.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
         Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot "stack\$file") "$stageLinux/stack/$file" '0600'
     }
     $optionsJson = $options | ConvertTo-Json -Depth 8 -Compress
     $optionsB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($optionsJson))
-    # Derived Windows hardware state is transported separately from durable user intent.
-    # Linux recomputes all WSL-visible state and fingerprints the combined capability model.
-    $windowsHardwareSnapshot = Get-LatticeValeWindowsHardwareSnapshot $bundleVersion
-    $windowsHardwareJson = $windowsHardwareSnapshot | ConvertTo-Json -Depth 6 -Compress
-    $windowsHardwareB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($windowsHardwareJson))
     $forceManagedUpdateArg = if ($forceManagedUpdate) { 'true' } else { 'false' }
-    Invoke-LatticeValeWslInteractiveGuarded $DistroName @('-d', $DistroName, '-u', 'root', '--', 'bash', "$stageLinux/linux/bootstrap.sh", $linuxUser, $optionsB64, $bundleVersion, $forceManagedUpdateArg, $windowsHardwareB64) 14400 30 20 4
+    Invoke-LatticeValeWslInteractiveGuarded $DistroName @('-d', $DistroName, '-u', 'root', '--', 'bash', "$stageLinux/linux/bootstrap.sh", $linuxUser, $optionsB64, $bundleVersion, $forceManagedUpdateArg) 14400 30 20 4
 } finally {
     [void](Invoke-WslDirectCapture $DistroName 'root' 'rm' @('-rf', $stageLinux))
 }

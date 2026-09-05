@@ -2,7 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.46','14.5.47','14.6.0'}, version
+assert version == '14.5.46', version
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 boot = (ROOT / 'linux' / 'bootstrap.sh').read_text(encoding='utf-8')
 cfg = (ROOT / 'stack' / 'configure-stack.sh').read_text(encoding='utf-8')
@@ -60,16 +60,9 @@ assert cfg.index('apply_honcho_timeout_policy() {') < cfg.index('stage_prepare_c
 assert cfg.index('apply_honcho_timeout_policy data/hermes/honcho.json') > cfg.index('stage_integrations() {')
 
 # DirectML adds a WSL-host workload that did not exist in the stable v14.5.2 topology.
-assert 'resource_host_memory_budget() {' in cfg
-if version == '14.6.0':
-    assert 'runtime-policy.py host-budget' in cfg
-    assert 'RESOURCE_POLICY_MODE]=adaptive' in cfg
-    assert 'directml_reserve_mib=$((mem_mib/4))' not in cfg
-    assert 'directml_reserve_mib=2048' not in cfg and 'directml_reserve_mib=4096' not in cfg
-else:
-    assert 'managed_ollama" == true && "$directml_selected" == false' in cfg
-    assert 'directml_reserve_mib=$((mem_mib/4))' in cfg
-    assert 'directml_reserve_mib=2048' in cfg and 'directml_reserve_mib=4096' in cfg
+assert 'managed_ollama_enabled && ! directml_text_enabled' in cfg
+assert 'directml_reserve_mib=$((mem_mib/4))' in cfg
+assert 'directml_reserve_mib=2048' in cfg and 'directml_reserve_mib=4096' in cfg
 
 # Compact WSL CPU allocations leave CPU for Docker/WSL housekeeping; repeated hard
 # DirectML starts switch to lightweight fallback rather than hot-looping torch imports.
