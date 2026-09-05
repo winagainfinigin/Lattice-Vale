@@ -24,8 +24,59 @@ port() { opt_port directmlPort 11436; }
 model() { local v; v="$(opt_text directmlTextModel)"; [[ -n "$v" ]] || v='Qwen/Qwen2.5-1.5B-Instruct'; printf '%s' "$v"; }
 fallback_model() { local v; v="$(opt_text localTextModel)"; [[ -n "$v" ]] || v='qwen3.5:4b'; printf '%s' "$v"; }
 ollama_backend() { local v; v="$(opt_text ollamaBackend)"; [[ "$v" == managed || "$v" == windows-native ]] || v=managed; printf '%s' "$v"; }
-adapter_name() { opt_text directmlAdapterName; }
-gpu_vendor() { local v; v="$(opt_text directmlGpuVendor)"; [[ "$v" == amd || "$v" == nvidia || "$v" == intel || "$v" == qualcomm ]] || v=''; printf '%s' "$v"; }
+adapter_name() {
+  local v
+  v="$(jq -r '.adapterSelection.selected.name // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
+  [[ -n "$v" ]] || v="$(opt_text directmlAdapterName)"
+  printf '%s' "$v"
+}
+gpu_vendor() {
+  local v
+  v="$(jq -r '.adapterSelection.selected.vendor // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
+  [[ -n "$v" ]] || v="$(opt_text directmlGpuVendor)"
+  [[ "$v" == amd || "$v" == nvidia || "$v" == intel || "$v" == qualcomm || "$v" == other ]] || v=''
+  printf '%s' "$v"
+}
+declared_vram_mib() {
+  local v=0
+  if [[ -s data/latticevale/backend-capabilities.json && ! -L data/latticevale/backend-capabilities.json ]]; then
+    v="$(jq -r '.adapterSelection.selected.directmlAdmission.capacityMiB // 0' data/latticevale/backend-capabilities.json 2>/dev/null || printf 0)"
+  fi
+  # Migration compatibility only: older 14.5.x stacks stored a selected-adapter
+  # value in install-options.json. New 14.6 runtime admission uses derived state.
+  if [[ ! "$v" =~ ^[0-9]+$ || "$v" -le 0 ]]; then
+    v="$(jq -r '.directmlVramMiB // 0' install-options.json 2>/dev/null || printf 0)"
+  fi
+  [[ "$v" =~ ^[0-9]+$ && "$v" -ge 0 && "$v" -le 1048576 ]] || v=0
+  printf '%s' "$v"
+}
+declared_vram_source() {
+  local v legacy_v
+  v="$(jq -r '.adapterSelection.selected.directmlAdmission.source // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
+  if [[ -z "$v" ]]; then
+    legacy_v="$(jq -r '.directmlVramMiB // 0' install-options.json 2>/dev/null || printf 0)"
+    if [[ "$legacy_v" =~ ^[0-9]+$ && "$legacy_v" -ge 256 ]]; then
+      v=legacy-install-options
+    else
+      v=unavailable
+    fi
+  fi
+  printf '%s' "$v"
+}
+declared_vram_confidence() {
+  local v legacy_v
+  v="$(jq -r '.adapterSelection.selected.directmlAdmission.confidence // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
+  if [[ -z "$v" ]]; then
+    legacy_v="$(jq -r '.directmlVramMiB // 0' install-options.json 2>/dev/null || printf 0)"
+    if [[ "$legacy_v" =~ ^[0-9]+$ && "$legacy_v" -ge 256 ]]; then
+      v=legacy
+    else
+      v=none
+    fi
+  fi
+  printf '%s' "$v"
+}
+directml_env_adapter() { adapter_name; }
 
 log_msg() {
   mkdir -p logs
@@ -56,6 +107,49 @@ python_bin() {
 
 requirements_digest() { sha256sum "$requirements" | awk '{print $1}'; }
 
+# WSL's D3D12 translation layer chooses the exposed adapter before torch-directml
+# imports.  Saving an adapter in Python alone is therefore too late on multi-GPU
+# systems.  Microsoft documents MESA_D3D12_DEFAULT_ADAPTER_NAME for this purpose.
+directml_runtime_fingerprint() {
+  local material='' p
+  material="kernel=$(uname -r 2>/dev/null || true)|hardware=$(jq -r '.hardwareFingerprint // empty' data/latticevale/hardware-capabilities.json 2>/dev/null || true)|backend=$(jq -r '.backendFingerprint // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)|adapter=$(adapter_name)|vendor=$(gpu_vendor)|vram=$(declared_vram_mib)|vram_source=$(declared_vram_source)|req=$(requirements_digest 2>/dev/null || true)"
+  for p in /dev/dxg /usr/lib/wsl/lib/libd3d12.so /usr/lib/wsl/lib/libd3d12core.so /usr/lib/wsl/lib/libdxcore.so; do
+    if [[ -e "$p" ]]; then
+      material+="|$p=$(stat -Lc '%t:%T:%s:%Y' "$p" 2>/dev/null || true)"
+    else
+      material+="|$p=missing"
+    fi
+  done
+  printf '%s' "$material" | sha256sum | awk '{print $1}'
+}
+
+write_force_fallback() {
+  local reason="$1" fp
+  fp="$(directml_runtime_fingerprint 2>/dev/null || true)"
+  {
+    printf 'VERSION=14.6.0\n'
+    printf 'TIME=%s\n' "$(date --iso-8601=seconds)"
+    printf 'FINGERPRINT=%s\n' "$fp"
+    printf 'REASON=%s\n' "$reason"
+  } >"$force_fallback_file"
+  chmod 0600 "$force_fallback_file" 2>/dev/null || true
+}
+
+reconcile_force_fallback() {
+  [[ -s "$force_fallback_file" && ! -L "$force_fallback_file" ]] || return 0
+  local saved current marker_version
+  marker_version="$(sed -n 's/^VERSION=//p' "$force_fallback_file" 2>/dev/null | head -n1)"
+  saved="$(sed -n 's/^FINGERPRINT=//p' "$force_fallback_file" 2>/dev/null | head -n1)"
+  current="$(directml_runtime_fingerprint 2>/dev/null || true)"
+  # v14.5.46 markers carried no fingerprint.  Retry once after upgrading to the
+  # corrected adapter-selection/runtime fingerprint implementation.  Thereafter
+  # retry automatically only when the relevant WSL GPU/runtime shape changes.
+  if [[ "$marker_version" != 14.6.0 || -z "$saved" || ( -n "$current" && "$saved" != "$current" ) ]]; then
+    log_msg 'DirectML runtime fingerprint changed (or legacy fallback marker found); clearing fallback marker for one fresh hardware probe'
+    rm -f "$force_fallback_file"
+  fi
+}
+
 install_dependencies() {
   directml_selected || return 0
   mkdir -p "$state_dir" "$hf_cache" logs
@@ -76,7 +170,7 @@ install_dependencies() {
   # runtime packages even on AMD/Intel DirectML systems. The DirectML venv is
   # installer-owned, so repair may safely rebuild only this venv when that stale
   # dependency shape is detected.
-  if "$venv/bin/python" - <<'PY_DML_ENV_SHAPE' >/dev/null 2>&1
+  if env MESA_D3D12_DEFAULT_ADAPTER_NAME="$(directml_env_adapter)" "$venv/bin/python" - <<'PY_DML_ENV_SHAPE' >/dev/null 2>&1
 import importlib.metadata as md
 try:
     import torch
@@ -100,7 +194,7 @@ PY_DML_ENV_SHAPE
     current=''
   fi
 
-  if [[ "$current" == "$wanted" ]] && "$venv/bin/python" - <<'PY_PROBE_DEPS' >/dev/null 2>&1
+  if [[ "$current" == "$wanted" ]] && env MESA_D3D12_DEFAULT_ADAPTER_NAME="$(directml_env_adapter)" "$venv/bin/python" - <<'PY_PROBE_DEPS' >/dev/null 2>&1
 import importlib.metadata as md
 import torch,torch_directml,transformers
 assert '+cpu' in str(torch.__version__).lower()
@@ -121,7 +215,7 @@ PY_PROBE_DEPS
      timeout --foreground --kill-after=30s 3600s "$venv/bin/python" -m pip install --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu 'torch==2.4.1+cpu' 'torchvision==0.19.1+cpu' && \
      timeout --foreground --kill-after=30s 1800s "$venv/bin/python" -m pip install --disable-pip-version-check -r "$requirements" && \
      timeout --foreground --kill-after=30s 1800s "$venv/bin/python" -m pip install --disable-pip-version-check --no-deps 'torch-directml==0.2.5.dev240914'; then
-    if "$venv/bin/python" - <<'PY_VERIFY_DML'
+    if env MESA_D3D12_DEFAULT_ADAPTER_NAME="$(directml_env_adapter)" "$venv/bin/python" - <<'PY_VERIFY_DML'
 import importlib.metadata as md
 import torch,torch_directml,transformers
 bad=sorted((d.metadata.get('Name') or '') for d in md.distributions() if (d.metadata.get('Name') or '').lower().startswith('nvidia-'))
@@ -190,40 +284,56 @@ probe_health() {
 }
 
 directml_cpu_threads() {
-  local cpus
-  cpus="$(nproc 2>/dev/null || printf 2)"
-  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 ]] || cpus=2
-  cpus=$(((cpus+1)/2))
-  (( cpus < 1 )) && cpus=1
-  (( cpus > 4 )) && cpus=4
-  printf '%s' "$cpus"
+  local planned cpus
+  planned="$(sed -n 's/^DIRECTML_CPU_THREADS=//p' .latticevale-resource-state 2>/dev/null | head -n1 || true)"
+  if [[ "$planned" =~ ^[0-9]+$ && "$planned" -ge 1 ]]; then printf '%s' "$planned"; return 0; fi
+  cpus="$(nproc 2>/dev/null || printf 1)"
+  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 ]] || cpus=1
+  python3 runtime-policy.py directml-cpu "$cpus" 2>/dev/null || printf 1
 }
 
 start_worker() {
-  local host py native_url='' pid cpu_threads host_reserve
+  local host py native_url='' pid cpu_threads host_reserve max_new_tokens context_length mem_mib vram_mib
   host="$(docker_host_gateway_ip)" || { log_msg 'waiting for Docker default host-gateway'; return 1; }
   py="$(python_bin)" || return 1
   if [[ "$(ollama_backend)" == windows-native ]]; then native_url="$(native_fallback_url 2>/dev/null || true)"; fi
   mkdir -p logs "$state_dir" "$hf_cache"
+  reconcile_force_fallback
   stop_worker
   cpu_threads="$(directml_cpu_threads)"
+  context_length="$(sed -n 's/^DIRECTML_CONTEXT_LENGTH=//p' .env 2>/dev/null | head -n1 || true)"
+  if [[ ! "$context_length" =~ ^[0-9]+$ ]]; then
+    mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || printf 0)"
+    vram_mib="$(declared_vram_mib)"
+    context_length="$(python3 runtime-policy.py directml-context "$mem_mib" "$vram_mib" 2>/dev/null || printf 4096)"
+  fi
   host_reserve="$(sed -n 's/^DIRECTML_HOST_RESERVE_MIB=//p' .latticevale-resource-state 2>/dev/null | head -n1 || true)"
   [[ "$host_reserve" =~ ^[0-9]+$ ]] || host_reserve=2048
+  max_new_tokens="$(sed -n 's/^DIRECTML_MAX_NEW_TOKENS=//p' .latticevale-resource-state 2>/dev/null | head -n1 || true)"
+  if [[ ! "$max_new_tokens" =~ ^[0-9]+$ ]]; then
+    local current_context
+    current_context="$(sed -n 's/^DIRECTML_CONTEXT_LENGTH=//p' .env 2>/dev/null | head -n1 || printf 4096)"
+    max_new_tokens="$(python3 runtime-policy.py directml-generation "$current_context" 2>/dev/null || printf 512)"
+  fi
   log_msg "starting DirectML gateway worker listen=${host}:$(port) model=$(model) fallback=$(ollama_backend) cpu_threads=${cpu_threads} host_reserve=${host_reserve}MiB"
   env \
     HF_HOME="$PWD/$hf_cache" \
     TOKENIZERS_PARALLELISM=false \
     LATTICEVALE_STACK_DIR="$PWD" \
     LATTICEVALE_DIRECTML_MODEL="$(model)" \
-    LATTICEVALE_DIRECTML_CONTEXT="$(sed -n 's/^DIRECTML_CONTEXT_LENGTH=//p' .env 2>/dev/null | head -n1 || printf 8192)" \
+    LATTICEVALE_DIRECTML_CONTEXT="$context_length" \
     LATTICEVALE_DIRECTML_VRAM_LIMIT_PCT="$(sed -n 's/^DIRECTML_VRAM_LIMIT_PCT=//p' .env 2>/dev/null | head -n1 || printf 75)" \
     LATTICEVALE_DIRECTML_ADAPTER_NAME="$(adapter_name)" \
     LATTICEVALE_DIRECTML_GPU_VENDOR="$(gpu_vendor)" \
+    LATTICEVALE_DIRECTML_VRAM_MIB="$(declared_vram_mib)" \
+    LATTICEVALE_DIRECTML_VRAM_SOURCE="$(declared_vram_source)" \
+    LATTICEVALE_DIRECTML_VRAM_CONFIDENCE="$(declared_vram_confidence)" \
+    MESA_D3D12_DEFAULT_ADAPTER_NAME="$(directml_env_adapter)" \
     LATTICEVALE_DIRECTML_FORCE_FALLBACK="$(if [[ -e "$force_fallback_file" ]]; then printf 1; else printf 0; fi)" \
     LATTICEVALE_OLLAMA_TEXT_MODEL="$(fallback_model)" \
     LATTICEVALE_OLLAMA_BACKEND="$(ollama_backend)" \
     LATTICEVALE_NATIVE_OLLAMA_URL="$native_url" \
-    LATTICEVALE_DIRECTML_MAX_NEW_TOKENS=512 \
+    LATTICEVALE_DIRECTML_MAX_NEW_TOKENS="$max_new_tokens" \
     LATTICEVALE_DIRECTML_IDLE_UNLOAD_SECONDS=300 \
     LATTICEVALE_DIRECTML_HOST_RESERVE_MIB="$host_reserve" \
     LATTICEVALE_DIRECTML_CPU_THREADS="$cpu_threads" \
@@ -260,7 +370,7 @@ supervise_gateway() {
         failures=$((failures+1))
         if (( failures >= 2 )) && [[ ! -e "$force_fallback_file" ]]; then
           log_msg 'DirectML worker failed twice before reaching health; switching to lightweight Ollama fallback to protect WSL host resources'
-          printf '%s\n' "$(date --iso-8601=seconds) repeated DirectML worker startup failure" >"$force_fallback_file"
+          write_force_fallback 'repeated DirectML worker startup failure'
           failures=0; delay=5
         else
           (( delay < 60 )) && delay=$((delay*3))
@@ -328,7 +438,7 @@ PY_SELF_PAYLOAD
     # this marker after rebuilding/revalidating the DirectML environment.
     echo 'WARNING: DirectML model self-test terminated without an HTTP response. Switching this installation to managed Ollama fallback mode until the next Resume / repair retries DirectML.' >&2
     mkdir -p "$state_dir"
-    printf '%s\n' "$(date --iso-8601=seconds) hard DirectML/model self-test failure" >"$force_fallback_file"
+    write_force_fallback 'hard DirectML/model self-test failure'
     stop_gateway
     rm -f "$disabled_file"
     start_gateway || return 1
@@ -340,9 +450,17 @@ PY_SELF_PAYLOAD
   printf '%s\n' "$backend" >"$last_backend"
   if [[ "$backend" == directml ]]; then
     rm -f "$force_fallback_file"
+    python3 latticevale_arch.py record-health directml verified-working DML_RUNTIME_VERIFIED --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --detail "DirectML model self-test passed" >/dev/null 2>&1 || true
+    python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json >/dev/null 2>&1 || true
     echo "DirectML inference verification passed with model $(model)."
   else
     direct_error="$(jq -r '.x_latticevale_directml_error // empty' <<<"$response")"
+    local reason_code=DML_MODEL_EXECUTION_FAILED
+    if [[ "$direct_error" == *'no trusted bounded memory-capacity source'* || "$direct_error" == *'VRAM capacity'* ]]; then
+      reason_code=DML_VRAM_CAPACITY_UNAVAILABLE
+    fi
+    python3 latticevale_arch.py record-health directml failed "$reason_code" --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --detail "${direct_error:-DirectML model execution unavailable}" >/dev/null 2>&1 || true
+    python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json >/dev/null 2>&1 || true
     echo "WARNING: DirectML gateway is operational but this test used Ollama fallback. ${direct_error:-DirectML model execution was unavailable.}" >&2
   fi
 }
@@ -360,6 +478,34 @@ case "${1:-status}" in
     host="$(docker_host_gateway_ip)" || exit 1
     printf 'http://%s:%s/v1' "$host" "$(port)"
     ;;
+  diagnose)
+    echo "selected=$(if directml_selected; then printf true; else printf false; fi)"
+    echo "adapter=$(adapter_name)"
+    echo "vendor=$(gpu_vendor)"
+    echo "declared_vram_mib=$(declared_vram_mib)"
+    echo "declared_vram_source=$(declared_vram_source)"
+    echo "declared_vram_confidence=$(declared_vram_confidence)"
+    echo "mesa_d3d12_adapter=$(directml_env_adapter)"
+    echo "runtime_fingerprint=$(directml_runtime_fingerprint 2>/dev/null || true)"
+    for p in /dev/dxg /usr/lib/wsl/lib/libd3d12.so /usr/lib/wsl/lib/libd3d12core.so /usr/lib/wsl/lib/libdxcore.so; do [[ -e "$p" ]] && echo "$p=present" || echo "$p=missing"; done
+    [[ -e "$force_fallback_file" ]] && { echo 'force_fallback=present'; cat "$force_fallback_file"; } || echo 'force_fallback=absent'
+    if [[ -x "$venv/bin/python" ]]; then
+      env MESA_D3D12_DEFAULT_ADAPTER_NAME="$(directml_env_adapter)" LATTICEVALE_DIRECTML_VRAM_MIB="$(declared_vram_mib)" LATTICEVALE_DIRECTML_VRAM_SOURCE="$(declared_vram_source)" LATTICEVALE_DIRECTML_VRAM_CONFIDENCE="$(declared_vram_confidence)" "$venv/bin/python" - <<'PY_DIAG_DML'
+import torch, torch_directml
+print(f'torch={torch.__version__}')
+print(f'device_count={torch_directml.device_count()}')
+for i in range(int(torch_directml.device_count())):
+    try: name=torch_directml.device_name(i)
+    except Exception as exc: name=f'<name-error:{exc}>'
+    try: mem=torch_directml.gpu_memory(i) if hasattr(torch_directml,'gpu_memory') else 'api-missing'
+    except Exception as exc: mem=f'<memory-error:{exc}>'
+    print(f'adapter[{i}]={name}; gpu_memory={mem}')
+d=torch_directml.device(); value=(torch.tensor([1.0]).to(d)+2.0).cpu().item(); print(f'default_device={d}; tensor_result={value}')
+PY_DIAG_DML
+    else
+      echo 'directml_venv=missing'
+    fi
+    ;;
   status)
     if ! directml_selected; then echo 'inactive (DirectML text backend not selected)'; exit 0; fi
     if health="$(probe_health 2>/dev/null)"; then
@@ -375,5 +521,5 @@ case "${1:-status}" in
       exit 1
     fi
     ;;
-  *) echo 'Usage: ./directml-gateway.sh {install|start|stop|restart|supervise|self-test|health|host|base-url|status}' >&2; exit 2 ;;
+  *) echo 'Usage: ./directml-gateway.sh {install|start|stop|restart|supervise|self-test|health|host|base-url|diagnose|status}' >&2; exit 2 ;;
 esac

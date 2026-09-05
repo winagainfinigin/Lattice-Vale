@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
-import re, subprocess, tempfile
+import re, subprocess, tempfile, shutil, os, signal, time
+from types import SimpleNamespace
 import yaml
 ROOT=Path(__file__).resolve().parents[1]
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
@@ -13,12 +14,80 @@ install=(root/'installer/install.ps1').read_text(encoding='utf-8')
 verify=(root/'installer/verify-release.ps1').read_text(encoding='utf-8')
 shared=(root/'tools/ReleaseManifest.ps1').read_text(encoding='utf-8')
 generator=(root/'tools/New-SourceManifest.ps1').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
+version=(ROOT/'VERSION.txt').read_text().strip()
+
+
+def _process_group_exists(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _reap_process_group(pgid, grace=1.5):
+    """Bounded cleanup for descendants created by one isolated legacy harness."""
+    if not _process_group_exists(pgid):
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline=time.monotonic()+grace
+    while time.monotonic() < deadline:
+        if not _process_group_exists(pgid):
+            return
+        time.sleep(0.05)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    deadline=time.monotonic()+1.0
+    while time.monotonic() < deadline:
+        if not _process_group_exists(pgid):
+            return
+        time.sleep(0.05)
+    if _process_group_exists(pgid):
+        raise AssertionError(f"legacy bash fixture process group {pgid} did not terminate")
+
+
+def run_bash_fixture(harness, cwd, timeout=20):
+    """Run a legacy shell harness in an isolated process group and reap descendants.
+
+    The assertions stay unchanged. File-backed capture plus a private session prevents a
+    descendant from inheriting the CI pipe, and bounded process-group cleanup guarantees
+    that the fixture itself terminates even when a historical shell helper leaves work
+    behind after its parent shell exits.
+    """
+    with tempfile.TemporaryFile(mode="w+") as out, tempfile.TemporaryFile(mode="w+") as err:
+        proc=subprocess.Popen(
+            ['bash','-c',harness], cwd=cwd, text=True, stdout=out, stderr=err,
+            start_new_session=True,
+        )
+        pgid=proc.pid
+        try:
+            rc=proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired as exc:
+            _reap_process_group(pgid)
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            raise AssertionError(f"legacy bash fixture exceeded {timeout}s") from exc
+        finally:
+            _reap_process_group(pgid)
+        out.seek(0); err.seek(0)
+        return SimpleNamespace(returncode=rc, stdout=out.read(), stderr=err.read())
+
+assert version in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
 assert 'schema = $compat.InstallOptionsSchema' in ps
 assert "ollamaAcceleration = $ollamaAcceleration" in ps
 assert "$options.Remove('ollamaAcceleration')" in ps and 'Legacy same-line repair: preserving the existing Ollama image/runtime choice' in ps
 assert "containerResourceLimits = $containerResourceLimits" in ps
-assert "@('auto','cpu','nvidia','amd')" in ps
+assert "@('auto','cpu','nvidia','amd','vulkan')" in ps if version in {'14.5.47','14.6.0'} else "@('auto','cpu','nvidia','amd')" in ps
 assert 'install_nvidia_container_toolkit_if_needed' in boot
 assert 'https://nvidia.github.io/libnvidia-container/gpgkey' in boot
 assert 'unexpected package origin' in boot and 'nvidia\\.github\\.io/libnvidia-container/' in boot
@@ -62,6 +131,9 @@ end=conf.index('\nchoose_ollama_context_length()', start)
 functions=conf[start:end].replace('/proc/meminfo', 'fake-meminfo')
 with tempfile.TemporaryDirectory() as td:
     td=Path(td)
+    shutil.copy2(ROOT/'stack/runtime-policy.py', td/'runtime-policy.py')
+    shutil.copy2(ROOT/'stack/latticevale_arch.py', td/'latticevale_arch.py')
+    shutil.copy2(ROOT/'compatibility.conf', td/'compatibility.conf')
     harness=r'''set -Eeuo pipefail
 set_env() {
   local file="$1" key="$2" value="$3"
@@ -84,6 +156,7 @@ opt_text() { jq -r ".${1} // empty" install-options.json; }
 local_ai_enabled() { [[ "$(opt_bool honcho)" == true || "$(opt_bool hermesLocalAI)" == true ]]; }
 ollama_backend() { local value; value="$(opt_text ollamaBackend)"; [[ "$value" == managed || "$value" == windows-native ]] || value=managed; printf '%s' "$value"; }
 managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed ]]; }
+directml_text_enabled() { return 1; }
 ollama_gpu_metrics() { printf '1:8192:8192:8192\n'; }
 ''' + functions + r'''
 cat > install-options.json <<'JSON_OPTIONS'
@@ -92,7 +165,7 @@ JSON_OPTIONS
 printf 'MemTotal: 16777216 kB\n' > fake-meminfo
 write_latticevale_compose_overlay cpu true
 '''
-    r=subprocess.run(['bash','-c',harness],cwd=td,text=True,capture_output=True,timeout=20)
+    r=run_bash_fixture(harness, td, 45)
     assert r.returncode==0, r.stderr
     overlay=(td/'compose.latticevale.yaml').read_text()
     env=(td/'.env').read_text()
@@ -110,6 +183,9 @@ write_latticevale_compose_overlay cpu true
 for accel in ('nvidia','amd'):
     with tempfile.TemporaryDirectory() as td:
         td=Path(td)
+        shutil.copy2(ROOT/'stack/runtime-policy.py', td/'runtime-policy.py')
+        shutil.copy2(ROOT/'stack/latticevale_arch.py', td/'latticevale_arch.py')
+        shutil.copy2(ROOT/'compatibility.conf', td/'compatibility.conf')
         harness=r'''set -Eeuo pipefail
 set_env() {
   local file="$1" key="$2" value="$3"
@@ -132,13 +208,14 @@ opt_text() { jq -r ".${1} // empty" install-options.json; }
 local_ai_enabled() { [[ "$(opt_bool honcho)" == true || "$(opt_bool hermesLocalAI)" == true ]]; }
 ollama_backend() { local value; value="$(opt_text ollamaBackend)"; [[ "$value" == managed || "$value" == windows-native ]] || value=managed; printf '%s' "$value"; }
 managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed ]]; }
+directml_text_enabled() { return 1; }
 ollama_gpu_metrics() { printf '1:8192:8192:8192\n'; }
 ''' + functions + r'''
 cat > install-options.json <<'JSON_OPTIONS'
 {"hermesLocalAI":true,"ollamaBackend":"managed"}
 JSON_OPTIONS
 ''' + f"printf 'MemTotal: 16777216 kB\\n' > fake-meminfo\nwrite_latticevale_compose_overlay {accel} false\n"
-        r=subprocess.run(['bash','-c',harness],cwd=td,text=True,capture_output=True,timeout=20)
+        r=run_bash_fixture(harness, td, 45)
         assert r.returncode==0, (accel,r.stderr)
         parsed=yaml.safe_load((td/'compose.latticevale.yaml').read_text())
         ollama=parsed['services']['ollama']
@@ -182,6 +259,8 @@ PY_ENV
 '''
 with tempfile.TemporaryDirectory() as td:
     td=Path(td)
+    shutil.copy2(ROOT/'stack/runtime-policy.py', td/'runtime-policy.py')
+    shutil.copy2(ROOT/'stack/latticevale_arch.py', td/'latticevale_arch.py')
     (td/'install-options.json').write_text('{"ollamaAcceleration":"cpu"}\n')
     (td/'.env').write_text(
         'OLLAMA_IMAGE=example/ollama:custom\n'
@@ -189,7 +268,7 @@ with tempfile.TemporaryDirectory() as td:
         'LATTICEVALE_OLLAMA_ACCELERATION=cpu\n'
     )
     harness='set -Eeuo pipefail\n'+set_env_helper+'\nollama_backend(){ printf managed; }\nOLLAMA_RESOLVED_ACCELERATION=cpu\nenv_was_new=false\n'+image_logic+'\n'
-    r=subprocess.run(['bash','-c',harness],cwd=td,text=True,capture_output=True,timeout=20)
+    r=run_bash_fixture(harness, td, 45)
     assert r.returncode==0, r.stderr
     env=(td/'.env').read_text()
     assert 'OLLAMA_IMAGE=example/ollama:custom\n' in env
@@ -198,6 +277,8 @@ with tempfile.TemporaryDirectory() as td:
 
 with tempfile.TemporaryDirectory() as td:
     td=Path(td)
+    shutil.copy2(ROOT/'stack/runtime-policy.py', td/'runtime-policy.py')
+    shutil.copy2(ROOT/'stack/latticevale_arch.py', td/'latticevale_arch.py')
     (td/'install-options.json').write_text('{"ollamaAcceleration":"amd"}\n')
     (td/'.env').write_text(
         'OLLAMA_IMAGE=ollama/ollama:0.32.14\n'
@@ -205,7 +286,7 @@ with tempfile.TemporaryDirectory() as td:
         'LATTICEVALE_OLLAMA_ACCELERATION=cpu\n'
     )
     harness='set -Eeuo pipefail\n'+set_env_helper+'\nollama_backend(){ printf managed; }\nOLLAMA_RESOLVED_ACCELERATION=amd\nenv_was_new=false\n'+image_logic+'\n'
-    r=subprocess.run(['bash','-c',harness],cwd=td,text=True,capture_output=True,timeout=20)
+    r=run_bash_fixture(harness, td, 45)
     assert r.returncode==0, r.stderr
     env=(td/'.env').read_text()
     assert 'OLLAMA_IMAGE=ollama/ollama:0.32.14-rocm\n' in env

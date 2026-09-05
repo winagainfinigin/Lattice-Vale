@@ -15,11 +15,11 @@ boot = (root / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 uninstall = (root / 'Uninstall-LatticeVale.ps1').read_text(encoding='utf-8')
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
 
-assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
+assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, version
 
-# Clean + repair adoption must both converge on the current policy v11. The startup helper is the
+# Clean + repair adoption must both converge on the current canonical policy. The startup helper is the
 # repair/cold-start migration backstop when a saved adaptive overlay is stale.
-assert 'POLICY_VERSION=11' in cs
+assert '[POLICY_VERSION]=12' in cs
 assert './configure-stack.sh --refresh-resource-policy' in boot
 assert "compose_files='compose.yaml'" in cs
 assert "compose_files+=':compose.latticevale.yaml'" in cs
@@ -38,8 +38,13 @@ for source in (cs, boot):
 def run_refresh(mode: str, seed_v2: bool = False) -> Path:
     td = Path(tempfile.mkdtemp(prefix=f'lv-1443-{mode}-'))
     shutil.copy2(root / 'stack/configure-stack.sh', td / 'configure-stack.sh')
+    shutil.copy2(root / 'stack/runtime-policy.py', td / 'runtime-policy.py')
+    shutil.copy2(root / 'stack/latticevale_arch.py', td / 'latticevale_arch.py')
+    shutil.copy2(root / 'stack/hardware-capabilities.py', td / 'hardware-capabilities.py')
+    shutil.copy2(root / 'stack/backend-capabilities.py', td / 'backend-capabilities.py')
+    shutil.copy2(root / 'compatibility.conf', td / 'compatibility.conf')
     options = {
-        'schema': 19,
+        'schema': 22,
         'installerVersion': version,
         'installerMode': mode,
         'timezone': 'Etc/UTC',
@@ -49,7 +54,7 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
         'qmd': True,
         'honcho': False,
         'hermesLocalAI': False,
-        # Keep this integration fixture host-RAM independent under policy v11: Honcho
+        # Keep this integration fixture host-RAM independent under the adaptive policy: Honcho
         # remains selected, but native-Windows Ollama means the WSL container budget
         # does not need to include a managed Ollama floor. The dedicated v14.5.1
         # hardware-matrix fixture covers managed-Ollama viability thresholds.
@@ -76,7 +81,7 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
         nobody = pwd.getpwnam('nobody')
         td.chmod(0o777)
         (td / 'configure-stack.sh').chmod(0o755)
-        for owned in (td / 'configure-stack.sh', td / 'install-options.json', td / 'compose.override.yaml', td / '.latticevale-resource-state'):
+        for owned in (td / 'configure-stack.sh', td / 'runtime-policy.py', td / 'latticevale_arch.py', td / 'hardware-capabilities.py', td / 'backend-capabilities.py', td / 'compatibility.conf', td / 'install-options.json', td / 'compose.override.yaml', td / '.latticevale-resource-state'):
             if owned.exists():
                 os.chown(owned, nobody.pw_uid, nobody.pw_gid)
         def drop_privileges():
@@ -94,13 +99,13 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
         preexec_fn=preexec,
     )
     assert proc.returncode == 0, proc.stdout
-    assert (td / '.latticevale-resource-state').read_text(encoding='utf-8').startswith('POLICY_VERSION=11\n')
+    assert (td / '.latticevale-resource-state').read_text(encoding='utf-8').startswith('POLICY_VERSION=12\n')
     env_line = next(x for x in (td / '.env').read_text(encoding='utf-8').splitlines() if x.startswith('COMPOSE_FILE='))
     assert env_line == 'COMPOSE_FILE=compose.yaml:compose.latticevale.yaml:compose.override.yaml', env_line
     overlay = yaml.safe_load((td / 'compose.latticevale.yaml').read_text(encoding='utf-8'))
     services = overlay['services']
-    assert str(services['hermes']['environment']['MALLOC_ARENA_MAX']) in {'2', '4'}
-    assert str(services['synapse']['environment']['SYNAPSE_CACHE_FACTOR']) in {'0.25', '0.35', '0.5', '0.50'}
+    assert 2 <= int(services['hermes']['environment']['MALLOC_ARENA_MAX']) <= 8
+    assert 0.20 <= float(services['synapse']['environment']['SYNAPSE_CACHE_FACTOR']) <= 0.50
     assert 'shared_buffers=' in ' '.join(map(str, services['synapse-db']['command']))
     return td
 

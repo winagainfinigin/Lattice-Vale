@@ -1,3 +1,15 @@
+## v14.6.0 canonical architecture source policy
+
+- **No new redistributed GPU/runtime binary:** the canonical hardware/backend/resource architecture is first-party Python/PowerShell/Bash and uses standard OS/runtime interfaces already required by LatticeVale.
+- **Capability evidence remains upstream-owned:** Microsoft documents PyTorch with DirectML inside WSL2 (`https://learn.microsoft.com/windows/ai/directml/pytorch-wsl`) on supported Windows 11/DirectX 12 systems; LatticeVale uses that WSL DirectX/`torch-directml` path rather than assuming AMD DirectML must run natively on Windows. CUDA uses the existing NVIDIA WSL/container path; ROCm uses existing AMD Linux devices/runtime; Vulkan uses the existing WSL DRM/Vulkan/Ollama path; CPU remains the portable fallback. LatticeVale does not install or replace Windows/vendor display drivers.
+- **Derived state is local:** `hardware-capabilities.json`, `backend-capabilities.json`, backend health, diagnostics, and `runtime-policy.json` are generated from local machine/runtime state and are not fetched from or uploaded to a hosted LatticeVale service. Windows memory capacity can come from DXDiag XML/text or 64-bit display-driver registry evidence; legacy 32-bit/WMI telemetry is lower-bound-only.
+
+## v14.5.47 GPU runtime source policy
+
+- **Microsoft WSL GPU / D3D12 guidance:** LatticeVale uses the WSL-projected DirectX bridge and the documented `MESA_D3D12_DEFAULT_ADAPTER_NAME` adapter-selection environment for the saved Windows adapter before DirectML runtime import. No Microsoft GPU binary is redistributed.
+- **Microsoft DirectML / torch-directml:** the existing isolated pinned environment remains installer-owned and fallback-preserving; DirectML is in maintenance mode upstream, so LatticeVale treats tensor/model execution as runtime proof rather than assuming support from package installation alone.
+- **Ollama Vulkan:** the standard pinned Ollama image is reused. LatticeVale enables the upstream Vulkan path with `OLLAMA_VULKAN=1` only when WSL exposes DRM render devices and verifies real model offload before accepting GPU execution. No Vulkan driver package or container image is added to the repository.
+
 ## v14.5.46 GPU-onboarding source-policy note
 
 v14.5.46 uses the existing DirectML/Ollama/NVIDIA package sources but makes their selection/reuse/provisioning explicit in the questionnaire. Current upstream references used for the capability policy include Microsoft PyTorch DirectML on WSL (`https://learn.microsoft.com/windows/ai/directml/pytorch-wsl`), NVIDIA CUDA on WSL (`https://docs.nvidia.com/cuda/wsl-user-guide/`), Ollama GPU support (`https://docs.ollama.com/gpu`), Ollama Linux installation (`https://docs.ollama.com/linux`), and Ollama Docker GPU setup (`https://docs.ollama.com/docker`). No third-party binary is newly redistributed by LatticeVale.

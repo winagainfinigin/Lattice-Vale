@@ -44,6 +44,12 @@ manifest_generator=(RELEASE_ROOT/'tools/New-SourceManifest.ps1').read_text(encod
 readme=(RELEASE_ROOT/'docs/README.md').read_text(encoding='utf-8')
 audit=read('AUDIT.md')
 compatibility=read('compatibility.conf')
+arch=read('stack/latticevale_arch.py')
+hardware_caps=read('stack/hardware-capabilities.py')
+backend_caps=read('stack/backend-capabilities.py')
+runtime_policy=read('stack/runtime-policy.py')
+diagnostics=read('stack/diagnostics.py')
+release_policy=(RELEASE_ROOT/'LatticeVale-Core/release/release-content.json').read_text(encoding='utf-8')
 
 # PowerShell parse guard: a bare variable immediately followed by ':' is parsed
 # as a scoped/provider variable reference. Scan every shipped PowerShell file,
@@ -72,7 +78,7 @@ for _label,_source in _shipped_ps1:
                   f'PowerShell {_label} unbraced variable-before-colon at line {_lineno}: {_line.strip()}')
 
 # Bash syntax
-for rel in ('linux/bootstrap.sh','stack/configure-stack.sh','stack/manage.sh','stack/qmd-index-cycle.sh','stack/native-ollama-relay.sh'):
+for rel in ('linux/bootstrap.sh','stack/configure-stack.sh','stack/manage.sh','stack/qmd-index-cycle.sh','stack/native-ollama-relay.sh','stack/directml-gateway.sh'):
     r=subprocess.run(['bash','-n',str(ROOT/rel)],capture_output=True,text=True)
     check(r.returncode==0, f'bash -n failed for {rel}: {r.stderr.strip()}')
 
@@ -207,6 +213,19 @@ check('docker_required_packages=(docker-ce docker-ce-cli containerd.io docker-bu
 check('start_docker_daemon' in bootstrap and 'service docker start' in bootstrap and 'nohup dockerd' in bootstrap,'systemd/non-systemd Docker startup compatibility missing')
 check('selected_infrastructure_services() {' in configure and 'An empty selection is valid.' in configure and 'return 0\n}' in configure[configure.index('selected_infrastructure_services() {'):configure.index('service_ready_for_local_repair()')], 'empty optional infrastructure selection must return success under ERR tracing')
 
+# v14.6 canonical architecture ownership
+check(version == '14.6.0', 'release VERSION.txt must be 14.6.0')
+for marker in ('INSTALL_OPTIONS_SCHEMA=22','HARDWARE_CAPABILITIES_SCHEMA=1','BACKEND_CAPABILITIES_SCHEMA=1','BACKEND_HEALTH_SCHEMA=1','RUNTIME_POLICY_SCHEMA=12','DIAGNOSTICS_SCHEMA=1'):
+    check(marker in compatibility, f'missing canonical compatibility schema declaration: {marker}')
+check('latticevale_arch.py validate-options install-options.json --compat compatibility.conf' in configure, 'configure-stack must use canonical options validator')
+check('PY_OPTIONS_VALIDATE' not in configure and 'schema must be an integer from 1 through 21' not in configure, 'configure-stack must not carry a duplicate embedded options schema validator')
+check('def host_memory_budget(' in arch and 'runtime-policy.py host-budget' in configure and 'directml_reserve_mib=$((mem_mib/4))' not in configure, 'host memory budget must be owned by canonical architecture layer')
+check('atomic_write_json' in arch and 'os.replace' in arch, 'canonical derived-state writes must be atomic')
+check('hardware-capabilities.json' in hardware_caps and 'backend-capabilities.json' in backend_caps and 'runtime-policy.json' in runtime_policy, 'canonical derived-state generators missing')
+check('GPU_EXPLICIT_ADAPTER_NOT_FOUND' in arch and 'BACKEND_EXPLICIT_UNAVAILABLE_SAFE_FALLBACK' in arch, 'explicit GPU/backend intent preservation contract missing')
+check('docs/legacy-patch-notes/' in release_policy and 'Test-LatticeValeRepositoryOnlyRelativePath' in manifest_generator, 'declarative repository-only release-content policy missing')
+check('diagnose-backends' in manage and 'diagnose-policy' in manage and 'Diagnostics / compatibility test' in ps1, 'first-class architecture diagnostics missing')
+
 # Existing optional-service behavior retained
 for phrase in ('Install Hermes Dashboard?','Create multiple Hermes profiles?','Enable Hermes Kanban?','Install Matrix/Synapse?',
                'Use Windows Tailscale for private remote access?','Install SearXNG + Valkey?','Install QMD?','Install fully self-hosted Honcho memory?',
@@ -214,9 +233,9 @@ for phrase in ('Install Hermes Dashboard?','Create multiple Hermes profiles?','E
                'Start the stack automatically at Windows logon?'):
     check(phrase in ps1, f'missing user-facing option: {phrase}')
 check('Install Ubuntu Pro for WSL?' not in ps1 and 'Canonical.UbuntuProforWSL' not in ps1 and 'ubuntuPro' not in ps1,'Ubuntu Pro must not remain a current LatticeVale installer/config option')
-check('POLICY_VERSION=11' in configure and './configure-stack.sh --refresh-resource-policy' in manage and 'values.get("POLICY_VERSION") != "11"' in state_audit,'adaptive resource policy v11 convergence/audit markers missing')
+check('[POLICY_VERSION]=12' in configure and './configure-stack.sh --refresh-resource-policy' in manage and 'RUNTIME_POLICY_SCHEMA' in state_audit,'adaptive resource policy v12 convergence/audit markers missing')
 check('directml-gateway.py' in ps1 and 'directml-gateway.sh' in ps1 and 'directml-requirements.txt' in ps1,'DirectML bundle files must be installer-required')
-check('DIRECTML_HOST_RESERVE_MIB' in configure and 'directml_reserve_mib=$((mem_mib/4))' in configure and 'directml_reserve_mib=4096' in configure,'DirectML host RAM reserve must be dynamically fingerprinted outside Docker budget')
+check('DIRECTML_HOST_RESERVE_MIB' in configure and 'runtime-policy.py host-budget' in configure and 'directml_reserve_mib=$((mem_mib/4))' not in configure,'DirectML host RAM reserve must come from canonical resource-policy API outside Docker budget')
 check('directml.host:host-gateway' in compose_text,'DirectML gateway must use explicit Docker host-gateway routing')
 check('/etc/sysctl.d/99-latticevale-redis-valkey.conf' in bootstrap and 'vm.overcommit_memory = 1' in bootstrap and 'sysctl -w vm.overcommit_memory=1' in bootstrap,'Redis/Valkey overcommit prerequisite missing')
 check('$description.Length -le 240' in ps1,'profile description 240-char guard missing')
@@ -294,11 +313,11 @@ check('MATRIX_HOME_ROOM' in configure and 'MATRIX_ALLOWED_ROOMS' in configure,'p
 check('secrets/matrix-profiles/$name.env' in configure and '.matrix-profiles/$name.info' in configure,'profile Matrix protected state/metadata missing')
 check('hermes_model_configured "$pdir/config.yaml"' in configure and 'HERMES_MODEL=$model' in configure,'profile Matrix provisioning must remain bound to the configured profile/model')
 check('matrix2.' not in configure and 'platforms.matrix2' not in configure,'invented second Matrix adapter namespace must never be generated')
-check(('Windows Obsidian vault folder (explicit Windows-local path required)' in ps1 and 'Windows Obsidian vault folder [suggested:' not in ps1) if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'} else (('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' in ps1) if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else ('Windows Obsidian vault folder [$defaultObsidianVault]' in ps1)),'initial installer questionnaire must collect an explicit Windows Obsidian vault path without a v14.3.22 suggestion')
+check(('Windows Obsidian vault folder (explicit Windows-local path required)' in ps1 and 'Windows Obsidian vault folder [suggested:' not in ps1) if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'} else (('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' in ps1) if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else ('Windows Obsidian vault folder [$defaultObsidianVault]' in ps1)),'initial installer questionnaire must collect an explicit Windows Obsidian vault path without a v14.3.22 suggestion')
 check('/_matrix/client/v3/join/$encoded_room' not in configure,'installer must not pre-join Hermes before its fresh E2EE state store initializes')
 check('/_matrix/client/v3/joined_rooms' in configure,'post-start Matrix auto-join verification missing')
 check('start_or_restart_profile_gateway_exact()' in configure and 'action=start' in configure and 'action=restart' in configure,'profile Matrix gateway activation must distinguish stopped from running s6 services')
-if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
+if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}:
     check('LATTICEVALE_PROVISIONING_STATE pending-manual' in configure and './manage.sh matrix-profile-finish "$name"' in configure,'profile Matrix retry/manual-finish path missing')
 else:
     check("wait_matrix_room_join \"$token\" \"$room_id\" \"Profile '$name' Matrix bot\" 45 \"$name\"" in configure,'profile Matrix join verification must track the exact named gateway')
@@ -318,14 +337,14 @@ check('start_selected_matrix_profile_gateways' in manage and "select(.matrix.ena
 check(r'runuser -u "\$stack_user" -- env -u DOCKER_CONTEXT' in bootstrap,'stack auto-start must run Compose as the selected Ubuntu user')
 check('-RestartCount 3' in ps1 and 'LastTaskResult' in ps1 and 'autoStartValidated' in ps1,'Windows stack auto-start task execution validation/retry missing')
 check('docker exec -u hermes hermes-agent hermes' in configure,'Hermes CLI should run unprivileged')
-if version in {'14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
+if version in {'14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}:
     check("integrations) printf '4' ;;" in configure,'v14.4.7+ integration migration revision missing')
     check("web['extract_backend']='latticevale-local'" in configure,'v14.4.7+ keyless extract backend selection missing')
     check('latticevale-web-extract' in configure and 'register_web_search_provider' in configure,'v14.4.7+ web extraction plugin generation missing')
     check('create_ssrf_safe_client' in configure and 'follow_redirects=False' in configure and 'normalize_url_for_request' in configure and 'sensitive_query_param_name' in configure and 'is_safe_url' in configure,'v14.4.7+ extractor network-safety boundaries missing')
     check("browser['cloud_provider']='local'" in configure and "browser.setdefault('engine','auto')" in configure,'v14.4.8 free local-browser reliability default missing')
     check("web_extract_aux.setdefault('timeout',360)" in configure,'v14.4.8 web-extract auxiliary timeout repair missing')
-if version in {'14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
+if version in {'14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}:
     check('& $powershellExe @helperArgs | Out-Host' in ps1,'v14.4.82 WSL helper diagnostics must bypass the function success-output return stream')
     check('$helperExitCode = [int]$LASTEXITCODE' in ps1 and 'return $helperExitCode' in ps1,'v14.4.82 WSL helper wrapper must return only the scalar native exit code')
 

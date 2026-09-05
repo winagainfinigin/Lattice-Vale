@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.44','14.5.45','14.5.46'}, version
+assert version in {'14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, version
 
 # v14.5.44 must use a DirectML-specific preflight rather than the broader Ollama
 # GPU prerequisite parser that produced false /dev/dxg negatives on a valid WSL2 stack.
@@ -55,7 +55,12 @@ assert 'real tensor execution probe' in select
 
 # AMD remains a first-class DirectML vendor. DirectML works across DirectX 12-capable
 # AMD/Intel/NVIDIA hardware; this hotfix must not special-case the reporter's GPU model.
-assert "@('amd','nvidia','intel','qualcomm')" in select
+if version == '14.6.0':
+    # 14.6 broadens manual qualification to other DirectX 12 display adapters;
+    # runtime enumeration remains authoritative and fail-closed.
+    assert "@('amd','nvidia','intel','qualcomm','other')" in select
+else:
+    assert "@('amd','nvidia','intel','qualcomm')" in select
 
 print('v14.5.44 DIRECTML PREFLIGHT FIXTURES: PASS')
 print('- DirectML no longer reuses the Ollama GPU parser for /dev/dxg detection')

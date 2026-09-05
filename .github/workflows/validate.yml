@@ -30,7 +30,7 @@ jobs:
         run: bash -n linux/bootstrap.sh stack/configure-stack.sh stack/manage.sh stack/qmd-index-cycle.sh stack/native-ollama-relay.sh stack/directml-gateway.sh
       - name: Python compile
         run: |
-          python -m py_compile stack/state-audit.py stack/latticevale_readonly.py stack/repair-plan.py stack/audit-free.py stack/patch-qmd-bind.py stack/native-ollama-relay.py stack/directml-gateway.py tests/*.py
+          python -m py_compile stack/state-audit.py stack/latticevale_readonly.py stack/latticevale_arch.py stack/hardware-capabilities.py stack/backend-capabilities.py stack/runtime-policy.py stack/diagnostics.py stack/repair-plan.py stack/audit-free.py stack/patch-qmd-bind.py stack/native-ollama-relay.py stack/directml-gateway.py tests/*.py
           find . -type d -name __pycache__ -prune -exec rm -rf {} +
           find . -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete
       - name: Static audit
@@ -38,21 +38,27 @@ jobs:
       - name: Release documentation and repository metadata consistency
         working-directory: .
         run: |
-          grep -q '^14.5.46$' LatticeVale-Core/VERSION.txt
-          grep -q '^# LatticeVale v14.5.46' README.md
-          grep -q '^LATTICEVALE v14.5.46' docs/Instructions.txt
-          grep -q '^LATTICEVALE v14.5.46' 'docs/Installer Description.txt'
-          grep -q '^## 14.5.46 ' docs/CHANGELOG.md
-          grep -q 'placeholder: 14.5.46' .github/ISSUE_TEMPLATE/bug_report.yml
+          grep -q '^14.6.0$' LatticeVale-Core/VERSION.txt
+          grep -q '^# LatticeVale v14.6.0' README.md
+          grep -q '^LATTICEVALE v14.6.0' docs/Instructions.txt
+          grep -q '^LATTICEVALE v14.6.0' 'docs/Installer Description.txt'
+          grep -q '^## 14.6.0 ' docs/CHANGELOG.md
+          grep -q 'placeholder: 14.6.0' .github/ISSUE_TEMPLATE/bug_report.yml
           grep -q 'read-only planner/config-state code must never write' .github/PULL_REQUEST_TEMPLATE.md
           grep -q 'PATCH-NOTES.md' docs/CHANGELOG.md docs/README.md docs/SUPPORT.md docs/RELEASE.md
           grep -q 'PATCH-NOTES.md' README.md LatticeVale-Core/README.md
           grep -q 'repair --plan' README.md LatticeVale-Core/README.md docs/FEATURES.md
           grep -q 'compose.override.yaml.*opaque' docs/FEATURES.md
           grep -q 'resource-policy-report.txt' README.md LatticeVale-Core/README.md LatticeVale-Core/AUDIT.md docs/README.md docs/FEATURES.md docs/RELEASE.md docs/SUPPORT.md
-          grep -q 'EXPECTED_FIXTURE_COUNT = 139' LatticeVale-Core/tests/run-regressions.py
-          grep -q '("06-release", 121, 139)' LatticeVale-Core/tests/run-regressions.py
+          grep -q 'EXPECTED_FIXTURE_COUNT = 142' LatticeVale-Core/tests/run-regressions.py
+          grep -q '("06-release", 121, 142)' LatticeVale-Core/tests/run-regressions.py
           grep -q 'Policy fingerprint' LatticeVale-Core/stack/configure-stack.sh LatticeVale-Core/stack/state-audit.py
+          grep -q '^INSTALL_OPTIONS_SCHEMA=22$' LatticeVale-Core/compatibility.conf
+          grep -q '^RUNTIME_POLICY_SCHEMA=12$' LatticeVale-Core/compatibility.conf
+          grep -q 'latticevale_arch.py validate-options install-options.json' LatticeVale-Core/stack/configure-stack.sh
+          ! grep -q 'PY_OPTIONS_VALIDATE' LatticeVale-Core/stack/configure-stack.sh
+          grep -q 'docs/legacy-patch-notes/' LatticeVale-Core/release/release-content.json
+          grep -q 'Test-LatticeValeRepositoryOnlyRelativePath' tools/ReleaseManifest.ps1 tools/New-SourceManifest.ps1
           ! grep -RInE --include='*.ps1' 'New-Object[[:space:]]+.*System\.Collections\.Generic\.' . | grep .
       - name: Mocked resume simulations
         run: |

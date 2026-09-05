@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "releasePolicyVersion": "14.6",
+  "repositoryOnlyPrefixes": [
+    "docs/legacy-patch-notes/"
+  ],
+  "notes": "Normal LatticeVale release archives contain current installer/runtime/source/test documentation. Historical v13 patch-note archives remain available in the repository but are not required by end-user installs."
+}

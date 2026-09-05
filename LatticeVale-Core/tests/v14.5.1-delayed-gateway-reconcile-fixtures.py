@@ -7,7 +7,7 @@ cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
 readonly = (ROOT / 'stack/latticevale_readonly.py').read_text(encoding='utf-8')
 version = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
+assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, version
 
 # Live repair evidence showed the exact default gateway could need longer than the
 # former 20-second readiness window, while the bounded stack verifier later became

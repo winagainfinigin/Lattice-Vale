@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert VERSION in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, VERSION
+assert VERSION in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, VERSION
 
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
@@ -20,40 +20,46 @@ features = (REPO / 'docs/FEATURES.md').read_text(encoding='utf-8')
 instructions = (REPO / 'docs/Instructions.txt').read_text(encoding='utf-8')
 
 # The current adaptive policy must converge through every clean/repair/start/audit path that owns the overlay.
-assert '[POLICY_VERSION]=11' in cfg and "printf 'POLICY_VERSION=%s\\n'" in cfg
-assert 'statev POLICY_VERSION)" == 11' in cfg
+assert '[POLICY_VERSION]=12' in cfg and '[RESOURCE_POLICY_MODE]=adaptive' in cfg
+assert "printf 'POLICY_VERSION=%s\\n'" in cfg
+assert 'runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state' in cfg
 assert './configure-stack.sh --refresh-resource-policy' in manage
 assert './configure-stack.sh --refresh-resource-policy' in boot
-assert 'values.get("POLICY_VERSION") != "11"' in audit
+if VERSION == '14.6.0':
+    assert 'validate_runtime_policy_state' in audit
+    assert 'validate_runtime_policy_document' in audit
+    assert 'probe_hardware' in audit and 'classify_backends' in audit
+    assert 'values.get("POLICY_VERSION") != "12"' not in audit
+else:
+    assert 'values.get("POLICY_VERSION") != "12"' in audit
+    assert 'values.get("RESOURCE_POLICY_MODE") != "adaptive"' in audit
 assert 'run_uncheckpointed_repair_step repair_runtime_policy' in cfg
 assert 'state_mark infrastructure pending' in cfg and 'state_mark reconcile pending' in cfg
 
-# Execute the exact embedded planner at the observed full-stack ~10 GiB shape.
-start = cfg.index("import sys\nbudget=int(sys.argv[1])", cfg.index("<<'PY_RESOURCE_PLAN'"))
-end = cfg.index('\nPY_RESOURCE_PLAN', start)
-planner = cfg[start:end]
+# Resource planning is canonical in 14.6.0: exercise the shared planner across
+# irregular budgets rather than depending on the retired embedded RAM-tier script.
+sys.path.insert(0, str(ROOT / 'stack'))
+from latticevale_arch import service_memory_plan
 required_services = ('hermes','synapse-db','synapse','searxng-valkey','searxng','qmd','qmd-indexer','honcho-db','honcho-redis','honcho-api','honcho-deriver','ollama')
+for budget in (2048, 3077, 4099, 5123, 6149, 7001, 8001):
+    try:
+        service_memory_plan(budget, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, hermes_floor=1024, ollama_floor=5120)
+    except ValueError as exc:
+        assert 'cannot safely fit selected services' in str(exc).lower()
+    else:
+        raise AssertionError(f'unsafe full-stack budget unexpectedly admitted: {budget}')
 observed_alloc = None
-for budget in (2048, 3072, 4096, 5120, 6144, 7958, 8192):
-    r = subprocess.run([sys.executable, '-c', planner, str(budget), 'true', 'true', 'true', 'true', 'true', 'cpu', '1024', '5120'], text=True, capture_output=True, timeout=10)
-    assert r.returncode == 3, (budget, r.returncode, r.stderr)
-    assert 'cannot safely fit the selected services' in r.stderr
-for budget in (8952, 10240, 12288):
-    r = subprocess.run([sys.executable, '-c', planner, str(budget), 'true', 'true', 'true', 'true', 'true', 'cpu', '1024', '5120'], text=True, capture_output=True, timeout=10)
-    assert r.returncode == 0, r.stderr
-    alloc = {}
-    for line in r.stdout.splitlines():
-        k, v = line.split('=', 1)
-        alloc[k] = int(v)
+for budget in (8953, 10243, 12293):
+    alloc = service_memory_plan(budget, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, hermes_floor=1024, ollama_floor=5120)
     assert sum(alloc.values()) <= budget, (sum(alloc.values()), budget, alloc)
     for required in required_services:
         assert required in alloc and alloc[required] > 0, (required, budget, alloc)
-    if budget == 8952:
+    if budget == 8953:
         observed_alloc = alloc
 assert observed_alloc is not None
 assert observed_alloc['ollama'] >= 5120, observed_alloc
 assert observed_alloc['hermes'] >= 1024, observed_alloc
-assert observed_alloc['honcho-api'] >= 512, observed_alloc
+assert observed_alloc['honcho-api'] >= 384, observed_alloc
 
 # Redis/Valkey sysctl is selected-workload-only, persistent, idempotent, and audited.
 for token in (

@@ -1,4 +1,10 @@
-# LatticeVale v14.5.46 audit
+# LatticeVale v14.6.0 audit
+
+> **v14.6.0 audit responsibility:** canonical schemas come from `compatibility.conf`; installer options schema 22, runtime-policy schema 12, and managed-refresh revision 4 must stay synchronized. `latticevale_arch.py` owns options validation, hardware/backend fingerprints, atomic derived state, adaptive host/container memory budgeting, CPU/service ceilings, model/context admission, and tuning invariants. `state-audit.py` consumes those canonical documents and re-probes through the same capability engines without recreating policy formulas. Production policy must derive from live WSL CPU/RAM, enabled services, model requirements, selected backend, and measured GPU topology rather than any fixed host shape. Static/fixture success must not be described as live physical-hardware proof.
+
+> **v14.6.0 same-version GPU portability responsibility:** DirectML structural capability and transient runtime health are separate. Windows selected-adapter memory evidence must prefer full-capacity DXDiag/64-bit registry sources; legacy DWORD/WMI values are lower bounds only and may never cap a stronger source. UMA/shared memory must be bounded against live WSL RAM. DirectML runtime fallback must not invalidate the resource-policy backend fingerprint unless a resource-relevant topology fact changed. Generic/`other` DirectX 12 adapters may reach DirectML runtime qualification; CUDA and ROCm remain vendor-specific.
+
+> **v14.5.47 GPU-recovery audit responsibility:** DirectML must apply the selected adapter before runtime import, verify adapter/tensor execution in-runtime, use installer-recorded DXDiag VRAM only when runtime VRAM reporting is unavailable, and keep fallback fingerprinted/fail-closed. Managed Vulkan must require real WSL DRM render devices and `ollama ps` offload proof. The standalone Windows GPU audit and gateway `diagnose` path must remain read-only.
 
 > **v14.5.46 GPU-onboarding audit responsibility:** questionnaire recommendations must derive from both Windows GPU vendor inventory and direct selected-distro capability probes; a vendor name alone may never authorize GPU resource sizing. DirectML/NVIDIA prerequisite acquisition must be idempotent and selected-path-only, AMD ROCm remains gated by real WSL devices, and Windows/vendor display-driver ownership stays external.
 

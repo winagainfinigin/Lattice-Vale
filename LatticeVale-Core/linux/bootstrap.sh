@@ -11,6 +11,7 @@ linux_user="${1:-}"
 options_b64="${2:-}"
 installer_version="${3:-v13}"
 force_managed_update="${4:-false}"
+windows_hardware_b64="${5:-}"
 [[ "$force_managed_update" == true || "$force_managed_update" == false ]] || { echo 'Invalid force-managed-update control flag.' >&2; exit 2; }
 if [[ -z "$linux_user" ]] || ! id "$linux_user" >/dev/null 2>&1; then
   echo 'Usage: bootstrap.sh EXISTING_LINUX_USER OPTIONS_BASE64' >&2; exit 2
@@ -32,8 +33,14 @@ linux_gid="$(id -g "$linux_user")"
 # distinguish missing prerequisites from already-satisfied prerequisites without upgrading
 # unrelated packages. Full JSON validation happens after python3 is guaranteed available.
 tmp_options="$(mktemp)"
-trap 'rm -f "$tmp_options"' EXIT
+tmp_windows_hardware="$(mktemp)"
+trap 'rm -f "$tmp_options" "$tmp_windows_hardware"' EXIT
 printf '%s' "$options_b64" | base64 -d > "$tmp_options"
+if [[ -n "$windows_hardware_b64" ]]; then
+  printf '%s' "$windows_hardware_b64" | base64 -d > "$tmp_windows_hardware"
+else
+  printf '{}\n' > "$tmp_windows_hardware"
+fi
 repair_run=false
 obsidian_selected=false
 local_ai_requested=false
@@ -78,7 +85,7 @@ if [[ -d "$stack_dir" ]]; then
   backup_dir="$stack_dir/backups/pre-$installer_version-$stamp"
   install -d -m 0700 -o "$linux_uid" -g "$linux_gid" "$backup_dir"
   backup_items=()
-  for item in compose.yaml compose.latticevale.yaml compose.override.yaml configure-stack.sh manage.sh state-audit.py latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
+  for item in compose.yaml compose.latticevale.yaml compose.override.yaml compatibility.conf configure-stack.sh manage.sh state-audit.py latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json data/latticevale .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
     [[ -e "$stack_dir/$item" ]] && backup_items+=("$item")
   done
   # Logs are diagnostic, not application state. Preserve them in the configuration
@@ -189,7 +196,8 @@ else
   fi
 fi
 python3 -m json.tool "$tmp_options" >/dev/null
-
+python3 -m json.tool "$tmp_windows_hardware" >/dev/null
+python3 "$bundle_root/stack/latticevale_arch.py" validate-options "$tmp_options" --compat "$compat_file" >/dev/null || { echo "Installer options failed canonical v14.6 validation before stack mutation." >&2; exit 3; }
 
 # Parse every root-affecting option structurally before GPU/runtime or permission
 # behavior consumes it. This is deliberately narrower than configure-stack's full
@@ -206,8 +214,8 @@ def flag(name):
         raise SystemExit(f'Invalid install options: {name} must be true or false.')
     return 'true' if v else 'false'
 accel=d.get('ollamaAcceleration','cpu')
-if accel not in ('auto','cpu','nvidia','amd'):
-    raise SystemExit('Invalid install options: ollamaAcceleration must be auto, cpu, nvidia, or amd.')
+if accel not in ('auto','cpu','nvidia','amd','vulkan'):
+    raise SystemExit('Invalid install options: ollamaAcceleration must be auto, cpu, nvidia, amd, or vulkan.')
 text_backend=d.get('localTextBackend','ollama')
 if text_backend not in ('ollama','directml'):
     raise SystemExit('Invalid install options: localTextBackend must be ollama or directml.')
@@ -490,6 +498,10 @@ if [[ "$local_ai_requested" == true && "$ollama_backend" == managed && "$ollama_
     install_nvidia_container_toolkit_if_needed || { echo 'NVIDIA acceleration was explicitly selected but the NVIDIA Container Toolkit could not be configured/verified. No Linux NVIDIA display driver was installed. Fix Windows/WSL GPU support or rerun with Auto/CPU.' >&2; exit 5; }
   elif [[ "$ollama_acceleration" == amd ]]; then
     echo 'AMD/ROCm managed Ollama selected. Reusing the WSL-provided /dev/kfd + /dev/dri device path and the pinned Ollama ROCm container image; LatticeVale does not install or replace the Windows/host display driver.'
+  elif [[ "$ollama_acceleration" == vulkan ]]; then
+    shopt -s nullglob; vulkan_nodes=(/dev/dri/renderD*); shopt -u nullglob
+    (( ${#vulkan_nodes[@]} > 0 )) || { echo 'Vulkan acceleration was explicitly selected but WSL exposes no DRM render node under /dev/dri/renderD*.' >&2; exit 5; }
+    echo 'Vulkan managed Ollama selected. LatticeVale passes the existing WSL DRM render devices to the standard pinned Ollama image and verifies real model offload before accepting the GPU policy.'
   elif [[ "$ollama_acceleration" == auto ]]; then
     if nvidia_smi_path >/dev/null 2>&1; then
       install_nvidia_container_toolkit_if_needed || echo 'WARNING: NVIDIA GPU was detected, but the Docker NVIDIA runtime could not be configured. Auto mode will fall back to another supported accelerator or CPU.' >&2
@@ -535,7 +547,7 @@ if [[ -s "\$stack_dir/.latticevale-resource-state" ]]; then
   saved_mem="\$(sed -n 's/^MEM_MIB=//p' "\$stack_dir/.latticevale-resource-state" 2>/dev/null | head -n1 || true)"
 fi
 # Ask the stack-owned policy verifier to refresh on every startup path. The refresh
-# subcommand is itself a no-op when policy v11 fingerprints already match, but it can
+# subcommand is itself a no-op when policy v12 fingerprints already match, but it can
 # detect hardware, profile/Kanban topology, installed Ollama artifact/context, and
 # policy-revision changes without duplicating allocator logic in this root helper.
 resource_limits_enabled="\$(python3 - "\$stack_dir/install-options.json" <<'PY_RESOURCE_ENABLED'
@@ -900,8 +912,8 @@ unset rel path
 # Refuse replacement symlinks before root writes installer-controlled files; otherwise a broken
 # or hostile prior install could redirect a repair write outside the dedicated stack tree.
 installer_owned_files=(
-  compose.yaml Dockerfile.qmd patch-qmd-bind.py configure-stack.sh manage.sh state-audit.py
-  latticevale_readonly.py repair-plan.py audit-free.py checkpoint-metadata.json
+  compose.yaml Dockerfile.qmd patch-qmd-bind.py compatibility.conf configure-stack.sh manage.sh state-audit.py
+  latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json
   qmd-index-cycle.sh native-ollama-relay.py native-ollama-relay.sh directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json
 )
 for rel in "${installer_owned_files[@]}"; do
@@ -918,6 +930,18 @@ install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/Dockerfile.qmd" "$stack_dir/Dockerfile.qmd"
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/patch-qmd-bind.py" "$stack_dir/patch-qmd-bind.py"
+install -m 0644 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/compatibility.conf" "$stack_dir/compatibility.conf"
+install -m 0644 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/latticevale_arch.py" "$stack_dir/latticevale_arch.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/hardware-capabilities.py" "$stack_dir/hardware-capabilities.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/backend-capabilities.py" "$stack_dir/backend-capabilities.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/runtime-policy.py" "$stack_dir/runtime-policy.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/diagnostics.py" "$stack_dir/diagnostics.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/configure-stack.sh" "$stack_dir/configure-stack.sh"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
@@ -945,7 +969,9 @@ install -m 0755 -o "$linux_uid" -g "$linux_gid" \
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/directml-requirements.txt" "$stack_dir/directml-requirements.txt"
 install -m 0600 -o "$linux_uid" -g "$linux_gid" "$tmp_options" "$stack_dir/install-options.json"
-rm -f "$tmp_options"
+install -d -m 0750 -o "$linux_uid" -g "$linux_gid" "$stack_dir/data/latticevale"
+install -m 0600 -o "$linux_uid" -g "$linux_gid" "$tmp_windows_hardware" "$stack_dir/data/latticevale/windows-hardware.json"
+rm -f "$tmp_options" "$tmp_windows_hardware"
 trap - EXIT
 
 # Fail early with a useful path instead of letting a later Python/Docker command surface an
@@ -954,20 +980,20 @@ trap - EXIT
 verify_write_dirs=(
   "$stack_dir" "$stack_dir/data" "$stack_dir/config" "$stack_dir/config/searxng"
   "$stack_dir/backups" "$stack_dir/secrets" "$stack_dir/logs" "$stack_dir/vendor"
-  "$stack_dir/workspace" "$stack_dir/data/hermes" "$stack_dir/data/qmd" "$stack_dir/data/directml"
+  "$stack_dir/workspace" "$stack_dir/data/hermes" "$stack_dir/data/qmd" "$stack_dir/data/directml" "$stack_dir/data/latticevale"
   "$stack_dir/data/qmd/config" "$stack_dir/data/qmd/cache" "$stack_dir/data/synapse"
   "$stack_dir/data/searxng-valkey" "$stack_dir/data/honcho-redis"
 )
 [[ "$obsidian_selected" == true ]] || verify_write_dirs+=("$stack_dir/vault")
 verify_write_files=(
-  "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/patch-qmd-bind.py"
+  "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/patch-qmd-bind.py" "$stack_dir/compatibility.conf"
   "$stack_dir/configure-stack.sh" "$stack_dir/manage.sh" "$stack_dir/state-audit.py"
-  "$stack_dir/latticevale_readonly.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
+  "$stack_dir/latticevale_readonly.py" "$stack_dir/latticevale_arch.py" "$stack_dir/hardware-capabilities.py" "$stack_dir/backend-capabilities.py" "$stack_dir/runtime-policy.py" "$stack_dir/diagnostics.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
   "$stack_dir/qmd-index-cycle.sh" "$stack_dir/native-ollama-relay.py" "$stack_dir/native-ollama-relay.sh" "$stack_dir/directml-gateway.py" "$stack_dir/directml-gateway.sh" "$stack_dir/directml-requirements.txt" "$stack_dir/install-options.json" "$stack_dir/.env"
   "$stack_dir/.repair-package-refresh" "$stack_dir/.repair-package-refresh-pending"
   "$stack_dir/.installer-state.json" "$stack_dir/.install-info" "$stack_dir/.configured"
   "$stack_dir/.matrix-info" "$stack_dir/.matrix-configured" "$stack_dir/.tailscale-info" "$stack_dir/.windows-native-info"
-  "$stack_dir/.installer-managed-profiles" "$stack_dir/data/hermes/config.yaml"
+  "$stack_dir/.installer-managed-profiles" "$stack_dir/data/latticevale/windows-hardware.json" "$stack_dir/data/latticevale/hardware-capabilities.json" "$stack_dir/data/latticevale/backend-capabilities.json" "$stack_dir/data/latticevale/runtime-policy.json" "$stack_dir/data/latticevale/backend-health.json" "$stack_dir/data/hermes/config.yaml"
   "$stack_dir/data/hermes/.env"
 )
 verify_selected_user_writable() {

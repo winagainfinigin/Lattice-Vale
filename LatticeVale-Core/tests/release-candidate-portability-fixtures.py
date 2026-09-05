@@ -10,14 +10,14 @@ manage=(root/'stack/manage.sh').read_text(encoding='utf-8')
 audit=(root/'stack/state-audit.py').read_text(encoding='utf-8')
 readme=(root/'README.md').read_text(encoding='utf-8')
 runner=(root/'tests/run-regressions.py').read_text(encoding='utf-8')
-assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
+assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
 
 
 # The release runner is deterministic, sharded, and refuses generated tree contamination.
 for token in (
-    'EXPECTED_FIXTURE_COUNT = 139', '("01-core", 1, 25)', '("02-installer", 26, 50)',
+    'EXPECTED_FIXTURE_COUNT = 142', '("01-core", 1, 25)', '("02-installer", 26, 50)',
     '("03-repair-update", 51, 75)', '("04-resource-policy", 76, 100)',
-    '("05-gpu-directml", 101, 120)', '("06-release", 121, 139)',
+    '("05-gpu-directml", 101, 120)', '("06-release", 121, 142)',
     'PYTHONDONTWRITEBYTECODE', '__pycache__', '.pyc', '.pyo', '.tmp', '.bak', '.swp',
     '.DS_Store', 'Thumbs.db', 'skipped": 0',
 ):
@@ -120,15 +120,21 @@ for forbidden in ('$Home =', '$args ='):
 assert 'repo_stamp="$(date -u +%Y%m%dT%H%M%SZ)"' in boot
 assert '"$existing.latticevale-pre-$repo_stamp.bak"' in boot
 
-# Persisted repair state is validated before it can become a path/model/port input.
+# Persisted repair state is validated by the canonical architecture library before
+# it can become a path/model/port input; filesystem ownership checks remain local.
+arch=(root / 'stack/latticevale_arch.py').read_text(encoding='utf-8')
 for text in (
-    'Persisted installer options validated.',
-    "name_re=re.compile(r'^[a-z0-9][a-z0-9_-]{0,31}$')",
-    "model_re=re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$')",
+    'latticevale_arch.py validate-options install-options.json --compat compatibility.conf',
     'assert_hermes_chown_targets_safe',
     'Current Hermes container startup recursively changes ownership at this path',
 ):
     assert text in cfg, text
+for text in (
+    'Persisted installer options validated',
+    'name_re = re.compile(r"^[a-z0-9][a-z0-9_-]{0,31}$")',
+    'model_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$")',
+):
+    assert text in arch, text
 assert "jq -r '.[0].Containers // {} | keys[]'" in cfg
 
 

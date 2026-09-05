@@ -1,85 +1,78 @@
 #!/usr/bin/env python3
-"""v14.5.4 DirectML VRAM admission + <=12 GiB WSL low-memory regression fixtures."""
+"""v14.5.4 DirectML VRAM admission + small-resource safety regressions under v14.6."""
 from pathlib import Path
 import importlib.util
-import subprocess
 import sys
-sys.dont_write_bytecode = True
-
+sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]; REPO=ROOT.parent
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
+assert (ROOT/'VERSION.txt').read_text().strip() in {'14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
+sys.path.insert(0,str(ROOT/'stack'))
+from latticevale_arch import host_memory_budget, service_memory_plan  # noqa:E402
 cfg=(ROOT/'stack/configure-stack.sh').read_text(); py=(ROOT/'stack/directml-gateway.py').read_text(); req=(ROOT/'stack/directml-requirements.txt').read_text(); audit=(ROOT/'stack/state-audit.py').read_text()
 
-# DirectML no longer has unbounded managed VRAM admission.
-for marker in (
-    'VRAM_LIMIT_PCT', '_directml_device_and_vram', '_model_vram_plan',
-    'gpu_memory', 'refusing unbounded GPU model admission',
-    'low_cpu_mem_usage": True', 'EFFECTIVE_MAX_CONTEXT',
-    'vram_budget_mib', 'estimated_model_vram_mib',
-): assert marker in py, marker
+for marker in ('VRAM_LIMIT_PCT','_directml_device_and_vram','_model_vram_plan','gpu_memory',
+               'no trusted bounded memory-capacity source','low_cpu_mem_usage": True','EFFECTIVE_MAX_CONTEXT',
+               'vram_budget_mib','estimated_model_vram_mib'):
+    assert marker in py, marker
 assert 'accelerate==0.34.2' in req
 assert 'DIRECTML_VRAM_LIMIT_PCT=75' in cfg
 
-# Resource policy v11 removes the v14.5.3 additive host-reserve double count and
-# introduces a tighter <=12 GiB WSL profile without weakening the 1 GiB Hermes floor.
-for marker in ('POLICY_VERSION=11','[LOW_MEMORY_PROFILE]="$(if (( mem_mib <= 12288 ))','mem_mib <= 12288','directml_reserve_mib=$((mem_mib/4))','directml_reserve_mib=2048','directml_reserve_mib=4096'):
-    assert marker in cfg, marker
+# 14.6 replaces the historical low-memory tier with one adaptive canonical policy.
+assert '[POLICY_VERSION]=12' in cfg
+assert '[RESOURCE_POLICY_MODE]=adaptive' in cfg
+assert 'LOW_MEMORY_PROFILE' not in cfg and 'mem_mib <= 12288' not in cfg
+assert 'runtime-policy.py host-budget' in cfg and 'runtime-policy.py service-plan' in cfg
 assert 'reserve_mib=$((reserve_mib+directml_reserve_mib))' not in cfg
-assert '(( reserve_mib < directml_reserve_mib )) && reserve_mib=$directml_reserve_mib' in cfg
-assert "('honcho-api',4,384,1024)" in cfg
-assert "('honcho-deriver',3,256,1024)" in cfg
-assert 'OLLAMA_AUTO_KEEP_ALIVE' in cfg and "printf '0s'" in cfg
-assert "printf 4096" in cfg
-assert 'values.get("POLICY_VERSION") != "11"' in audit
+assert 'OLLAMA_AUTO_KEEP_ALIVE' in cfg
+assert 'validate_runtime_policy_state' in audit and 'validate_runtime_policy_document' in audit
 
-# Current release identity/documentation must describe the new safety responsibility.
-readme=(REPO/'README.md').read_text(); release=(REPO/'docs/RELEASE.md').read_text(); support=(REPO/'docs/SUPPORT.md').read_text(); changelog=(REPO/'docs/CHANGELOG.md').read_text()
-assert readme.startswith(('# LatticeVale v14.5.42', '# LatticeVale v14.5.43', '# LatticeVale v14.5.44', '# LatticeVale v14.5.45', '# LatticeVale v14.5.46')) and 'VRAM admission' in readme and '16 GB' in readme
-assert 'v14.5.46 current release' in release and 'v14.5.42 historical release gate' in release and 'v14.5.4-vram-lowmem-fixtures.py' in release
-assert 'v14.5.4 DirectML / low-memory support note' in support
-assert '## 14.5.4 - 2026-09-03' in changelog
+# Small-resource safety is expressed by invariants, not an exact RAM topology.
+for mem in (2059,3079,4201,5813,7993,11317,17123):
+    b=host_memory_budget(mem,'cpu',True,True)
+    assert b['reserveMiB']+b['containerBudgetMiB']==mem
+    assert 0 < b['directmlHostReserveMiB'] <= b['reserveMiB']
+# Dynamically locate full-stack viability for a representative hybrid model floor.
+def try_plan(budget):
+    try:
+        return service_memory_plan(budget,matrix=True,searxng=True,qmd=True,ollama=True,honcho=True,
+                                   hermes_floor=1024,ollama_floor=3072)
+    except ValueError:
+        return None
+lo,hi=384,65536
+while lo<hi:
+    mid=(lo+hi)//2
+    if try_plan(mid) is None: lo=mid+1
+    else: hi=mid
+threshold=lo
+assert try_plan(threshold) is not None and try_plan(threshold-1) is None
+for budget in (threshold,threshold+379,threshold+1781,threshold+6907):
+    a=try_plan(budget); assert a and sum(a.values())<=budget
+    assert a['hermes']>=1024 and a['ollama']>=3072 and a['honcho-api']>=384 and a['honcho-deriver']>=256
 
-# Execute the embedded planner. The same 6400 MiB container budget cannot fit the
-# old normal minima with a 3072 MiB hybrid Ollama floor, but it fits policy-v11's
-# low-memory profile while keeping Hermes at >=1024 MiB.
-start=cfg.index('import sys\nbudget=int(sys.argv[1])', cfg.index("<<'PY_RESOURCE_PLAN'")); end=cfg.index('\nPY_RESOURCE_PLAN',start); planner=cfg[start:end]
-def run(low):
-    args=['6400','true','true','true','true','true','cpu','1024','3072','true' if low else 'false']
-    return subprocess.run([sys.executable,'-c',planner,*args],text=True,capture_output=True,timeout=10)
-old=run(False); assert old.returncode==3, (old.returncode,old.stdout,old.stderr)
-low=run(True); assert low.returncode==0, low.stderr
-alloc={k:int(v) for k,v in (line.split('=',1) for line in low.stdout.splitlines())}
-assert alloc['hermes']>=1024 and alloc['ollama']>=3072 and sum(alloc.values())<=6400,alloc
-assert alloc['honcho-api']>=384 and alloc['honcho-deriver']>=256,alloc
-
-# 16 GB-class Windows hosts commonly expose about 8 GiB to WSL by default. With
-# DirectML now retains a bounded 25% WSL-host reserve (minimum 2 GiB) before
-# distributing the remaining container budget. Representative safe budgets must
-# admit the full provisional hybrid topology before downloaded model artifacts are
-# measured; post-download model sizing remains authoritative.
-def run_budget(budget):
-    args=[str(budget),'true','true','true','true','true','cpu','1024','3072','true']
-    return subprocess.run([sys.executable,'-c',planner,*args],text=True,capture_output=True,timeout=10)
-for budget in (6144,7168):
-    r=run_budget(budget); assert r.returncode==0,(budget,r.stderr)
-    a={k:int(v) for k,v in (line.split('=',1) for line in r.stdout.splitlines())}
-    assert sum(a.values())<=budget and a['hermes']>=1024 and a['ollama']>=3072,(budget,a)
-
-# Exercise DirectML adapter VRAM normalization for both the historical MiB-style
-# API value and a byte-style wrapper value.
+# DirectML adapter VRAM normalization accepts MiB-style and byte-style wrapper values.
 spec=importlib.util.spec_from_file_location('lv_dml',ROOT/'stack/directml-gateway.py'); mod=importlib.util.module_from_spec(spec); spec.loader.exec_module(mod)
 class FakeDML:
-    def __init__(self, raw): self.raw=raw
+    def __init__(self,raw): self.raw=raw
     def device_count(self): return 1
-    def device_name(self, idx): return 'AMD Radeon RX Test'
+    def device_name(self,idx): return 'AMD Radeon RX Test'
     def default_device(self): return 0
-    def device(self, idx=0): return f'privateuseone:{idx}'
-    def gpu_memory(self, idx=0): return self.raw
-for raw in (12288, 12288*1024*1024):
-    dev,idx,vram,name=mod._directml_device_and_vram(FakeDML(raw))
-    assert idx==0 and vram==12288 and 'Radeon' in name,(raw,dev,idx,vram,name)
+    def device(self,idx=0): return f'privateuseone:{idx}'
+    def gpu_memory(self,idx=0): return self.raw
+for raw in (12288,12288*1024*1024):
+    result=mod._directml_device_and_vram(FakeDML(raw))
+    dev,idx,vram,name=result[:4]
+    assert idx==0 and vram==12288 and 'Radeon' in name,(raw,result)
 
-# Exercise the gateway admission calculation without importing torch.
+# WSL torch-directml builds can execute tensors while exposing no usable gpu_memory().
+# Canonical Windows/WSL hardware state must provide the bounded fallback instead of
+# treating one missing runtime API as proof that the GPU is unusable.
+mod.DECLARED_VRAM_MIB=12272
+mod.DECLARED_VRAM_SOURCE='windows-dxdiag-text'
+mod.DECLARED_VRAM_CONFIDENCE='high'
+result=mod._directml_device_and_vram(FakeDML(0))
+assert result[2]==12272 and result[4]=='canonical:windows-dxdiag-text:high',result
+
+# Gateway admission remains fail-closed relative to actual adapter VRAM.
 class T:
     def __init__(self,n,e=2): self.n=n; self.e=e
     def numel(self): return self.n
@@ -98,4 +91,7 @@ try: mod._model_vram_plan(M())
 except RuntimeError as exc: assert 'admission refused' in str(exc)
 else: raise AssertionError('oversized model was admitted to a 4 GiB adapter')
 
-print('v14.5.4 VRAM / LOW-MEMORY FIXTURES: PASS')
+readme=(REPO/'README.md').read_text(); release=(REPO/'docs/RELEASE.md').read_text(); changelog=(REPO/'docs/CHANGELOG.md').read_text()
+assert readme.startswith('# LatticeVale v14.6.0') and 'VRAM' in readme
+assert 'v14.6.0 current release' in release and '14.5.4' in changelog
+print('v14.5.4 VRAM / ADAPTIVE SMALL-RESOURCE FIXTURES: PASS')

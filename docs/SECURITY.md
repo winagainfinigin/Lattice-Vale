@@ -1,3 +1,13 @@
+## v14.6.0 derived-state and privilege boundary
+
+Canonical architecture JSON is derived state, written atomically and validated before trust. Durable user intent remains separate. GPU probing does not grant permission to install/replace vendor drivers, and explicit adapter preference is not silently redirected. Diagnostic commands are read-only except that explicit `diagnose-gpu`/`diagnose-backends` refresh their installer-owned derived capability documents; they do not mutate application data or credentials. Existing least-privilege/root-scope and Docker-daemon environment sanitization requirements remain inherited.
+
+## v14.5.47 GPU recovery boundary
+
+DirectML adapter identity is applied before runtime import and then verified again inside `torch_directml`; a saved Windows adapter name is never accepted as proof by itself. Installer-recorded DXDiag VRAM can substitute only for a missing/unusable DirectML memory-reporting API, not for missing adapter/tensor execution. Fingerprinted fallback retry never bypasses model admission or Ollama fallback.
+
+Managed Vulkan requires an existing WSL DRM render node and grants the Ollama container access to `/dev/dri`; it does not install a display driver or fabricate a device. GPU execution is trusted only after bounded `ollama ps` processor proof. Select CPU or native-Windows Ollama when that device access is not desired.
+
 ## v14.5.46 GPU-onboarding security boundary
 
 Hardware/vendor inventory is advisory only and never authorizes GPU-sized resource policy by itself. DirectML still requires direct WSL bridge/runtime proof; managed NVIDIA still requires working WSL `nvidia-smi` and a verified Docker runtime; managed AMD ROCm still requires `/dev/kfd` + `/dev/dri` and measured topology. LatticeVale installs only selected installer-owned WSL prerequisites and never installs/replaces Windows/vendor display drivers. A missing host GPU device is not fabricated or bypassed.

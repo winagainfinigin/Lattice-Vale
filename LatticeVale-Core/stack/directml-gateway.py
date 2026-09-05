@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-VERSION = "14.5.42"
+VERSION = "14.6.0"
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MODEL_ID = os.environ.get("LATTICEVALE_DIRECTML_MODEL", "Qwen/Qwen2.5-1.5B-Instruct").strip()
 FALLBACK_MODEL = os.environ.get("LATTICEVALE_OLLAMA_TEXT_MODEL", "qwen3.5:4b").strip()
@@ -46,9 +46,15 @@ FAILURE_COOLDOWN_SECONDS = max(15, min(int(os.environ.get("LATTICEVALE_DIRECTML_
 NATIVE_FALLBACK_URL = os.environ.get("LATTICEVALE_NATIVE_OLLAMA_URL", "").rstrip("/")
 REQUESTED_ADAPTER_NAME = os.environ.get("LATTICEVALE_DIRECTML_ADAPTER_NAME", "").strip()
 REQUESTED_GPU_VENDOR = os.environ.get("LATTICEVALE_DIRECTML_GPU_VENDOR", "").strip().lower()
+try:
+    DECLARED_VRAM_MIB = max(0, min(int(os.environ.get("LATTICEVALE_DIRECTML_VRAM_MIB", "0")), 1024 * 1024))
+except Exception:
+    DECLARED_VRAM_MIB = 0
+DECLARED_VRAM_SOURCE = os.environ.get("LATTICEVALE_DIRECTML_VRAM_SOURCE", "legacy-install-options").strip() or "legacy-install-options"
+DECLARED_VRAM_CONFIDENCE = os.environ.get("LATTICEVALE_DIRECTML_VRAM_CONFIDENCE", "legacy").strip() or "legacy"
 FORCE_FALLBACK = os.environ.get("LATTICEVALE_DIRECTML_FORCE_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 HOST_RESERVE_MIB = max(1024, min(int(os.environ.get("LATTICEVALE_DIRECTML_HOST_RESERVE_MIB", "2048")), 8192))
-CPU_THREADS = max(1, min(int(os.environ.get("LATTICEVALE_DIRECTML_CPU_THREADS", str(max(1, (os.cpu_count() or 2) // 2)))), 4))
+CPU_THREADS = max(1, min(int(os.environ.get("LATTICEVALE_DIRECTML_CPU_THREADS", str(max(1, round((os.cpu_count() or 1) * 0.35))))), 12))
 
 os.environ.setdefault("HF_HOME", str(HF_HOME))
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -67,6 +73,7 @@ LAST_ERROR = ""
 LAST_FAILURE = 0.0
 DEPENDENCY_PROBE: dict[str, Any] = {"ready": False, "detail": "not-probed"}
 VRAM_TOTAL_MIB = 0
+VRAM_SOURCE = "unknown"
 VRAM_BUDGET_MIB = 0
 MODEL_WEIGHT_MIB = 0
 ESTIMATED_MODEL_VRAM_MIB = 0
@@ -179,7 +186,7 @@ def _adapter_vendor(name: str) -> str:
     return "other"
 
 
-def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str]:
+def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str, str]:
     count = 0
     try:
         count = int(torch_directml.device_count())
@@ -207,7 +214,7 @@ def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str]:
         elif len(matches) > 1:
             raise RuntimeError(f"saved DirectML adapter name is ambiguous: {REQUESTED_ADAPTER_NAME!r}")
 
-    if index is None and REQUESTED_GPU_VENDOR in {"amd", "nvidia", "intel", "qualcomm"}:
+    if index is None and REQUESTED_GPU_VENDOR in {"amd", "nvidia", "intel", "qualcomm", "other"}:
         vendor_matches = [idx for idx, _name, vendor in adapters if vendor == REQUESTED_GPU_VENDOR]
         if len(vendor_matches) == 1:
             index = vendor_matches[0]
@@ -231,12 +238,23 @@ def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str]:
     device = torch_directml.device(index)
     name = next((name for idx, name, _vendor in adapters if idx == index), f"DirectML adapter {index}")
     vram_mib = 0
+    vram_source = "torch-directml"
     try:
         if hasattr(torch_directml, "gpu_memory"):
             vram_mib = _normalize_vram_mib(torch_directml.gpu_memory(index))
     except Exception:
         vram_mib = 0
-    return device, index, vram_mib, name
+    # torch-directml builds in WSL do not consistently expose dedicated-memory
+    # capacity.  The Windows installer therefore records the selected adapter's
+    # DXGI/dxdiag dedicated-memory value.  Use that only when the runtime API is
+    # unavailable; it is tied to the exact saved adapter and remains subject to
+    # LatticeVale's conservative percentage admission budget.
+    if vram_mib <= 0 and DECLARED_VRAM_MIB >= 256:
+        vram_mib = DECLARED_VRAM_MIB
+        vram_source = f"canonical:{DECLARED_VRAM_SOURCE}:{DECLARED_VRAM_CONFIDENCE}"
+    elif vram_mib <= 0:
+        vram_source = "unavailable"
+    return device, index, vram_mib, name, vram_source
 
 
 def _model_vram_plan(model: Any) -> tuple[int, int, int, int, str]:
@@ -250,7 +268,10 @@ def _model_vram_plan(model: Any) -> tuple[int, int, int, int, str]:
     """
     global VRAM_TOTAL_MIB, VRAM_BUDGET_MIB
     if VRAM_TOTAL_MIB <= 0:
-        raise RuntimeError("DirectML VRAM capacity could not be measured; refusing unbounded GPU model admission")
+        raise RuntimeError(
+            "DirectML model admission has no trusted bounded memory-capacity source; "
+            "torch-directml did not report capacity and canonical Windows/WSL hardware state supplied none"
+        )
     budget_mib = VRAM_TOTAL_MIB * VRAM_LIMIT_PCT // 100
     VRAM_BUDGET_MIB = budget_mib
     if budget_mib < 1024:
@@ -319,7 +340,7 @@ def probe_dependencies() -> dict[str, Any]:
             import torch
             import torch_directml
             import transformers
-            device, device_index, vram_mib, device_name = _directml_device_and_vram(torch_directml)
+            device, device_index, vram_mib, device_name, vram_source = _directml_device_and_vram(torch_directml)
             # A real operation proves more than merely constructing the device handle.
             value = (torch.tensor([1.0], dtype=torch.float32).to(device) + 2.0).cpu().item()
             if abs(float(value) - 3.0) > 0.001:
@@ -330,18 +351,25 @@ def probe_dependencies() -> dict[str, Any]:
                 pass
             TORCH = torch
             DML_DEVICE = device
-            global VRAM_TOTAL_MIB, VRAM_BUDGET_MIB
+            global VRAM_TOTAL_MIB, VRAM_BUDGET_MIB, VRAM_SOURCE
             VRAM_TOTAL_MIB = vram_mib
+            VRAM_SOURCE = vram_source
             VRAM_BUDGET_MIB = vram_mib * VRAM_LIMIT_PCT // 100
+            detail = "DirectML tensor probe passed"
+            if vram_mib > 0:
+                detail += f"; VRAM capacity={vram_mib}MiB source={vram_source}"
+            else:
+                detail += "; VRAM capacity unavailable (model admission will remain fail-closed)"
             DEPENDENCY_PROBE = {
                 "ready": True,
-                "detail": "DirectML tensor + VRAM-capacity probe passed",
+                "detail": detail,
                 "torch": getattr(torch, "__version__", "unknown"),
                 "transformers": getattr(transformers, "__version__", "unknown"),
                 "device": str(device),
                 "device_index": device_index,
                 "device_name": device_name,
                 "vram_total_mib": VRAM_TOTAL_MIB,
+                "vram_source": VRAM_SOURCE,
                 "vram_budget_mib": VRAM_BUDGET_MIB,
                 "vram_limit_pct": VRAM_LIMIT_PCT,
             }
@@ -670,7 +698,7 @@ def stream_chunks(handler: BaseHTTPRequestHandler, result: dict[str, Any], model
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
-    server_version = "LatticeValeDirectML/14.5.4"
+    server_version = "LatticeValeDirectML/14.5.47"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -715,6 +743,10 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "max_context": MAX_CONTEXT,
                     "effective_max_context": EFFECTIVE_MAX_CONTEXT,
                     "vram_total_mib": VRAM_TOTAL_MIB or None,
+                    "vram_source": VRAM_SOURCE,
+                    "declared_vram_mib": DECLARED_VRAM_MIB or None,
+                    "declared_vram_source": DECLARED_VRAM_SOURCE,
+                    "declared_vram_confidence": DECLARED_VRAM_CONFIDENCE,
                     "vram_limit_pct": VRAM_LIMIT_PCT,
                     "vram_budget_mib": VRAM_BUDGET_MIB or None,
                     "model_weight_mib": MODEL_WEIGHT_MIB or None,

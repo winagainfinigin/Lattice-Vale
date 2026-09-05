@@ -1,16 +1,21 @@
-# LatticeVale v14.5.46 — Stable
+# LatticeVale v14.6.0 — Stable
 
-**Current release:** v14.5.46 adds GPU-aware questionnaire recommendations and selected-path WSL prerequisite reuse/provisioning while retaining v14.5.45 PowerShell compatibility, v14.5.44 DirectML WSL GPU preflight, and v14.5.43 cumulative universal **Resume / repair** migration for any older recognized installer-managed stack. The current full installer proves ownership, detects historical version/schema state, refuses downgrades/future schemas, takes a verified rollback backup, stages the current installer-owned management layer, replays stale checkpoint migrations, refreshes declared managed pins, and regenerates policy v11 from current hardware. No intermediate LatticeVale release is required. Same-version repair remains local-first.
+> **Current documentation set:** v14.6.0. Repository/release packaging rules are documented in [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md); historical v13 notes are repository-only archives.
 
-**Preservation boundary:** unrecognized/corrupt stacks fail closed rather than being adopted as fresh. Persistent Hermes/Matrix/Honcho/QMD/SearXNG/Ollama/DirectML/vault/workspace/user-override state remains preservation-first. Legacy managed Ollama without an acceleration setting becomes explicit CPU during cumulative migration instead of silently opting into GPU.
 
-**Canonical resource state:** policy v11 freezes one finalized policy object and uses it for generated Compose, `.latticevale-resource-state`, live verification, and `resource-policy-report.txt`. Separate hardware/policy SHA-256 fingerprints make hardware changes and policy drift independently detectable. `resource-policy-report.txt` is intentionally secret-free and is the first diagnostic to attach for resource-policy support.
+**Current release:** v14.6.0 consolidates hardware discovery, backend capability/health/selection, resource-policy calculation, canonical validation, diagnostics, and repair dependency tracking. Start with [QUICKSTART.md](QUICKSTART.md); task-oriented current docs are now separate from historical changelog material.
 
-**Release qualification:** v14.5.46 requires exactly 139 deterministic fixtures across six shards, source-tree contamination checks, exact source-manifest verification, exact v14.5.45→v14.5.46 patch round-trip, and fresh-extraction ZIP equivalence before artifacts are publishable.
+**Architecture:** durable choices stay in `install-options.json`; generated Windows/WSL hardware, backend, health, and resource-policy state lives under `data/latticevale/` with explicit schemas and fingerprints. DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU are capabilities rather than vendor assumptions.
 
-> **v14.5.4:** hardens the optional DirectML hybrid backend with fail-closed VRAM admission and a lower-memory resource-policy v10 for common <=12 GiB WSL allocations. Ollama remains fallback and Honcho embedding authority; existing installations do not switch automatically.
+**Historical 14.5.47 repair hotfix lineage:** the revised 14.5.47 package accepted its schema-21 repair state and used one canonical policy-v11 host-memory calculation for both generation and verification. DirectML host reserve is derived from WSL-visible RAM independently of Linux-native GPU enumeration, while managed Ollama continues to resolve Auto among CUDA, ROCm, Vulkan, and CPU based on the devices it can actually use.
 
-> **v14.5.2:** historical cleanup/recovery release. It added the isolated Option 7 cleanup/reclaim path and a low-space recovery gate that permits only Verify or Cleanup for a recognized managed stack below the ordinary repair floor. It otherwise inherited v14.5.1 resource policy v9, OOM-aware audit/repair detection, model-aware managed-Ollama sizing, and live Docker CPU/RAM convergence unchanged. Current installs and repairs should use v14.5.46; Option 7 remains available there.
+**GPU paths:** managed Ollama supports Auto, CPU, NVIDIA CUDA, AMD/ROCm, and Vulkan; DirectML remains an optional WSL-host text backend with Ollama fallback; native Windows Ollama remains user-owned. Vulkan requires an existing WSL `/dev/dri/renderD*` device and real `ollama ps` offload proof before GPU execution is trusted. LatticeVale never installs/replaces Windows/vendor display drivers.
+
+**Release qualification:** v14.6.0 requires exactly 142 deterministic fixtures across six shards, both resume simulations, source-tree contamination checks, corrected v14.5.47 schema-21 migration coverage, exact declarative release-content/source-manifest verification, repository-patch round-trip equivalence, and fresh-extraction ZIP byte equivalence before artifacts are publishable.
+
+**Resource diagnostics:** `~/hermes-stack/resource-policy-report.txt` remains the secret-free explanation of resource policy v12, GPU/offload state, generated ceilings, and hardware/policy fingerprints; `./manage.sh audit` independently verifies the same state.
+
+> **v14.5.2:** historical cleanup/recovery release. It added the isolated Option 7 cleanup/reclaim path and a low-space recovery gate that permits only Verify or Cleanup for a recognized managed stack below the ordinary repair floor. It otherwise inherited v14.5.1 resource policy v9, OOM-aware audit/repair detection, model-aware managed-Ollama sizing, and live Docker CPU/RAM convergence unchanged. Current installs and repairs should use v14.6.0; Option 7 remains available there.
 
 > **v14.4.85:** prior direct-install release. It promotes the accumulated pre-release reliability fixes into a normal versioned release, retaining the v14.4.84 WSL lifecycle repair while adding startup-aware reconcile/post-gateway readiness, exact checked gateway lifecycle handling, a bundle-owned Option 6 pre-update safety backup that can safely read container-owned persistent files, and a useful Option 3 read-only verification report. Existing v14.4.84 installs should run the full v14.4.85 release and choose Resume / repair.
 
@@ -24,7 +29,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retained those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4; v14.5.1 advanced enabled adaptive state to policy v9; v14.5.2 retained that policy unchanged while adding cleanup/recovery; v14.5.4 advanced the DirectML/low-memory branch to policy v10; and v14.5.42 advanced enabled adaptive state to policy v11; current v14.5.46 retains policy v11, v14.5.44 DirectML preflight, and v14.5.43 cumulative repair migration while retaining the earlier repair-convergence, Hermes/web maintenance, and managed-refresh revision/age/explicit-force model.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retained those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4; v14.5.1 advanced enabled adaptive state to policy v9; v14.5.2 retained that policy unchanged while adding cleanup/recovery; v14.5.4 advanced the DirectML/low-memory branch to policy v10; and v14.5.42 advanced enabled adaptive state to policy v11; v14.5.47 retained policy v11 and the v14.5.44 DirectML/v14.5.43 migration work; current v14.6.0 advances to canonical policy v12 while retaining those repair-convergence, Hermes/web maintenance, and managed-refresh guarantees.
 
 For detailed history, use `CHANGELOG.md`. Detailed implementation/audit notes for the v14.x patch line are consolidated in `PATCH-NOTES.md`; the v13 archive remains under `legacy-patch-notes/`.
 
@@ -43,17 +48,16 @@ Run public entry points from the repository root using `./installer/...` as show
 
 ### Inherited v14.4.3 RAM-efficiency policy
 
-When adaptive container resource limits are enabled, current policy v11:
+When adaptive container resource limits are enabled, current policy v12:
 
 - CPU ceilings scale from processors actually visible to WSL (`nproc` semantics): Hermes about 75%, managed Ollama 100%, medium services about 50%, light stores about 25%, with a one-CPU minimum. Hermes may rise toward 100% when additional persistent Matrix profile gateways or Kanban concurrency above 3 increase in-container workload.
 - Memory minima are computed only from enabled services and configured Hermes topology. The 1024 MiB Hermes baseline covers the default gateway plus up to one secondary Matrix gateway and Kanban concurrency up to 3; each additional persistent secondary Matrix gateway adds 192 MiB and each Kanban slot above 3 adds 96 MiB, capped at a 4096 MiB topology floor. If those minima cannot fit inside the post-reserve container budget, policy v9 refuses the plan instead of proportionally shrinking containers into implausibly small hard limits.
 - Clean/repair/start reconciliation verifies effective Compose `mem_limit` and `cpus` against live Docker `HostConfig.Memory` and `HostConfig.NanoCpus`; user `compose.override.yaml` remains final and authoritative.
 
 
-- derives ceilings from CPU/RAM actually visible inside WSL while reserving 30% on <=6 GiB; 10% on >6-12 GiB when CPU-backed managed Ollama is selected; 20% on other >6-24 GiB shapes; and 15% above 24 GiB, with bounded reserve floors/caps;
+- derives host reserve, DirectML host reserve, container budget, and service ceilings continuously from CPU/RAM actually visible inside WSL, with bounded safety floors/caps rather than fixed host-size bands;
 - applies `MALLOC_ARENA_MAX` to long-lived glibc/Python services to limit allocator arena growth;
-- lowers Synapse's supported `SYNAPSE_CACHE_FACTOR` on smaller WSL VMs;
-- uses 64 MiB PostgreSQL `shared_buffers` on <=12 GiB WSL VMs and 128 MiB above that while preserving Honcho PostgreSQL's existing `max_connections=200`;
+- derives Synapse cache and PostgreSQL `shared_buffers` tuning from live WSL resources plus the actual generated service allocations while preserving Honcho PostgreSQL's existing `max_connections=200`;
 - keeps user `compose.override.yaml` last and authoritative.
 
 The policy is applied on clean install and regenerated on repair/start when an older resource-policy revision or changed WSL CPU/RAM fingerprint is detected. LatticeVale does not set a global WSL memory cap or `autoMemoryReclaim`; current WSL memory-reclaim behavior remains host/user-owned.
@@ -70,7 +74,7 @@ Normal uninstall now refuses to continue if stack metadata indicates Docker runt
 - Optional Matrix/Synapse with PostgreSQL, encrypted managed rooms, and optional dedicated profile Matrix identities/rooms.
 - Optional SearXNG, QMD, Windows-local Obsidian integration, Honcho memory, and Hermes Dashboard.
 - Managed WSL/Docker Ollama or integration with a separately installed native Windows Ollama backend.
-- Optional Auto/CPU/NVIDIA/AMD-ROCm managed-Ollama acceleration when prerequisites are verified.
+- Optional Auto/CPU/NVIDIA/AMD-ROCm/Vulkan managed-Ollama acceleration when prerequisites are verified.
 - Optional adaptive per-container CPU/RAM ceilings based on WSL-visible resources.
 - Optional Windows Tailscale Serve exposure for selected private services; public Funnel is not the managed path.
 - Preservation-first Resume/repair, scoped component changes, read-only verification, provider/profile reconfiguration, advanced recovery, controlled bundle-aligned update/repair, backup, and lifecycle tooling.
@@ -80,7 +84,7 @@ See **`FEATURES.md`** for the complete current feature and installer-option refe
 
 ### GPU acceleration and resource ceilings
 
-When **LatticeVale-managed WSL/Docker Ollama** is selected, LatticeVale can use **Auto**, **CPU**, **NVIDIA**, or **AMD/ROCm** acceleration. v14.3.5 probes the **selected Ubuntu distro** before a forced GPU mode is accepted; Windows GPU presence alone is not treated as container readiness. Auto enables an accelerator only after its WSL/Docker prerequisites pass and otherwise falls back to CPU. Forced NVIDIA requires `/dev/dxg` plus a working WSL `nvidia-smi` probe before selection and may then install/configure the tested NVIDIA Container Toolkit 1.20.0 package set; a complete newer toolkit is preserved. The managed Ollama Docker AMD/ROCm path requires x86_64 plus `/dev/kfd` and `/dev/dri`; `/dev/dxg` alone is not assumed to satisfy that path. On repair, an unusable saved forced mode is explicitly reconciled before bootstrap.
+When **LatticeVale-managed WSL/Docker Ollama** is selected, LatticeVale can use **Auto**, **CPU**, **NVIDIA**, **AMD/ROCm**, or **Vulkan** acceleration. v14.3.5 probes the **selected Ubuntu distro** before a forced GPU mode is accepted; Windows GPU presence alone is not treated as container readiness. Auto enables an accelerator only after its WSL/Docker prerequisites pass and otherwise falls back to CPU. Forced NVIDIA requires `/dev/dxg` plus a working WSL `nvidia-smi` probe before selection and may then install/configure the tested NVIDIA Container Toolkit 1.20.0 package set; a complete newer toolkit is preserved. The managed Ollama Docker AMD/ROCm path requires x86_64 plus `/dev/kfd` and `/dev/dri`; `/dev/dxg` alone is not assumed to satisfy that path. On repair, an unusable saved forced mode is explicitly reconciled before bootstrap.
 
 **Native Windows Ollama is an optional advanced integration.** It crosses Windows/WSL/Docker networking and firewall boundaries; users who prefer the smallest integration surface should select LatticeVale-managed WSL/Docker Ollama instead. See `NATIVE-OLLAMA-INTEGRATION.md` and `WINDOWS-INTEGRATION-TEST-MATRIX.md`.
 
@@ -279,7 +283,7 @@ The Dashboard normally remains on `http://localhost:9119`. Matrix/Synapse is loc
 
 Repair checkpoints are recorded in `.installer-state.json`, but they never override live validation. **The state file is only a hint**: repair stages still verify the components they own and rerun required migrations when the installed release changes.
 
-In v14.4.5, adaptive runtime/RAM policy is reconciled outside the old `prepare_config` checkpoint. If policy v11 is missing/stale, the WSL-visible CPU/RAM fingerprint changed, or the Matrix-profile/Kanban topology changed, repair regenerates the installer-owned overlay, marks infrastructure/full-stack reconciliation pending, and requires a final live policy verification before declaring success.
+In v14.4.5, adaptive runtime/RAM policy is reconciled outside the old `prepare_config` checkpoint. If policy v12 is missing/stale, the WSL-visible CPU/RAM fingerprint changed, or the Matrix-profile/Kanban topology changed, repair regenerates the installer-owned overlay, marks infrastructure/full-stack reconciliation pending, and requires a final live policy verification before declaring success.
 
 Managed software refresh is policy-aware rather than version-number-driven. Normal Resume / repair runs the bounded installer-owned package/image/source refresh when the 30-day age gate is due, the `MANAGED_REPAIR_REFRESH_REVISION` changes, or a legacy install lacks valid refresh state. The marker still records the installer version for provenance, but a version change alone does not trigger another pull/build cycle. An interrupted refresh with the same refresh-policy revision resumes its user-level phase without repeating completed root package work; a revision mismatch reruns the bounded root phase. Explicit Update / repair always forces the current bundle's managed refresh.
 
@@ -347,3 +351,8 @@ Third-party components retain their own licenses and security policies. **Honcho
 
 The original granular pre-LatticeVale v13 patch notes from the v13.16.6 bundle are preserved verbatim under `docs/legacy-patch-notes/hermes-wsl-foundry-v13/`. They are archival and may describe superseded behavior; use the current documentation for current LatticeVale behavior.
 
+
+
+## GitHub repository and release packaging
+
+See [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md) for repository-size/path constraints, community-health file locations, archive-root requirements, release-content policy, and pre-publication checks.

@@ -18,6 +18,41 @@ function Assert-LatticeValePortableReleaseRelativePath {
 }
 
 
+
+function Get-LatticeValeReleaseContentPolicy {
+    param([Parameter(Mandatory=$true)][string]$ReleaseRoot)
+    Set-StrictMode -Version 2.0
+    $policyPath = Join-Path $ReleaseRoot 'LatticeVale-Core\release\release-content.json'
+    $default = [pscustomobject]@{ schema = 1; repositoryOnlyPrefixes = @() }
+    if (-not (Test-Path -LiteralPath $policyPath -PathType Leaf)) { return $default }
+    try { $policy = Get-Content -LiteralPath $policyPath -Raw | ConvertFrom-Json }
+    catch { throw "Release-content policy is invalid JSON: $policyPath`n$($_.Exception.Message)" }
+    if ($null -eq $policy -or $policy.schema -ne 1) { throw 'Release-content policy schema must be 1.' }
+    $prefixes = @()
+    foreach ($prefixRaw in @($policy.repositoryOnlyPrefixes)) {
+        $prefix = [string]$prefixRaw
+        if ([string]::IsNullOrWhiteSpace($prefix)) { throw 'Release-content repositoryOnlyPrefixes must not contain empty values.' }
+        $prefix = $prefix.Replace('\','/').TrimStart('/')
+        if (-not $prefix.EndsWith('/')) { throw "Repository-only release prefix must end with '/': $prefix" }
+        Assert-LatticeValePortableReleaseRelativePath ($prefix.TrimEnd('/'))
+        $prefixes += $prefix
+    }
+    return [pscustomobject]@{ schema = 1; repositoryOnlyPrefixes = @($prefixes) }
+}
+
+function Test-LatticeValeRepositoryOnlyRelativePath {
+    param(
+        [Parameter(Mandatory=$true)][string]$RelativePath,
+        [Parameter(Mandatory=$true)]$Policy
+    )
+    $normalized = $RelativePath.Replace('\','/').TrimStart('/')
+    foreach ($prefix in @($Policy.repositoryOnlyPrefixes)) {
+        if ($normalized.StartsWith([string]$prefix,[StringComparison]::OrdinalIgnoreCase)) { return $true }
+        if (($normalized + '/').Equals([string]$prefix,[StringComparison]::OrdinalIgnoreCase)) { return $true }
+    }
+    return $false
+}
+
 function Assert-LatticeValePowerShellSourceEncoding {
     param(
         [Parameter(Mandatory=$true)][string]$Path,
@@ -49,6 +84,7 @@ function Test-LatticeValeSourceManifest {
     else { $root = $rootFull.TrimEnd('\','/') }
     $manifest = [IO.Path]::GetFullPath($ManifestPath)
     if (-not (Test-Path -LiteralPath $manifest -PathType Leaf)) { throw "Source manifest not found: $manifest" }
+    $releasePolicy = Get-LatticeValeReleaseContentPolicy -ReleaseRoot $root
     $checked=0; $listed=@{}
     foreach ($line in Get-Content -LiteralPath $manifest) {
         if ([string]::IsNullOrWhiteSpace($line) -or $line.TrimStart().StartsWith('#')) { continue }
@@ -86,7 +122,11 @@ function Test-LatticeValeSourceManifest {
         if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw "Release tree must not contain reparse points: $relativeItem" }
         Assert-LatticeValePortableReleaseRelativePath $relativeItem
     }
-    $actualFiles=@($items | Where-Object { -not $_.PSIsContainer -and [IO.Path]::GetFullPath($_.FullName) -ne $manifest })
+    $actualFiles=@($items | Where-Object {
+        if ($_.PSIsContainer -or [IO.Path]::GetFullPath($_.FullName) -eq $manifest) { return $false }
+        $relativeCandidate=$_.FullName.Substring($root.Length).TrimStart('\','/').Replace('\','/')
+        return -not (Test-LatticeValeRepositoryOnlyRelativePath -RelativePath $relativeCandidate -Policy $releasePolicy)
+    })
     foreach ($file in $actualFiles) {
         $relativeActual=$file.FullName.Substring($root.Length).TrimStart('\','/').Replace('\','/')
         if (-not $listed.ContainsKey($relativeActual.ToLowerInvariant())) {

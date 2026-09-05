@@ -11,6 +11,10 @@ Usage: ./manage.sh COMMAND [ARG]
   status                 Show current Hermes/service state without treating normal startup as failure
   verify [seconds]       Wait up to 300s (or supplied timeout) for the selected stack to become healthy
   audit                  State-aware read-only audit (includes incomplete/legacy state)
+  diagnose               Canonical hardware/backend/resource diagnostic summary
+  diagnose-gpu           Refresh and print canonical Windows/WSL hardware capabilities
+  diagnose-backends      Refresh and print backend capabilities/selection
+  diagnose-policy        Validate and print canonical runtime resource policy
   audit-free             Read-only check of the current free/local operating path
   plan [--offline]       Show a read-only repair plan; never changes the stack
   repair --plan [--offline]
@@ -1074,7 +1078,7 @@ backup() {
   fi
   local -a items=()
   for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-managed-profiles .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
-    compose.yaml directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
+    compose.yaml compatibility.conf latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/latticevale data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
     [[ -e "$p" ]] && items+=("$p")
   done
   [[ "$matrix_dumped" == false && -e data/synapse-db ]] && items+=(data/synapse-db)
@@ -1100,6 +1104,25 @@ if [[ "$cmd" == matrix-profile-finish ]]; then
   }
   ensure_docker_for_user
   finish_matrix_profile "$2"
+  exit $?
+fi
+
+if [[ "$cmd" == diagnose || "$cmd" == diagnose-gpu || "$cmd" == diagnose-backends || "$cmd" == diagnose-policy ]]; then
+  [[ -s install-options.json && -s compatibility.conf && -s latticevale_arch.py ]] || {
+    echo 'Canonical diagnostics are not staged far enough to run safely. Rerun the Windows installer or use its Windows-side diagnostics.' >&2
+    exit 1
+  }
+  case "$cmd" in
+    diagnose) python3 ./diagnostics.py --stack . ;;
+    diagnose-gpu)
+      python3 ./hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json --json ;;
+    diagnose-backends)
+      python3 ./hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json >/dev/null
+      python3 ./backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json --json ;;
+    diagnose-policy)
+      python3 ./runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json
+      python3 -m json.tool data/latticevale/runtime-policy.json ;;
+  esac
   exit $?
 fi
 
