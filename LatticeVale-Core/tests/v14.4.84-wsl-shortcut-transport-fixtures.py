@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
+assert version in {'14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, version
 
 launcher = (ROOT / 'windows' / 'LatticeVale-Shortcut.ps1').read_text(encoding='ascii')
 installer = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
@@ -59,8 +59,8 @@ assert 'wsl.exe --terminate' not in repair
 
 # Root public guidance must direct existing installs to the full current release
 # and keep the source-only overwrite patch separate from live-stack repair.
-assert (f'# LatticeVale v{version}' in root_readme) if version in {'14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'} else ('# LatticeVale v14.5.1' in root_readme)
-if version in {'14.5.43','14.5.44','14.5.45','14.5.46'}:
+assert (f'# LatticeVale v{version}' in root_readme) if version in {'14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'} else ('# LatticeVale v14.5.1' in root_readme)
+if version in {'14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}:
     assert f'For **any recognized older installer-managed LatticeVale installation**, launch the **full v{version} release**' in root_readme
     assert 'choose **Resume / repair installation**' in root_readme
     assert 'not a universal Git diff' in root_readme and 'patch ZIP remains for source checkouts only' in root_readme

@@ -1,5 +1,9 @@
 # LatticeVale 14.6.0 Test Confidence Levels
 
+## v14.6.0 policy-13 release additions
+
+The canonical architecture fixture includes a **3,328-case** CPU/backend/service-topology property sweep (13 CPU counts × 4 acceleration modes × 64 service/DirectML topologies), irregular RAM/resource sweeps, explicit boundary probes around host-reserve floor/ratio/cap transitions, GPU opt-out, DirectML fail-closed fallback, schema-21→23 and schema-22→23 migration, and aggregate CPU conservation. DirectML fixtures prohibit `torch.inference_mode()` and require `torch.no_grad()`, require the fail-closed fallback helper to exist, require bounded gateway diagnostics on a failed HTTP self-test, and require the version-gated Qwen2 `torch.where` compatibility path. The regression runner isolates each fixture in its own process group so descendants cannot retain CI pipes.
+
 1. **Static/source** — syntax, encoding, manifest, forbidden patterns, architecture ownership assertions.
 2. **Deterministic fixtures** — mocked migration, repair, backend, resource-policy, networking, preservation, and release contracts.
 3. **WSL integration** — real supported Ubuntu WSL distro behavior.

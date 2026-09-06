@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
-assert version in {"14.4.85", "14.5.0","14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46'}, version
+assert version in {"14.4.85", "14.5.0","14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}, version
 chg = (REPO / "docs/CHANGELOG.md").read_text(encoding="utf-8")
 assert "## 14.4.85 - 2026-08-28" in chg
 patch = (REPO / "docs/PATCH-NOTES.md").read_text(encoding="utf-8")

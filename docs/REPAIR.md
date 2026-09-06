@@ -1,5 +1,9 @@
 # LatticeVale 14.6.0 Resume / Repair
 
+## Schema 21/22 to schema 23 migration
+
+Resume / repair accepts recognized schema-21 and schema-22 managed state and normalizes it to schema 23 without resetting application data. Older DirectML state that lacks `directmlFallbackPolicy` inherits its prior Ollama backend as the text fallback. Existing state without `useGpuAcceleration` preserves the historical GPU-enabled behavior; after the user explicitly disables GPU acceleration, repair preserves CPU-only operation. Policy v13 is regenerated from current WSL resources and enabled service topology.
+
 ## Use Option 1 for an existing installation
 
 Launch the **full 14.6.0 release** and select **Resume / repair installation**. The repair engine proves managed ownership, reads historical installer metadata, creates the required rollback backup before managed-source refresh, stages the current management layer, migrates schemas, regenerates derived architecture state, and resumes from the earliest stale/incomplete dependency.

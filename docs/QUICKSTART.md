@@ -1,5 +1,9 @@
 # LatticeVale 14.6.0 Quickstart
 
+## Current local-AI choice
+
+When prompted, choose whether to use GPU acceleration. If DirectML is selected, also choose its Ollama **text** fallback: native Windows, managed WSL/Docker, or none (fail closed). This does not control Honcho's separate embedding role. Adaptive resource policy v13 automatically divides only the resources visible to WSL among the services you enabled.
+
 LatticeVale installs into an **existing supported Ubuntu WSL2 distribution**. It does not create, import, convert, unregister, update, or repair WSL distributions, and it does not install or replace Windows display drivers.
 
 ## 1. Before running the installer

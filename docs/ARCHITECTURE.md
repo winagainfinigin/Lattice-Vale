@@ -1,5 +1,9 @@
 # LatticeVale 14.6.0 Architecture
 
+## Schema 23 / policy 13 ownership
+
+Schema 23 adds durable GPU enablement and DirectML text-fallback intent. Policy 13 derives one CPU envelope from WSL-visible processors and divides only its Docker portion among enabled services; it does not let each container independently claim the whole WSL CPU set. Ollama roles are modeled separately for normal text, DirectML text fallback, and Honcho embeddings. Runtime DirectML failure is allowed to alter active health/fallback state without changing durable resource topology.
+
 ## Principle
 
 **Detect once, classify once, calculate once, validate once.** Downstream components consume canonical derived state instead of independently recreating hardware/backend/resource assumptions.

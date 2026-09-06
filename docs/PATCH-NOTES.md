@@ -1,4 +1,61 @@
-# Current v14.5.46 patch notes
+# Current v14.6.0 patch notes
+
+## v14.6.0 same-version schema-23 / policy-13 completion
+
+- Adds durable `useGpuAcceleration` and the three-way `directmlFallbackPolicy`.
+- Separates Ollama text-fallback and Honcho embedding roles.
+- Changes DirectML generation from `torch.inference_mode()` to `torch.no_grad()` and makes fallback `none` strictly fail closed.
+- Replaces independently oversized service CPU fractions with one conserved WSL-visible CPU envelope: about 10% system headroom, an additional about 25% DirectML host reserve when selected, and the remainder as the aggregate Docker ceiling.
+- Adds schema-21/schema-22 migration coverage, 3,328 CPU/backend/topology property cases, runner process isolation, and the corrected v14.5.47 GPU-audit recovery file in repository patching.
+- Corrects a fail-closed DirectML installer bug where `text_fallback_enabled` was referenced before being defined.
+- Adds a process-local Transformers 4.46.3 Qwen2/Qwen2.5 DirectML mask compatibility shim using `torch.where`, avoiding known DirectML failures in the pinned causal-mask path without modifying the system Python install or upstream package files.
+- Makes DirectML host-RAM budgeting continuously monotonic: about 30% of live WSL RAM, with a 2 GiB floor when the allocation can support it, an 8 GiB cap, and no 6 GiB/known-PC threshold. Impossible service/model combinations continue to fail closed.
+- DirectML self-test HTTP failures now emit the curl error plus a bounded gateway-log tail before fallback/fail-closed handling.
+
+## v14.6.0 same-version GPU portability / repair-convergence hardening
+
+- DirectML capacity fallback now comes from canonical selected-adapter memory evidence instead of depending on `torch_directml.gpu_memory()` or one legacy DXDiag field. Windows DXDiag and the 64-bit display-driver registry are PNP-correlated; WMI/DWORD values are lower-bound only.
+- Dedicated VRAM and shared/UMA memory are separate. UMA admission scales with current WSL RAM and the reported shared ceiling; no exact PC topology or GPU-name special case is used.
+- A DirectML runtime/model failure records backend health and activates the existing Ollama fallback without changing resource-relevant backend identity. This prevents the observed end-of-repair `runtime-policy.json backend fingerprint is stale` abort after a safe fallback response.
+- Read-only installer diagnostics stage the current 14.6 validator and Windows snapshot even when the installed stack is still 14.5.x/legacy architecture.
+- The RX 6700 XT scenario is retained only as one regression example: DirectML eligibility follows WSL DirectML evidence; ROCm/Vulkan/CUDA/CPU remain independent capability routes.
+
+
+## v14.6.0 — architecture consolidation
+
+- Completes a full documentation synchronization for v14.6.0: current install/repair/GPU/resource/native-Ollama/security/support/testing/release/GitHub guidance now describes schema 23, policy v13, 142 fixtures, canonical adaptive resource ownership, and the single-root `Lattice-Vale/` archive contract; historical release notes remain explicitly historical.
+- Canonicalizes Windows/WSL hardware inventory, backend capability/health/selection, and resource policy instead of allowing multiple layers to re-derive machine assumptions.
+- Adds atomic, fingerprinted derived state under `data/latticevale/` and keeps durable user intent separate in schema-23 `install-options.json`.
+- Preserves DirectML independence from Linux-native GPU enumeration, keeps CUDA/ROCm/Vulkan/native-Windows/CPU paths distinct, and prevents explicit adapter intent from silently drifting to another GPU.
+- Moves options validation and host-memory-budget invariants into the shared architecture library so the installer cannot generate schema/policy state that a duplicate verifier rejects.
+- Adds read-only architecture diagnostics, repair dependency reasoning, task-oriented docs, and a declarative release-content policy.
+
+
+## v14.5.47 Hotfix 2 — Option 1 adaptive resource-policy verification fix
+
+- A DirectML repair could correctly write its adaptive host reserve and then fail `repair_runtime_policy` because the verifier still calculated the pre-hotfix fixed-tier DirectML reserve. The historical test PC exposed the mismatch, but the fix and regression coverage operate over irregular WSL memory envelopes rather than reproducing one machine as a policy target.
+- `resource_host_memory_budget()` is now the single Bash calculation used by both generation and verification. It accepts explicit RAM, resolved managed-Ollama acceleration, managed-Ollama-enabled state, and DirectML-selected state, so validation is independent of one vendor or machine.
+- The verifier now validates all three persisted budget dimensions: total `RESERVE_MIB`, `DIRECTML_HOST_RESERVE_MIB`, and `BUDGET_MIB`. `state-audit.py` mirrors the same calculation so a future drift is reported as a repairable policy mismatch.
+- DirectML remains a WSL-host `/dev/dxg` path and therefore does not require Linux-native GPU enumeration. Managed Ollama can independently resolve to NVIDIA CUDA, AMD/ROCm, Vulkan, or CPU. A system with a valid DirectML bridge and zero Linux-native GPU adapters is not itself a policy error.
+- Safety floors are unchanged: extremely small WSL allocations still fail closed rather than shrinking DirectML host headroom merely to pass verification.
+- Version remains **14.5.47**. Use the revised full release and rerun **Resume / repair installation**.
+
+## v14.5.47 Hotfix 1 — Option 1 Resume / repair schema-validation fix
+
+- The initial v14.5.47 Windows installer correctly advances managed `install-options.json` to schema 21, but the Linux `configure-stack.sh` validation block still allowed only schema 1-20. Option 1 could therefore reject the installer's own freshly normalized repair options before configuration continued.
+- The validator now accepts schema 1-21 and `repairOriginSchema` 0-21 while still rejecting future schema 22+ fail-closed. No compatibility floor, migration semantics, GPU policy, checkpoint reset, distro identity, or persistent-data ownership rule is weakened.
+- The current-release regression fixture executes the exact embedded validator against schema 21 and future-schema rejection cases, and older source-contract fixtures now assert the current bound instead of preserving the stale cap.
+- This is a same-version source/package hotfix: `VERSION.txt` remains **14.5.47**. Replace the initial 14.5.47 release ZIP and rerun **Resume / repair installation**; uninstall/reinstall is not required.
+
+## v14.5.47 — DirectML WSL GPU recovery / Vulkan fallback
+
+- DirectML receives the saved Windows adapter name in the WSL D3D12 environment before `torch_directml` imports, reducing multi-GPU selection divergence while retaining exact runtime adapter validation.
+- The installer captures selected-adapter dedicated VRAM from DXDiag. That value is a fallback only when the DirectML runtime cannot report usable dedicated memory; unknown VRAM remains a safe refusal.
+- DirectML fallback markers now include a runtime fingerprint and automatically retry once after upgrade or a relevant WSL/GPU/runtime change instead of remaining permanently latched to a stale failure.
+- `./directml-gateway.sh diagnose` and `tools/Audit-LatticeVale-Gpu.ps1` provide bounded read-only diagnosis for `/dev/dxg`, WSL bridge libraries, selected adapter/tensor execution, fallback markers, gateway health, and Docker host-gateway routing.
+- Managed Ollama adds explicit Vulkan acceleration for existing WSL DRM render nodes. It uses the standard pinned image with `/dev/dri` + `OLLAMA_VULKAN=1`; Auto/forced handling still requires real `ollama ps` offload proof before GPU-sized assumptions are accepted.
+- NVIDIA CUDA, AMD/ROCm, DirectML, native-Windows Ollama, and CPU fallback are preserved. LatticeVale does not install or replace Windows GPU drivers.
+- Options schema is **21**, managed repair refresh revision is **3**, and regression coverage is **140 deterministic fixtures**.
 
 ## v14.5.46 — GPU-aware onboarding / selected-path prerequisite provisioning
 

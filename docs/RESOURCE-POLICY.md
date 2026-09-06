@@ -1,8 +1,12 @@
-# LatticeVale 14.6.0 Canonical Resource Policy v12
+# LatticeVale 14.6.0 Canonical Resource Policy v13
+
+## Policy v13 conserved CPU envelope
+
+Policy v13 treats WSL-visible CPU as one conserved budget instead of giving every container an independent fraction of all CPUs. Approximately 10% is reserved for WSL/system scheduling. When DirectML text inference is selected, approximately 25% is reserved for its host-side worker and the remaining approximately 65% is the aggregate Docker envelope. Without DirectML, the Docker envelope is approximately 90%. Only enabled services receive quotas, and their summed ceilings must not exceed the Docker envelope. Memory remains independently derived from live WSL RAM, selected services, model requirements, and backend/GPU evidence; impossible combinations fail closed rather than overcommit critical floors.
 
 ## Single source of calculation
 
-Resource policy v12 generation and verification consume the same canonical architecture functions. `configure-stack.sh` is a compatibility/orchestration layer; it must not independently reimplement host-memory budget, CPU-quota, service-memory, context, GPU-coordination, or runtime-tuning formulas.
+Resource policy v13 generation and verification consume the same canonical architecture functions. `configure-stack.sh` is a compatibility/orchestration layer; it must not independently reimplement host-memory budget, CPU-quota, service-memory, context, GPU-coordination, or runtime-tuning formulas.
 
 The persisted policy includes at least:
 
@@ -22,6 +26,10 @@ The persisted policy includes at least:
 ## DirectML host reserve
 
 DirectML runs on the WSL host, outside the Docker service memory budget. Its host reserve therefore remains valid even when Linux-native GPU enumeration is zero. The canonical calculation treats it independently from managed Ollama acceleration.
+
+For current policy v13, ordinary host headroom scales from live WSL RAM (12% when managed Ollama is selected, otherwise 15%) with bounded safety floors/caps. When DirectML is selected, the total host reserve is raised to the larger of that ordinary reserve and a DirectML reserve derived from about 30% of live WSL RAM. The DirectML path uses a 2 GiB floor when the allocation can afford it, clamps against very small VMs so at least a minimal container-planning remainder exists, and caps the DirectML reserve at 8 GiB on large systems. The calculation uses integer-MiB scaling rather than coarse percentage rounding or RAM-size tiers, so increasing WSL RAM cannot make the calculated container budget go backward at a boundary.
+
+These values are ceilings/budget partitions, not a promise that every selected model can run on every machine. Service minima, model VRAM admission, current host `MemAvailable`, and the live DirectML model self-test are separate gates. If the selected topology cannot fit safely, LatticeVale refuses the plan or leaves DirectML unavailable according to the configured fallback policy rather than overcommitting RAM.
 
 ## CPU is supported
 

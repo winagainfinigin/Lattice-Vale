@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Deterministic, sharded LatticeVale regression-suite runner.
 
-The release contract is intentionally explicit: v14.5.46 ships 139 deterministic
+The release contract is intentionally explicit: v14.6.0 ships 142 deterministic
 *-fixtures.py programs.  The suite can be run as six bounded shards to avoid CI or
 wrapper time ceilings, while invoking this file without --shard still executes all
-shards and reports one authoritative 139/139 result.
+shards and reports one authoritative 142/142 result.
 """
 from __future__ import annotations
 
@@ -14,19 +14,22 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
+import signal
+import time
 from typing import Iterable
 
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent.parent
-EXPECTED_FIXTURE_COUNT = 139
+EXPECTED_FIXTURE_COUNT = 142
 SHARDS: tuple[tuple[str, int, int], ...] = (
     ("01-core", 1, 25),
     ("02-installer", 26, 50),
     ("03-repair-update", 51, 75),
     ("04-resource-policy", 76, 100),
     ("05-gpu-directml", 101, 120),
-    ("06-release", 121, 139),
+    ("06-release", 121, 142),
 )
 FORBIDDEN_FILE_NAMES = {".DS_Store", "Thumbs.db"}
 FORBIDDEN_SUFFIXES = {".pyc", ".pyo", ".tmp", ".bak", ".swp"}
@@ -62,23 +65,79 @@ def shard_slice(all_fixtures: list[Path], shard_name: str) -> list[tuple[int, Pa
     raise KeyError(shard_name)
 
 
+def _group_exists(pgid: int) -> bool:
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def _reap_group(pgid: int, grace: float = 1.5) -> None:
+    """Boundedly reap descendants so one fixture cannot retain the CI output pipe."""
+    if not _group_exists(pgid):
+        return
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    deadline = time.monotonic() + grace
+    while time.monotonic() < deadline:
+        if not _group_exists(pgid):
+            return
+        time.sleep(0.05)
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+
 def run_items(items: Iterable[tuple[int, Path]]) -> tuple[int, list[dict[str, object]]]:
     failures = 0
     results: list[dict[str, object]] = []
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env.setdefault("TERM", "dumb")
+    fixture_timeout = int(env.get("LATTICEVALE_FIXTURE_TIMEOUT", "900"))
     for index, fixture in items:
         print(f"[{index:03d}/{EXPECTED_FIXTURE_COUNT}] {fixture.name}", flush=True)
-        proc = subprocess.run(
-            [sys.executable, str(fixture)],
-            cwd=str(ROOT.parent),
-            check=False,
-            env=env,
-        )
-        ok = proc.returncode == 0
+        with tempfile.TemporaryFile(mode="w+") as stdout, tempfile.TemporaryFile(mode="w+") as stderr:
+            proc = subprocess.Popen(
+                [sys.executable, str(fixture)],
+                cwd=str(ROOT.parent),
+                env=env,
+                stdout=stdout,
+                stderr=stderr,
+                text=True,
+                start_new_session=True,
+            )
+            pgid = proc.pid
+            timed_out = False
+            try:
+                returncode = proc.wait(timeout=fixture_timeout)
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                _reap_group(pgid)
+                try:
+                    returncode = proc.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    returncode = proc.wait()
+            finally:
+                _reap_group(pgid)
+            stdout.seek(0); stderr.seek(0)
+            out = stdout.read(); err = stderr.read()
+        if out:
+            print(out, end="" if out.endswith("\n") else "\n", flush=True)
+        if err:
+            print(err, end="" if err.endswith("\n") else "\n", file=sys.stderr, flush=True)
+        ok = returncode == 0 and not timed_out
+        if timed_out:
+            print(f"Fixture exceeded {fixture_timeout}s hard timeout.", file=sys.stderr, flush=True)
         print(f"{'PASS' if ok else 'FAIL'} {index:03d} {fixture.name}", flush=True)
-        results.append({"index": index, "fixture": fixture.name, "returncode": proc.returncode, "status": "PASS" if ok else "FAIL"})
+        results.append({"index": index, "fixture": fixture.name, "returncode": returncode, "status": "PASS" if ok else "FAIL", "timedOut": timed_out})
         if not ok:
             failures += 1
     return failures, results

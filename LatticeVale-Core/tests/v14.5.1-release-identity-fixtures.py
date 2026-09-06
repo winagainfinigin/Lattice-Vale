@@ -4,7 +4,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
-assert version in {"14.5.1", "14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46'}, version
+assert version in {"14.5.1", "14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}, version
 changelog = (REPO / "docs/CHANGELOG.md").read_text(encoding="utf-8")
 patch_notes = (REPO / "docs/PATCH-NOTES.md").read_text(encoding="utf-8")
 root_readme = (REPO / "README.md").read_text(encoding="utf-8")

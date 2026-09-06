@@ -1,5 +1,9 @@
 # LatticeVale 14.6.0 Troubleshooting
 
+## DirectML fail-closed and high-CPU checks
+
+If DirectML was configured with no Ollama text fallback, a DirectML worker/model failure is expected to leave local text inference unavailable rather than silently switch to Ollama. Resume / repair removes any legacy forced-fallback marker under this policy. For unexpected CPU saturation, inspect `resource-policy-report.txt`: policy v13 records system headroom, DirectML reserve, Docker envelope, aggregate Docker allocation, and per-service quotas. The aggregate Docker allocation must be at or below the Docker envelope.
+
 ## Repair fails after generating configuration
 
 Use the reported stage and reason code. Do not immediately recreate the distro. Run the read-only diagnostics and rerun Option 1 after correcting the prerequisite. Current generated options/policy must validate through the canonical architecture layer before downstream service work continues.
@@ -14,6 +18,12 @@ That is not enough evidence to declare all GPU acceleration broken. Check each r
 - Vulkan: DRM render device plus runtime execution proof.
 
 CPU fallback remains valid when no GPU backend is usable.
+
+## DirectML tensor probe passes but the model self-test has no HTTP response
+
+A passing tensor probe proves the WSL DirectX bridge, `torch_directml` import, selected adapter, and a simple device operation. It does **not** prove that every Transformers model/operator used during generation is supported. Current v14.6.0 additionally protects the pinned Qwen2/Qwen2.5 path from known DirectML causal-mask `masked_fill`/in-place-mask failures and fixes the fail-closed helper used when Ollama text fallback is disabled.
+
+On Resume / repair, LatticeVale rebuilds/revalidates its isolated DirectML environment and retries the model self-test. If the HTTP request still terminates, the self-test now prints the bounded curl error and the last 120 lines of `logs/directml-gateway.log` before applying the configured fallback policy. With fallback `none`, this remains a hard fail-closed result; with a configured Ollama text fallback, LatticeVale may activate the bounded fallback marker and continue. Do not interpret a successful standalone system-Python tensor test as proof that the managed model-generation path is healthy.
 
 ## DirectML gateway uses Ollama fallback because memory capacity is unavailable
 

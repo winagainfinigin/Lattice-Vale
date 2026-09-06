@@ -4,7 +4,7 @@ import argparse,json,sys
 from pathlib import Path
 sys.dont_write_bytecode=True
 from latticevale_arch import (
-    atomic_write_json, build_runtime_policy_document, cpu_profile, cpu_quota_plan, directml_context_recommendation, directml_cpu_thread_plan, directml_generation_limit,
+    atomic_write_json, build_runtime_policy_document, cpu_envelope_plan, cpu_profile, cpu_quota_plan, directml_context_recommendation, directml_cpu_thread_plan, directml_generation_limit,
     gpu_context_recommendation, gpu_coordination, hermes_floor_mib, host_memory_budget, ollama_model_floor,
     load_json, ollama_runtime_settings, parse_compatibility, parse_env_state, ram_context_recommendation,
     ram_profile, runtime_tuning, schema_value, service_memory_plan,
@@ -28,7 +28,8 @@ def main()->int:
     q=sub.add_parser('hermes-floor'); q.add_argument('matrix_gateways',type=int); q.add_argument('kanban_concurrency',type=int)
     q=sub.add_parser('ollama-floor'); q.add_argument('mem_mib',type=int); q.add_argument('artifact_mib',type=int); q.add_argument('context_tokens',type=int); q.add_argument('accel'); q.add_argument('hybrid',type=tf); q.add_argument('usable_gpu_max_mib',type=int,nargs='?',default=0); q.add_argument('usable_gpu_total_mib',type=int,nargs='?',default=0)
     q=sub.add_parser('gpu-coordination'); q.add_argument('accel'); q.add_argument('count',type=int); q.add_argument('min_mib',type=int); q.add_argument('max_mib',type=int); q.add_argument('directml_vendor'); q.add_argument('directml_selected',type=tf)
-    q=sub.add_parser('cpu-plan'); q.add_argument('cpus',type=int); q.add_argument('matrix_gateways',type=int); q.add_argument('kanban_concurrency',type=int); q.add_argument('accel')
+    q=sub.add_parser('cpu-plan'); q.add_argument('cpus',type=int); q.add_argument('matrix_gateways',type=int); q.add_argument('kanban_concurrency',type=int); q.add_argument('accel'); q.add_argument('matrix',type=tf); q.add_argument('searxng',type=tf); q.add_argument('qmd',type=tf); q.add_argument('ollama',type=tf); q.add_argument('honcho',type=tf); q.add_argument('directml',type=tf)
+    q=sub.add_parser('cpu-envelope'); q.add_argument('cpus',type=int); q.add_argument('directml',type=tf)
     q=sub.add_parser('tuning'); q.add_argument('mem_mib',type=int); q.add_argument('cpus',type=int); q.add_argument('synapse_mib',type=int); q.add_argument('database_mib',type=int)
     q=sub.add_parser('service-plan'); q.add_argument('budget_mib',type=int); q.add_argument('matrix',type=tf); q.add_argument('searxng',type=tf); q.add_argument('qmd',type=tf); q.add_argument('ollama',type=tf); q.add_argument('honcho',type=tf); q.add_argument('hermes_floor',type=int); q.add_argument('ollama_floor',type=int)
     for name in ('write','verify'):
@@ -56,9 +57,11 @@ def main()->int:
         if a.cmd=='gpu-coordination':
             r=gpu_coordination(a.accel,a.count,a.min_mib,a.max_mib,a.directml_vendor,a.directml_selected); print(f"{r['ollamaGpuOverheadMiB']}:{r['directmlVramLimitPct']}:{str(r['sharedVendor']).lower()}"); return 0
         if a.cmd=='cpu-plan':
-            r=cpu_quota_plan(a.cpus,a.matrix_gateways,a.kanban_concurrency,a.accel)
+            r=cpu_quota_plan(a.cpus,a.matrix_gateways,a.kanban_concurrency,a.accel,matrix=a.matrix,searxng=a.searxng,qmd=a.qmd,ollama=a.ollama,honcho=a.honcho,directml_selected=a.directml)
             for k,v in r.items(): print(f'{k}={v}')
             return 0
+        if a.cmd=='cpu-envelope':
+            r=cpu_envelope_plan(a.cpus,a.directml); print(f"{r['systemHeadroomMilli']}:{r['directmlReserveMilli']}:{r['dockerEnvelopeMilli']}"); return 0
         if a.cmd=='tuning':
             r=runtime_tuning(a.mem_mib,a.cpus,a.synapse_mib,a.database_mib); print(f"{r['mallocArenaMax']}:{r['synapseCacheFactor']}:{r['postgresSharedBuffers']}"); return 0
         if a.cmd=='service-plan':

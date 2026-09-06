@@ -1,3 +1,22 @@
+# Windows integration test matrix
+
+> **Current release: v14.6.0.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+
+## v14.6.0 confidence levels and architecture cases
+
+Static and deterministic fixtures are Level 1/2 evidence; live WSL, Docker, physical GPU, and complete Windows installer qualification remain separate Level 3-6 evidence as described in `TESTING.md`. Required architecture cases include DirectML with zero Linux-native GPU adapters, AMD/ROCm, NVIDIA/CUDA, Vulkan/DRM, Intel/DirectML or Vulkan where the environment exposes them, CPU-only fallback, explicit missing adapter preservation, multi-GPU identity, interrupted repair, and repeated Option 1 convergence.
+
+Same-version GPU portability qualification additionally covers: DirectML tensor/runtime availability with no usable `torch_directml.gpu_memory()` result; full-capacity Windows DXDiag/64-bit registry fallback; legacy 32-bit memory telemetry that must not cap stronger evidence; integrated/UMA shared-memory admission across irregular WSL RAM envelopes; transient DirectML model failure with Ollama fallback while the policy fingerprint remains stable; and a generic `other` DirectX 12 adapter that reaches runtime qualification without being rejected solely by vendor naming. The RX 6700 XT log that exposed the VRAM/fingerprint failure is one regression example, not a production hardware special case.
+
+## v14.5.47 WSL GPU recovery cases
+
+- Multi-GPU Windows host: saved DirectML adapter is exported before `torch_directml` import and the runtime must resolve the same adapter or fail closed.
+- DirectML runtime with working tensor execution but missing/unusable `gpu_memory()`: selected-adapter DXDiag dedicated VRAM is used as the bounded admission source; missing both sources refuses DirectML model placement.
+- Legacy v14.5.46 fallback marker: v14.5.47 performs one fresh probe; unchanged repeated failure re-latches, while a changed kernel/bridge/adapter fingerprint permits a new retry.
+- WSL `/dev/dri/renderD*` present without verified NVIDIA CUDA or AMD ROCm: Vulkan may be selected/recommended, but GPU state is accepted only after `ollama ps` proves model offload.
+- No `/dev/dxg`, no vendor path, and no DRM render node: CPU/native-Windows Ollama remains available and no fake GPU path is generated.
+- Windows-side GPU audit discovers managed stacks outside a single hard-coded `~/hermes-stack` home and remains read-only.
+
 ## v14.5.46 GPU-aware onboarding cases
 
 - NVIDIA Windows GPU + `/dev/dxg` + working WSL `nvidia-smi`: recommend Ollama/NVIDIA and report that NVIDIA Container Toolkit will be reused or provisioned.

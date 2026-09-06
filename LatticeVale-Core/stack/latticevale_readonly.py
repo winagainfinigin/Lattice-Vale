@@ -119,6 +119,8 @@ class InstallOptions:
     hermes_local_ai: bool
     ollama_backend: str
     local_text_backend: str
+    use_gpu_acceleration: bool
+    directml_fallback_policy: str
     directml_text_model: str
     directml_port: int
     container_resource_limits: bool
@@ -147,6 +149,10 @@ class InstallOptions:
         local_text_backend = _text(raw, "localTextBackend", "ollama")
         if local_text_backend not in {"ollama", "directml"}:
             local_text_backend = "ollama"
+        use_gpu_acceleration = _bool(raw, "useGpuAcceleration", True)
+        directml_fallback_policy = _text(raw, "directmlFallbackPolicy")
+        if directml_fallback_policy not in {"managed", "windows-native", "none"}:
+            directml_fallback_policy = backend if local_text_backend == "directml" else "none"
         directml_text_model = _text(raw, "directmlTextModel", "Qwen/Qwen2.5-1.5B-Instruct")
         if not directml_text_model:
             directml_text_model = "Qwen/Qwen2.5-1.5B-Instruct"
@@ -165,6 +171,8 @@ class InstallOptions:
             hermes_local_ai=_bool(raw, "hermesLocalAI"),
             ollama_backend=backend,
             local_text_backend=local_text_backend,
+            use_gpu_acceleration=use_gpu_acceleration,
+            directml_fallback_policy=directml_fallback_policy,
             directml_text_model=directml_text_model,
             directml_port=_port(raw, "directmlPort", 11436),
             container_resource_limits=_bool(raw, "containerResourceLimits"),
@@ -182,6 +190,28 @@ class InstallOptions:
     def local_ai_enabled(self) -> bool:
         return self.honcho or self.hermes_local_ai
 
+    @property
+    def directml_enabled(self) -> bool:
+        return self.local_ai_enabled and self.use_gpu_acceleration and self.local_text_backend == "directml"
+
+    @property
+    def ollama_text_role(self) -> bool:
+        return self.local_ai_enabled and (self.local_text_backend == "ollama" or (self.directml_enabled and self.directml_fallback_policy != "none"))
+
+    @property
+    def ollama_embedding_role(self) -> bool:
+        return self.honcho
+
+    @property
+    def ollama_role(self) -> bool:
+        return self.ollama_text_role or self.ollama_embedding_role
+
+    @property
+    def effective_ollama_backend(self) -> str:
+        if self.directml_enabled and self.directml_fallback_policy != "none":
+            return self.directml_fallback_policy
+        return self.ollama_backend
+
     def selected_components(self) -> tuple[str, ...]:
         selected = ["hermes"]
         for name, enabled in (
@@ -191,8 +221,8 @@ class InstallOptions:
             ("searxng", self.searxng),
             ("qmd", self.qmd),
             ("honcho", self.honcho),
-            ("ollama", self.local_ai_enabled),
-            ("directml", self.local_ai_enabled and self.local_text_backend == "directml"),
+            ("ollama", self.ollama_role),
+            ("directml", self.directml_enabled),
             ("tailscale", self.tailscale),
             ("obsidian", self.obsidian),
         ):

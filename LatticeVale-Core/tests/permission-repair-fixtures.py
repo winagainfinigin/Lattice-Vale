@@ -32,5 +32,5 @@ assert 'verify_write_files=(' in boot
 # Read-only audit must surface permissions as a first-class repair condition.
 assert 'c["permissions"]' in audit
 assert 'installer/user-owned write paths are writable' in audit
-assert '("stack", "permissions", "storage", "docker", "hermes", "api")' in audit
+assert 'mandatory_components = ["stack", "permissions", "storage", "docker", "hermes", "api"]' in audit and 'mandatory_components.insert(1, "architecture")' in audit
 print('PERMISSION REPAIR FIXTURES: PASS')

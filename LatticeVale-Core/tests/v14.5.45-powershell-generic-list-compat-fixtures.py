@@ -5,7 +5,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.45','14.5.46'}, version
+assert version in {'14.5.45','14.5.46','14.5.47','14.6.0'}, version
 
 # PowerShell 7.6 on affected Windows 11 builds can throw
 # "Argument types do not match" when New-Object-created generic lists are later
@@ -24,7 +24,7 @@ start = installer.index('function Get-WindowsGpuInventory {')
 end = installer.index('function Select-LatticeValeDirectMLGpu', start)
 gpu = installer[start:end]
 assert '$items = [System.Collections.Generic.List[object]]::new()' in gpu
-assert 'return $items.ToArray()' in gpu
+assert ('return @($script:LatticeValeWindowsGpuInventoryCache)' in gpu and '$items.ToArray()' in gpu) if version in {'14.5.47','14.6.0'} else ('return $items.ToArray()' in gpu)
 assert 'New-Object System.Collections.Generic.List[object]' not in gpu
 
 # Other user-facing Windows paths are covered too, so the crash cannot simply move

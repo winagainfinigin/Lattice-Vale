@@ -4,7 +4,7 @@ import socket, subprocess, sys, tempfile, time, urllib.request
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}
+assert version in {'14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='ascii')
 conf=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
@@ -15,7 +15,7 @@ relay_py=ROOT/'stack/native-ollama-relay.py'
 compose=(ROOT/'stack/compose.yaml').read_text(encoding='utf-8')
 
 # Current WSL topology is detected, but capability is proven functionally rather than assumed.
-assert ("'wslinfo' @('--networking-mode')" in ps) if version in {'14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'} else ('wslinfo --networking-mode' in ps)
+assert ("'wslinfo' @('--networking-mode')" in ps) if version in {'14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'} else ('wslinfo --networking-mode' in ps)
 assert "'wsl-localhost-relay'" in ps and "'windows-gateway-relay'" in ps
 assert "Test-WslHttpEndpointDirect $Name $targetAddress $targetPort '/api/version'" in ps
 assert "Current WSL networking mode: $($state.NetworkingMode)" in ps
@@ -45,7 +45,7 @@ assert 'not target_ip.is_private' in relay_text
 assert 'relay target must remain on IPv4 loopback unless the verified WSL-host fallback explicitly enables a private target' in relay_text
 
 # Native Ollama + remote Tailscale share one centralized WSL networking policy.
-if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
+if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}:
     assert 'shared-native-ollama-tailscale' in ps
     assert 'user-existing-mirrored' in ps
     assert 'Use mirrored WSL networking as the shared mode for native Windows Ollama and Tailscale remote access?' not in ps

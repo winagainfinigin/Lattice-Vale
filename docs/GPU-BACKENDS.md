@@ -1,5 +1,9 @@
 # LatticeVale 14.6.0 GPU and Inference Backends
 
+## Current GPU-choice and DirectML fallback contract
+
+The installer asks **Use GPU acceleration?**. Choosing No is a durable CPU-only policy preserved by Resume / repair. If DirectML is selected, text fallback is separately chosen as **Native Windows Ollama**, **Managed WSL/Docker Ollama**, or **No Ollama text fallback — fail closed**. Honcho may still use Ollama for embeddings when DirectML text fallback is disabled; embedding use does not silently enable text fallback. DirectML generation uses `torch.no_grad()`. Repeated DirectML startup/self-test failure may create a forced-fallback marker only when a text fallback was explicitly enabled; fallback `none` removes legacy markers and remains unavailable/fail-closed.
+
 ## Capability model
 
 14.6.0 does not equate "a GPU exists" with "a backend works." It records Windows GPU identity separately from WSL-visible device/runtime capability and classifies each inference route independently.
@@ -16,6 +20,12 @@
 DirectML is a WSL-host path and is intentionally independent of Docker/Linux-native CUDA/ROCm enumeration. A machine can therefore have `Linux-native Ollama GPU inventory=0` while DirectML remains valid through `/dev/dxg`.
 
 Microsoft supports PyTorch with DirectML inside WSL2 on supported Windows 11 builds. LatticeVale therefore does not force DirectML workloads back to native Windows merely because the GPU is AMD, Intel, NVIDIA, Qualcomm, or another adapter that the actual WSL DirectML runtime can qualify. Windows/WSL GPU projection and the vendor display driver are host prerequisites; LatticeVale owns its isolated `torch-directml` environment, adapter correlation, bounded model admission, runtime qualification, and fallback.
+
+## DirectML framework compatibility
+
+The managed DirectML environment is isolated under the LatticeVale stack and pins the tested PyTorch/torch-directml/Transformers envelope. A system-wide Python or CUDA wheel is not used as runtime proof for the managed gateway. The installer first performs a real DirectML tensor operation, then a model-generation self-test before marking DirectML healthy.
+
+Transformers 4.46.3 Qwen2/Qwen2.5 uses causal-mask operations that have failed on torch-directml despite a successful basic tensor probe. v14.6.0 applies a narrowly scoped process-local compatibility shim for that pinned Qwen2 path, replacing the problematic in-place boolean multiplication/`masked_fill` construction with equivalent `torch.where` operations. The shim is version-gated, does not patch upstream files on disk, and is not keyed to AMD, NVIDIA, Intel, Qualcomm, a GPU model name, or a fixed PC configuration. Other models remain subject to the normal model self-test and fail/fallback policy.
 
 ## DirectML memory admission
 

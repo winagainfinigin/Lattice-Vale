@@ -165,6 +165,7 @@ def validate_install_options(data: Any, current_schema: int) -> dict[str, Any]:
         "obsidian", "unattendedUpdates", "autoStart", "windowsShortcuts", "keepWslServicesRunning",
         "containerResourceLimits", "resetCheckpoints", "forceProviderSetup", "forceProfileSetup",
         "rebuildMatrixIdentity", "repairMaintenance", "forceManagedUpdate", "universalRepairMigration",
+        "useGpuAcceleration",
     )
     for key in bool_keys:
         _bool(data, key)
@@ -231,6 +232,9 @@ def validate_install_options(data: Any, current_schema: int) -> dict[str, Any]:
     backend = data.get("ollamaBackend", "managed")
     if backend not in ("managed", "windows-native"):
         raise ValueError("ollamaBackend must be managed or windows-native")
+    fallback_policy = data.get("directmlFallbackPolicy")
+    if fallback_policy is not None and fallback_policy not in ("managed", "windows-native", "none"):
+        raise ValueError("directmlFallbackPolicy must be managed, windows-native, or none")
     accel = data.get("ollamaAcceleration")
     if accel is not None and accel not in ("auto", "cpu", "nvidia", "amd", "vulkan"):
         raise ValueError("ollamaAcceleration must be auto, cpu, nvidia, amd, or vulkan")
@@ -860,17 +864,35 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
     requested_text = str(options.get("localTextBackend") or "ollama")
     requested_ollama = str(options.get("ollamaAcceleration") or "auto")
     explicit_backend = str(options.get("inferenceBackendPreference") or "auto") or "auto"
-    windows_native_selected = options.get("ollamaBackend") == "windows-native"
+    gpu_enabled = bool(options.get("useGpuAcceleration", True))
+    fallback_policy = str(options.get("directmlFallbackPolicy") or "")
+    if fallback_policy not in ("managed", "windows-native", "none"):
+        # Schema <=22 migration behavior: DirectML historically always used the
+        # selected Ollama backend as its text fallback. Preserve that behavior.
+        fallback_policy = str(options.get("ollamaBackend") or "managed") if requested_text == "directml" else "none"
+    if not gpu_enabled:
+        requested_ollama = "cpu"
+        explicit_backend = "cpu"
 
-    directml_structurally_usable = bool(caps["directml"].get("available")) and not caps["directml"].get("selectionBlocked")
-    directml_runtime_usable = _capability_usable(caps["directml"]) and not caps["directml"].get("selectionBlocked")
-    # Policy topology follows durable intent + structural capability. A transient
-    # DirectML execution failure is handled inside the gateway by Ollama fallback;
-    # retaining the DirectML host reserve makes a later health retry safe.
-    text_backend = "directml" if requested_text == "directml" and directml_structurally_usable else "ollama"
-    active_text_backend = "directml" if text_backend == "directml" and directml_runtime_usable else "ollama"
+    if requested_text == "directml":
+        windows_native_selected = fallback_policy == "windows-native"
+    else:
+        windows_native_selected = options.get("ollamaBackend") == "windows-native"
+
+    directml_structurally_usable = gpu_enabled and bool(caps["directml"].get("available")) and not caps["directml"].get("selectionBlocked")
+    directml_runtime_usable = gpu_enabled and _capability_usable(caps["directml"]) and not caps["directml"].get("selectionBlocked")
+    text_fallback_enabled = bool(requested_text == "directml" and fallback_policy != "none")
+
+    # Policy topology follows durable user intent. No-fallback DirectML is deliberately
+    # fail closed: an unavailable DirectML runtime is not silently converted to Ollama.
+    if gpu_enabled and requested_text == "directml" and (directml_structurally_usable or not text_fallback_enabled):
+        text_backend = "directml"
+    else:
+        text_backend = "ollama"
 
     def auto_ollama() -> tuple[str, str]:
+        if not gpu_enabled:
+            return "cpu", "cpu"
         if windows_native_selected and _capability_usable(caps["windows-native"]):
             return "windows-native", "windows-native"
         if _capability_usable(caps["cuda"]):
@@ -881,7 +903,9 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
             return "vulkan", "vulkan"
         return "cpu", "cpu"
 
-    if windows_native_selected:
+    if not gpu_enabled:
+        ollama_accel, auto_backend = "cpu", "cpu"
+    elif windows_native_selected:
         if _capability_usable(caps["windows-native"]):
             ollama_accel, auto_backend = "windows-native", "windows-native"
         else:
@@ -896,11 +920,23 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
     else:
         ollama_accel, auto_backend = auto_ollama()
 
+    if text_backend == "directml":
+        if directml_runtime_usable:
+            active_text_backend = "directml"
+        elif text_fallback_enabled:
+            # The selected Ollama role owns fallback; if native fallback is unavailable
+            # this remains unavailable rather than silently provisioning another role.
+            if fallback_policy == "windows-native" and not _capability_usable(caps["windows-native"]):
+                active_text_backend = "unavailable"
+            else:
+                active_text_backend = "ollama"
+        else:
+            active_text_backend = "unavailable"
+    else:
+        active_text_backend = "ollama"
+
     explicit_usable = True
     if explicit_backend in caps:
-        # DirectML policy selection is structural; its gateway owns safe runtime
-        # fallback. Other accelerators must be runtime-usable because they change
-        # the managed Ollama resource envelope directly.
         if explicit_backend == "directml":
             explicit_usable = directml_structurally_usable
         else:
@@ -909,22 +945,36 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
         explicit_usable = False
 
     policy_selected = "directml" if text_backend == "directml" else auto_backend
-    active_selected = "directml" if active_text_backend == "directml" else auto_backend
-    if explicit_backend != "auto" and explicit_usable:
+    if active_text_backend == "directml":
+        active_selected = "directml"
+    elif active_text_backend == "ollama":
+        active_selected = auto_backend
+    else:
+        active_selected = "unavailable"
+
+    if not gpu_enabled:
+        selected = active_selected = "cpu"
+        selection_reason = "GPU_ACCELERATION_DISABLED_CPU_POLICY"
+    elif explicit_backend != "auto" and explicit_usable:
         selected = explicit_backend
         selection_reason = "BACKEND_EXPLICIT_AVAILABLE"
         if explicit_backend == "directml":
-            active_selected = "directml" if directml_runtime_usable else auto_backend
+            if directml_runtime_usable:
+                active_selected = "directml"
+            elif text_fallback_enabled:
+                active_selected = auto_backend
+            else:
+                active_selected = "unavailable"
         else:
             active_selected = explicit_backend
     elif explicit_backend != "auto":
         selected = policy_selected
-        selection_reason = "BACKEND_EXPLICIT_UNAVAILABLE_SAFE_FALLBACK"
+        selection_reason = "BACKEND_EXPLICIT_UNAVAILABLE_SAFE_FALLBACK" if text_fallback_enabled or text_backend != "directml" else "BACKEND_EXPLICIT_UNAVAILABLE_FAIL_CLOSED"
     else:
         selected = policy_selected
         selection_reason = "BACKEND_AUTO_SELECTED"
 
-    gpu_available = any(bool(caps[name].get("available")) for name in ("directml", "cuda", "rocm", "vulkan", "windows-native"))
+    gpu_available = gpu_enabled and any(bool(caps[name].get("available")) for name in ("directml", "cuda", "rocm", "vulkan", "windows-native"))
     qualification_observed = hardware.get("qualification") if isinstance(hardware.get("qualification"), dict) else {}
     core_ok = bool(qualification_observed.get("observedCorePrerequisitesSatisfied", True))
     qualification = {
@@ -932,33 +982,43 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
         "qualifiedForCoreStack": core_ok,
         "reasonCode": ("QUALIFIED_GPU_OR_CPU_FALLBACK" if gpu_available else "QUALIFIED_CPU_FALLBACK") if core_ok else "CORE_PREREQUISITE_VIOLATION",
         "observedViolations": list(qualification_observed.get("observedViolations") or []),
-        "note": "Core qualification is based only on observed installer prerequisites; acceleration capability is independent and may safely fall back to CPU.",
+        "note": "Core qualification is based only on observed installer prerequisites; acceleration capability is independent and CPU-only operation is a supported durable policy.",
     }
 
-    fallback_chain: list[str] = []
-    for candidate in ("directml", "cuda", "rocm", "vulkan", "windows-native", "cpu"):
-        if candidate == selected:
-            continue
-        if _capability_usable(caps[candidate]):
-            fallback_chain.append(candidate)
-    if "cpu" not in fallback_chain and selected != "cpu":
-        fallback_chain.append("cpu")
+    if text_backend == "directml":
+        if not text_fallback_enabled:
+            fallback_chain: list[str] = []
+        elif fallback_policy == "windows-native":
+            fallback_chain = ["windows-native"]
+        else:
+            fallback_chain = [auto_backend]
+    else:
+        fallback_chain = []
+        for candidate in ("cuda", "rocm", "vulkan", "windows-native", "cpu"):
+            if candidate == selected:
+                continue
+            if gpu_enabled and _capability_usable(caps[candidate]):
+                fallback_chain.append(candidate)
+        if "cpu" not in fallback_chain and selected != "cpu":
+            fallback_chain.append("cpu")
 
     selection = {
+        "gpuAccelerationEnabled": gpu_enabled,
         "requestedTextBackend": requested_text,
-        "requestedOllamaAcceleration": requested_ollama,
-        "requestedInferenceBackend": explicit_backend,
-        # Policy/resource fields: stable across transient DirectML fallback.
+        "requestedOllamaAcceleration": str(options.get("ollamaAcceleration") or "auto"),
+        "requestedInferenceBackend": str(options.get("inferenceBackendPreference") or "auto") or "auto",
+        "directmlFallbackPolicy": fallback_policy,
+        "textFallbackEnabled": text_fallback_enabled,
         "textBackend": text_backend,
         "ollamaAcceleration": ollama_accel,
         "inferenceBackend": selected,
         "selectionReasonCode": selection_reason,
         "fallbackBackend": fallback_chain[0] if fallback_chain else "none",
         "fallbackChain": fallback_chain,
-        # Runtime observation fields are intentionally excluded from backendFingerprint.
         "activeTextBackend": active_text_backend,
         "activeInferenceBackend": active_selected,
-        "runtimeFallbackActive": bool(text_backend == "directml" and active_text_backend != "directml"),
+        "runtimeFallbackActive": bool(text_backend == "directml" and active_text_backend == "ollama"),
+        "runtimeFailClosed": bool(text_backend == "directml" and active_text_backend == "unavailable" and not text_fallback_enabled),
     }
 
     payload = {
@@ -980,10 +1040,6 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
         "qualification": qualification,
     }
 
-    # The policy fingerprint deliberately excludes transient backend-health records,
-    # timestamps, diagnostic detail, and active DirectML fallback state. It changes
-    # only when hardware topology, durable selection, or a resource-relevant Ollama
-    # acceleration decision changes.
     policy_caps: dict[str, Any] = {}
     for name, cap in caps.items():
         policy_caps[name] = {
@@ -996,8 +1052,9 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
             "selectionReasonCode": cap.get("selectionReasonCode", ""),
         }
     policy_selection = {k: selection.get(k) for k in (
-        "requestedTextBackend", "requestedOllamaAcceleration", "requestedInferenceBackend",
-        "textBackend", "ollamaAcceleration", "inferenceBackend", "selectionReasonCode",
+        "gpuAccelerationEnabled", "requestedTextBackend", "requestedOllamaAcceleration", "requestedInferenceBackend",
+        "directmlFallbackPolicy", "textFallbackEnabled", "textBackend", "ollamaAcceleration",
+        "inferenceBackend", "selectionReasonCode", "fallbackBackend", "fallbackChain",
     )}
     payload["backendFingerprint"] = fingerprint({
         "hardwareFingerprint": payload["hardwareFingerprint"],
@@ -1048,16 +1105,24 @@ def host_memory_budget(mem_mib: int, accel: str, managed_ollama: bool, directml_
     # large workstation from wasting an unbounded amount of RAM outside containers.
     base_ratio = 0.12 if managed_ollama else 0.15
     base_cap = max(384, min(6144, mem_mib - 384))
-    reserve = _clamp_int(_round_step(mem_mib * base_ratio), 768, base_cap)
+    # Keep the host budget monotonic at MiB granularity. Rounding a percentage up
+    # to a coarse quantum can make a machine with 1 MiB *more* RAM receive a
+    # smaller container budget at a rounding boundary. Floors/caps are sufficient
+    # here; service-level plans perform their own safe quantization later.
+    reserve = _clamp_int(int(mem_mib * base_ratio), 768, base_cap)
 
     directml = 0
     if directml_selected:
         # DirectML is a WSL-host workload. Scale its reserve continuously with WSL
-        # RAM instead of matching any known topology.  The floor is a runtime safety
-        # minimum, while the cap keeps large hosts from over-reserving indefinitely.
+        # RAM instead of matching any known topology. The 2 GiB floor protects the
+        # host-side Python/model-loading path when the VM can afford it; 30% then
+        # grows smoothly with arbitrary WSL allocations and an 8 GiB cap prevents
+        # large workstations from losing an unbounded share to non-container RAM.
+        # Very small allocations clamp against mem-384 and selected-service minima
+        # fail closed normally instead of being assigned a known-PC special case.
         directml_cap = max(384, min(8192, mem_mib - 384))
         dml_floor = min(2048, directml_cap)
-        directml = _clamp_int(_round_step(mem_mib * 0.22), dml_floor, directml_cap)
+        directml = _clamp_int(int(mem_mib * 0.30), dml_floor, directml_cap)
         reserve = max(reserve, directml)
 
     budget = mem_mib - reserve
@@ -1307,41 +1372,81 @@ def service_memory_plan(
     return {name: alloc[name] for name in SERVICE_ORDER if name in alloc}
 
 
-def cpu_quota_plan(cpus: int, matrix_gateways: int, kanban_concurrency: int, accel: str) -> dict[str, int]:
+def cpu_envelope_plan(cpus: int, directml_selected: bool) -> dict[str, int]:
+    """Return one conserved WSL-visible CPU envelope in milli-CPU units.
+
+    Policy 13 keeps 10% scheduler/system headroom. DirectML additionally reserves
+    25% for its host-side worker; Docker services share only the remaining 65%.
+    Without DirectML the Docker aggregate ceiling is 90%.
+    """
     if cpus < 1:
         raise ValueError("CPU count must be at least one")
+    total = cpus * 1000
+    system = _round_step(total * 0.10, 50)
+    directml = _round_step(total * 0.25, 50) if directml_selected else 0
+    docker = total - system - directml
+    if docker < 50:
+        raise ValueError("CPU envelope is too small for managed services")
+    return {
+        "totalMilli": total,
+        "systemHeadroomMilli": system,
+        "directmlReserveMilli": directml,
+        "dockerEnvelopeMilli": docker,
+    }
+
+
+def cpu_quota_plan(
+    cpus: int, matrix_gateways: int, kanban_concurrency: int, accel: str,
+    *, matrix: bool = True, searxng: bool = True, qmd: bool = True,
+    ollama: bool = True, honcho: bool = True, directml_selected: bool = False,
+) -> dict[str, int]:
     if accel not in ("cpu", "vulkan", "nvidia", "amd"):
         raise ValueError("unsupported acceleration for CPU quota planning")
-    # Quotas are adaptive milli-CPU ceilings.  They scale continuously from the
-    # process-visible CPU count and workload pressure rather than whole-core tiers.
-    capacity = cpus * 1000
-    pressure = max(0, matrix_gateways - 1) * 0.055 + max(0, kanban_concurrency - 1) * 0.025
-    hermes_ratio = min(1.0, 0.62 + pressure)
-    ollama_ratio = 0.95 if accel in ("cpu", "vulkan") else 0.55
-    medium_ratio = min(0.68, 0.38 + 0.025 * max(0, cpus - 1))
-    light_ratio = min(0.36, 0.18 + 0.012 * max(0, cpus - 1))
+    envelope = cpu_envelope_plan(cpus, directml_selected)
+    active = ["hermes"]
+    if matrix: active += ["synapse-db", "synapse"]
+    if searxng: active += ["searxng-valkey", "searxng"]
+    if qmd: active += ["qmd", "qmd-indexer"]
+    if ollama: active += ["ollama"]
+    if honcho: active += ["honcho-db", "honcho-redis", "honcho-api", "honcho-deriver"]
 
-    def quota(ratio: float, minimum: int = 250) -> int:
-        raw = max(minimum, int(round(capacity * ratio)))
-        return min(capacity, max(minimum, _round_step(raw, 50)))
-
-    return {
-        "hermes": quota(hermes_ratio, 500),
-        "synapse-db": quota(medium_ratio), "synapse": quota(medium_ratio),
-        "searxng-valkey": quota(light_ratio), "searxng": quota(medium_ratio),
-        "qmd": quota(medium_ratio), "qmd-indexer": quota(medium_ratio),
-        "ollama": quota(ollama_ratio, 500),
-        "honcho-db": quota(medium_ratio), "honcho-redis": quota(light_ratio),
-        "honcho-api": quota(medium_ratio), "honcho-deriver": quota(medium_ratio),
+    # Relative weights model service pressure, but unlike policy 12 they divide one
+    # conserved aggregate ceiling. Increasing a service's weight redistributes CPU;
+    # it cannot manufacture additional WSL CPU capacity.
+    pressure = max(0, matrix_gateways - 1) * 0.35 + max(0, kanban_concurrency - 1) * 0.18
+    weights = {
+        "hermes": 8.0 + pressure,
+        "synapse-db": 3.0, "synapse": 4.0,
+        "searxng-valkey": 1.5, "searxng": 3.0,
+        "qmd": 3.0, "qmd-indexer": 3.5,
+        "ollama": 8.0 if accel in ("cpu", "vulkan") else 5.0,
+        "honcho-db": 3.0, "honcho-redis": 1.5, "honcho-api": 3.5, "honcho-deriver": 4.0,
     }
+    quantum = 50
+    minimum = 50
+    budget = envelope["dockerEnvelopeMilli"]
+    base = minimum * len(active)
+    if base > budget:
+        raise ValueError("Docker CPU envelope cannot fit the enabled service topology")
+    slots = (budget - base) // quantum
+    total_weight = sum(weights[name] for name in active)
+    exact = {name: slots * weights[name] / total_weight for name in active}
+    slot_alloc = {name: int(exact[name]) for name in active}
+    remainder = slots - sum(slot_alloc.values())
+    order = sorted(active, key=lambda name: (-(exact[name] - slot_alloc[name]), -weights[name], name))
+    for name in order[:remainder]:
+        slot_alloc[name] += 1
+    result = {name: minimum + slot_alloc[name] * quantum for name in active}
+    if sum(result.values()) > budget:
+        raise AssertionError("canonical CPU planner exceeded its Docker envelope")
+    return {name: result[name] for name in SERVICE_ORDER if name in result}
 
 
 def directml_cpu_thread_plan(cpus: int) -> int:
     if cpus < 1:
         raise ValueError("CPU count must be at least one")
-    # DirectML inference is GPU-led but tokenization/model orchestration still needs
-    # host CPU. Scale with visible CPUs while leaving capacity for Docker services.
-    return _clamp_int(_round_step(cpus * 0.35, 1), 1, min(12, cpus))
+    # DirectML owns approximately one quarter of the WSL-visible CPU envelope.
+    return _clamp_int(_round_step(cpus * 0.25, 1), 1, min(12, cpus))
 
 
 def directml_generation_limit(context_tokens: int) -> int:
@@ -1471,10 +1576,30 @@ def validate_runtime_policy_state(
             raise ValueError(f"HERMES_MIN_MIB mismatch: expected {expected_hermes}, found {state.get('HERMES_MIN_MIB')}")
 
     service_mem, service_cpu = _state_service_limits(state)
-    expected_cpu = cpu_quota_plan(cpus, matrix_gateways, kanban, accel)
-    for name, actual_cpu in service_cpu.items():
-        if expected_cpu.get(name) != actual_cpu:
-            raise ValueError(f"CPU quota mismatch for {name}: expected {expected_cpu.get(name)}, found {actual_cpu}")
+    matrix_enabled = bool(options.get("matrix")) if options is not None else ("synapse" in service_cpu)
+    searxng_enabled = bool(options.get("searxng")) if options is not None else ("searxng" in service_cpu)
+    qmd_enabled = bool(options.get("qmd")) if options is not None else ("qmd" in service_cpu)
+    honcho_enabled = bool(options.get("honcho")) if options is not None else ("honcho-api" in service_cpu)
+    expected_cpu = cpu_quota_plan(
+        cpus, matrix_gateways, kanban, accel, matrix=matrix_enabled, searxng=searxng_enabled,
+        qmd=qmd_enabled, ollama=managed, honcho=honcho_enabled, directml_selected=directml,
+    )
+    if service_cpu and service_cpu != expected_cpu:
+        raise ValueError(f"CPU quota plan mismatch: expected {expected_cpu}, found {service_cpu}")
+    cpu_envelope = cpu_envelope_plan(cpus, directml)
+    envelope_state = {
+        "systemHeadroomMilli": _int_state(state, "CPU_SYSTEM_HEADROOM_MILLI", 0) if "CPU_SYSTEM_HEADROOM_MILLI" in state else cpu_envelope["systemHeadroomMilli"],
+        "directmlReserveMilli": _int_state(state, "CPU_DIRECTML_RESERVE_MILLI", 0) if "CPU_DIRECTML_RESERVE_MILLI" in state else cpu_envelope["directmlReserveMilli"],
+        "dockerEnvelopeMilli": _int_state(state, "CPU_DOCKER_ENVELOPE_MILLI", 0) if "CPU_DOCKER_ENVELOPE_MILLI" in state else cpu_envelope["dockerEnvelopeMilli"],
+    }
+    for key in envelope_state:
+        if envelope_state[key] != cpu_envelope[key]:
+            raise ValueError(f"CPU envelope mismatch for {key}: expected {cpu_envelope[key]}, found {envelope_state[key]}")
+    allocated_cpu = sum(service_cpu.values())
+    if allocated_cpu > cpu_envelope["dockerEnvelopeMilli"]:
+        raise ValueError("aggregate Docker CPU quota exceeds canonical Docker envelope")
+    if "CPU_DOCKER_ALLOCATED_MILLI" in state and _int_state(state, "CPU_DOCKER_ALLOCATED_MILLI", 0) != allocated_cpu:
+        raise ValueError("CPU_DOCKER_ALLOCATED_MILLI does not match persisted service quotas")
 
     if options is not None and service_mem:
         ollama_floor = _int_state(state, "OLLAMA_MODEL_FLOOR_MIB", 0)
@@ -1579,6 +1704,7 @@ def validate_runtime_policy_state(
         "ramProfile": ram_profile(mem),
         "services": service_mem,
         "cpuQuotasMilli": {name: service_cpu[name] for name in SERVICE_ORDER if name in service_cpu},
+        "cpuEnvelope": {**cpu_envelope, "allocatedDockerMilli": allocated_cpu},
         "tuning": tuning,
         "ollamaRuntime": ollama_runtime,
         "directmlRuntime": {"contextLength": dml_context, "cpuThreads": dml_threads, "maxNewTokens": dml_generation, "admissionMiB": vram_mib, "admissionSource": vram_source, "admissionConfidence": vram_confidence},
@@ -1615,8 +1741,8 @@ def build_runtime_policy_document(state: dict[str, str], hardware: dict[str, Any
     }
     backend_selection = (backends.get("selection") or {}) if isinstance(backends.get("selection"), dict) else {}
     policy_selection_keys = (
-        "requestedTextBackend", "requestedOllamaAcceleration", "requestedInferenceBackend",
-        "textBackend", "ollamaAcceleration", "inferenceBackend", "selectionReasonCode",
+        "gpuAccelerationEnabled", "requestedTextBackend", "requestedOllamaAcceleration", "requestedInferenceBackend",
+        "directmlFallbackPolicy", "textFallbackEnabled", "textBackend", "ollamaAcceleration", "inferenceBackend", "selectionReasonCode",
         "fallbackBackend", "fallbackChain",
     )
     policy_selection = {key: backend_selection.get(key) for key in policy_selection_keys if key in backend_selection}
@@ -1643,6 +1769,7 @@ def build_runtime_policy_document(state: dict[str, str], hardware: dict[str, Any
             "wslCpuCount": validation["cpuCount"],
             "ramProfile": validation["ramProfile"],
             "cpuProfile": validation["cpuProfile"],
+            "cpuEnvelope": validation["cpuEnvelope"],
             **validation["memory"],
         },
         "gpu": gpu,

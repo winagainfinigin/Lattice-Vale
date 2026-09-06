@@ -6,9 +6,9 @@ This process deliberately runs on the WSL host instead of in Docker so
 container stack depend on GPU-device plumbing.  It exposes only the Docker
 host-gateway interface and routes text generation to DirectML when healthy.
 If DirectML/model execution fails, the same request is retried through the
-already-selected Ollama backend.  Honcho embeddings bypass this gateway and
-continue using Ollama directly so the existing 1536-dimension vector store is
-not changed.
+selected Ollama backend only when the durable fallback policy enables that role.
+A no-fallback selection fails closed. Honcho embeddings bypass this gateway and
+can independently use Ollama without making it a text fallback.
 """
 
 from __future__ import annotations
@@ -31,11 +31,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-VERSION = "14.5.42"
+VERSION = "14.6.0"
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MODEL_ID = os.environ.get("LATTICEVALE_DIRECTML_MODEL", "Qwen/Qwen2.5-1.5B-Instruct").strip()
 FALLBACK_MODEL = os.environ.get("LATTICEVALE_OLLAMA_TEXT_MODEL", "qwen3.5:4b").strip()
 OLLAMA_BACKEND = os.environ.get("LATTICEVALE_OLLAMA_BACKEND", "managed").strip()
+FALLBACK_POLICY = os.environ.get("LATTICEVALE_DIRECTML_FALLBACK_POLICY", OLLAMA_BACKEND).strip()
+if FALLBACK_POLICY not in {"managed", "windows-native", "none"}:
+    FALLBACK_POLICY = OLLAMA_BACKEND if OLLAMA_BACKEND in {"managed", "windows-native"} else "managed"
+FALLBACK_ENABLED = FALLBACK_POLICY != "none"
 STACK_DIR = Path(os.environ.get("LATTICEVALE_STACK_DIR", os.getcwd())).resolve()
 HF_HOME = Path(os.environ.get("HF_HOME", str(STACK_DIR / "data" / "directml" / "hf-cache"))).resolve()
 MAX_CONTEXT = max(1024, min(int(os.environ.get("LATTICEVALE_DIRECTML_CONTEXT", "8192")), 32768))
@@ -46,9 +50,15 @@ FAILURE_COOLDOWN_SECONDS = max(15, min(int(os.environ.get("LATTICEVALE_DIRECTML_
 NATIVE_FALLBACK_URL = os.environ.get("LATTICEVALE_NATIVE_OLLAMA_URL", "").rstrip("/")
 REQUESTED_ADAPTER_NAME = os.environ.get("LATTICEVALE_DIRECTML_ADAPTER_NAME", "").strip()
 REQUESTED_GPU_VENDOR = os.environ.get("LATTICEVALE_DIRECTML_GPU_VENDOR", "").strip().lower()
-FORCE_FALLBACK = os.environ.get("LATTICEVALE_DIRECTML_FORCE_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
+try:
+    DECLARED_VRAM_MIB = max(0, min(int(os.environ.get("LATTICEVALE_DIRECTML_VRAM_MIB", "0")), 1024 * 1024))
+except Exception:
+    DECLARED_VRAM_MIB = 0
+DECLARED_VRAM_SOURCE = os.environ.get("LATTICEVALE_DIRECTML_VRAM_SOURCE", "legacy-install-options").strip() or "legacy-install-options"
+DECLARED_VRAM_CONFIDENCE = os.environ.get("LATTICEVALE_DIRECTML_VRAM_CONFIDENCE", "legacy").strip() or "legacy"
+FORCE_FALLBACK = FALLBACK_ENABLED and os.environ.get("LATTICEVALE_DIRECTML_FORCE_FALLBACK", "0").strip().lower() in {"1", "true", "yes", "on"}
 HOST_RESERVE_MIB = max(1024, min(int(os.environ.get("LATTICEVALE_DIRECTML_HOST_RESERVE_MIB", "2048")), 8192))
-CPU_THREADS = max(1, min(int(os.environ.get("LATTICEVALE_DIRECTML_CPU_THREADS", str(max(1, (os.cpu_count() or 2) // 2)))), 4))
+CPU_THREADS = max(1, min(int(os.environ.get("LATTICEVALE_DIRECTML_CPU_THREADS", str(max(1, round((os.cpu_count() or 1) * 0.25))))), 12))
 
 os.environ.setdefault("HF_HOME", str(HF_HOME))
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
@@ -67,11 +77,13 @@ LAST_ERROR = ""
 LAST_FAILURE = 0.0
 DEPENDENCY_PROBE: dict[str, Any] = {"ready": False, "detail": "not-probed"}
 VRAM_TOTAL_MIB = 0
+VRAM_SOURCE = "unknown"
 VRAM_BUDGET_MIB = 0
 MODEL_WEIGHT_MIB = 0
 ESTIMATED_MODEL_VRAM_MIB = 0
 EFFECTIVE_MAX_CONTEXT = MAX_CONTEXT
 VRAM_POLICY_DETAIL = "not-evaluated"
+DIRECTML_TRANSFORMERS_COMPAT = "not-applied"
 STOP_EVENT = threading.Event()
 
 
@@ -129,7 +141,9 @@ def _managed_ollama_url() -> str:
 
 
 def fallback_base_url() -> str:
-    if OLLAMA_BACKEND == "windows-native":
+    if not FALLBACK_ENABLED:
+        raise RuntimeError("Ollama text fallback is disabled by fail-closed policy")
+    if FALLBACK_POLICY == "windows-native":
         if not NATIVE_FALLBACK_URL:
             raise RuntimeError("native Windows Ollama fallback URL is unavailable")
         return NATIVE_FALLBACK_URL.rstrip("/") + ("" if NATIVE_FALLBACK_URL.endswith("/v1") else "/v1")
@@ -137,9 +151,11 @@ def fallback_base_url() -> str:
 
 
 def fallback_ready() -> tuple[bool, str]:
+    if not FALLBACK_ENABLED:
+        return False, "disabled by fail-closed policy"
     try:
         base = fallback_base_url()
-        if OLLAMA_BACKEND == "managed":
+        if FALLBACK_POLICY == "managed":
             api = base[:-3] if base.endswith("/v1") else base
             _http_json(api + "/api/version", timeout=5)
         else:
@@ -179,7 +195,7 @@ def _adapter_vendor(name: str) -> str:
     return "other"
 
 
-def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str]:
+def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str, str]:
     count = 0
     try:
         count = int(torch_directml.device_count())
@@ -207,7 +223,7 @@ def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str]:
         elif len(matches) > 1:
             raise RuntimeError(f"saved DirectML adapter name is ambiguous: {REQUESTED_ADAPTER_NAME!r}")
 
-    if index is None and REQUESTED_GPU_VENDOR in {"amd", "nvidia", "intel", "qualcomm"}:
+    if index is None and REQUESTED_GPU_VENDOR in {"amd", "nvidia", "intel", "qualcomm", "other"}:
         vendor_matches = [idx for idx, _name, vendor in adapters if vendor == REQUESTED_GPU_VENDOR]
         if len(vendor_matches) == 1:
             index = vendor_matches[0]
@@ -231,12 +247,23 @@ def _directml_device_and_vram(torch_directml: Any) -> tuple[Any, int, int, str]:
     device = torch_directml.device(index)
     name = next((name for idx, name, _vendor in adapters if idx == index), f"DirectML adapter {index}")
     vram_mib = 0
+    vram_source = "torch-directml"
     try:
         if hasattr(torch_directml, "gpu_memory"):
             vram_mib = _normalize_vram_mib(torch_directml.gpu_memory(index))
     except Exception:
         vram_mib = 0
-    return device, index, vram_mib, name
+    # torch-directml builds in WSL do not consistently expose dedicated-memory
+    # capacity.  The Windows installer therefore records the selected adapter's
+    # DXGI/dxdiag dedicated-memory value.  Use that only when the runtime API is
+    # unavailable; it is tied to the exact saved adapter and remains subject to
+    # LatticeVale's conservative percentage admission budget.
+    if vram_mib <= 0 and DECLARED_VRAM_MIB >= 256:
+        vram_mib = DECLARED_VRAM_MIB
+        vram_source = f"canonical:{DECLARED_VRAM_SOURCE}:{DECLARED_VRAM_CONFIDENCE}"
+    elif vram_mib <= 0:
+        vram_source = "unavailable"
+    return device, index, vram_mib, name, vram_source
 
 
 def _model_vram_plan(model: Any) -> tuple[int, int, int, int, str]:
@@ -250,7 +277,10 @@ def _model_vram_plan(model: Any) -> tuple[int, int, int, int, str]:
     """
     global VRAM_TOTAL_MIB, VRAM_BUDGET_MIB
     if VRAM_TOTAL_MIB <= 0:
-        raise RuntimeError("DirectML VRAM capacity could not be measured; refusing unbounded GPU model admission")
+        raise RuntimeError(
+            "DirectML model admission has no trusted bounded memory-capacity source; "
+            "torch-directml did not report capacity and canonical Windows/WSL hardware state supplied none"
+        )
     budget_mib = VRAM_TOTAL_MIB * VRAM_LIMIT_PCT // 100
     VRAM_BUDGET_MIB = budget_mib
     if budget_mib < 1024:
@@ -310,6 +340,79 @@ def _host_mem_available_mib() -> int:
     return 0
 
 
+def _install_transformers_directml_compat() -> str:
+    """Install narrowly-scoped fixes for operations broken by torch-directml.
+
+    transformers 4.46.3 Qwen2/Qwen2.5 causal-mask construction uses two operations
+    with known torch-directml incompatibilities: in-place float ``*=`` boolean-mask
+    promotion and ``masked_fill`` with the fp16 minimum.  LatticeVale pins this
+    transformers version, so replace only Qwen2's mask builder and only inside this
+    installer-owned DirectML process.  ``torch.where`` preserves the same mask
+    semantics without mutating a float tensor through those problematic kernels.
+    """
+    global DIRECTML_TRANSFORMERS_COMPAT
+    try:
+        import transformers
+        if getattr(transformers, "__version__", "") != "4.46.3":
+            DIRECTML_TRANSFORMERS_COMPAT = f"not-applied:transformers-{getattr(transformers, '__version__', 'unknown')}"
+            return DIRECTML_TRANSFORMERS_COMPAT
+        from transformers.cache_utils import SlidingWindowCache
+        from transformers.models.qwen2.modeling_qwen2 import Qwen2Model
+
+        torch = TORCH
+        if torch is None:
+            raise RuntimeError("PyTorch is not initialized")
+
+        def _prepare_4d_causal_attention_mask_with_cache_position(
+            attention_mask: Any,
+            sequence_length: int,
+            target_length: int,
+            dtype: Any,
+            device: Any,
+            cache_position: Any,
+            batch_size: int,
+            config: Any,
+            past_key_values: Any,
+        ) -> Any:
+            if attention_mask is not None and attention_mask.dim() == 4:
+                return attention_mask
+
+            min_dtype = torch.finfo(dtype).min
+            positions = torch.arange(target_length, device=device)
+            diagonal_attend_mask = positions > cache_position.reshape(-1, 1)
+            if getattr(config, "sliding_window", None) is not None:
+                if not isinstance(past_key_values, SlidingWindowCache) or sequence_length > target_length:
+                    sliding_attend_mask = positions <= (cache_position.reshape(-1, 1) - config.sliding_window)
+                    diagonal_attend_mask = torch.logical_or(diagonal_attend_mask, sliding_attend_mask)
+
+            min_values = torch.full(diagonal_attend_mask.shape, min_dtype, dtype=dtype, device=device)
+            causal_mask = torch.where(diagonal_attend_mask, min_values, torch.zeros_like(min_values))
+            causal_mask = causal_mask[None, None, :, :].expand(batch_size, 1, -1, -1)
+
+            if attention_mask is not None:
+                causal_mask = causal_mask.clone()
+                if attention_mask.shape[-1] > target_length:
+                    attention_mask = attention_mask[:, :target_length]
+                mask_length = attention_mask.shape[-1]
+                current = causal_mask[:, :, :, :mask_length]
+                padding_mask = (current + attention_mask[:, None, None, :]) == 0
+                prefix = torch.where(padding_mask, torch.full_like(current, min_dtype), current)
+                if mask_length < causal_mask.shape[-1]:
+                    causal_mask = torch.cat((prefix, causal_mask[:, :, :, mask_length:]), dim=-1)
+                else:
+                    causal_mask = prefix
+            return causal_mask
+
+        Qwen2Model._prepare_4d_causal_attention_mask_with_cache_position = staticmethod(
+            _prepare_4d_causal_attention_mask_with_cache_position
+        )
+        DIRECTML_TRANSFORMERS_COMPAT = "qwen2-mask-where-v1"
+        return DIRECTML_TRANSFORMERS_COMPAT
+    except Exception as exc:
+        DIRECTML_TRANSFORMERS_COMPAT = f"failed:{exc}"
+        raise RuntimeError(f"DirectML transformers compatibility setup failed: {exc}") from exc
+
+
 def probe_dependencies() -> dict[str, Any]:
     global TORCH, DML_DEVICE, DEPENDENCY_PROBE, LAST_ERROR
     with STATE_LOCK:
@@ -319,7 +422,7 @@ def probe_dependencies() -> dict[str, Any]:
             import torch
             import torch_directml
             import transformers
-            device, device_index, vram_mib, device_name = _directml_device_and_vram(torch_directml)
+            device, device_index, vram_mib, device_name, vram_source = _directml_device_and_vram(torch_directml)
             # A real operation proves more than merely constructing the device handle.
             value = (torch.tensor([1.0], dtype=torch.float32).to(device) + 2.0).cpu().item()
             if abs(float(value) - 3.0) > 0.001:
@@ -330,18 +433,25 @@ def probe_dependencies() -> dict[str, Any]:
                 pass
             TORCH = torch
             DML_DEVICE = device
-            global VRAM_TOTAL_MIB, VRAM_BUDGET_MIB
+            global VRAM_TOTAL_MIB, VRAM_BUDGET_MIB, VRAM_SOURCE
             VRAM_TOTAL_MIB = vram_mib
+            VRAM_SOURCE = vram_source
             VRAM_BUDGET_MIB = vram_mib * VRAM_LIMIT_PCT // 100
+            detail = "DirectML tensor probe passed"
+            if vram_mib > 0:
+                detail += f"; VRAM capacity={vram_mib}MiB source={vram_source}"
+            else:
+                detail += "; VRAM capacity unavailable (model admission will remain fail-closed)"
             DEPENDENCY_PROBE = {
                 "ready": True,
-                "detail": "DirectML tensor + VRAM-capacity probe passed",
+                "detail": detail,
                 "torch": getattr(torch, "__version__", "unknown"),
                 "transformers": getattr(transformers, "__version__", "unknown"),
                 "device": str(device),
                 "device_index": device_index,
                 "device_name": device_name,
                 "vram_total_mib": VRAM_TOTAL_MIB,
+                "vram_source": VRAM_SOURCE,
                 "vram_budget_mib": VRAM_BUDGET_MIB,
                 "vram_limit_pct": VRAM_LIMIT_PCT,
             }
@@ -369,6 +479,7 @@ def _load_model() -> tuple[Any, Any, Any]:
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer
 
+            _install_transformers_directml_compat()
             available_mib = _host_mem_available_mib()
             if available_mib and available_mib < HOST_RESERVE_MIB:
                 raise RuntimeError(
@@ -528,7 +639,7 @@ def directml_chat(payload: dict[str, Any]) -> dict[str, Any]:
         }
         if attention_mask is not None:
             generation["attention_mask"] = attention_mask
-        with TORCH.inference_mode():
+        with TORCH.no_grad():
             output = model.generate(input_ids=input_ids, **generation)
         generated = output[0][input_tokens:].detach().cpu()
         text = tokenizer.decode(generated, skip_special_tokens=True).strip()
@@ -586,9 +697,10 @@ def routed_chat(payload: dict[str, Any]) -> dict[str, Any]:
         return directml_chat(payload)
     except Exception as exc:
         error = str(exc)
+        if not FALLBACK_ENABLED:
+            raise RuntimeError(f"DirectML failed ({error}); Ollama text fallback is disabled by fail-closed policy") from exc
         # When this request owned the completed DirectML attempt, release the model
         # before invoking Ollama so fallback does not unnecessarily compete for VRAM.
-        # A queue-timeout request does not unload a model still used by another request.
         if not INFERENCE_LOCK.locked():
             unload_model("inference failure before Ollama fallback")
         gc.collect()
@@ -670,7 +782,7 @@ def stream_chunks(handler: BaseHTTPRequestHandler, result: dict[str, Any], model
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
-    server_version = "LatticeValeDirectML/14.5.4"
+    server_version = "LatticeValeDirectML/14.5.47"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -707,7 +819,9 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "directml_detail": DEPENDENCY_PROBE.get("detail"),
                     "model": MODEL_ID,
                     "model_loaded": MODEL is not None,
-                    "fallback_backend": OLLAMA_BACKEND,
+                    "fallback_policy": FALLBACK_POLICY,
+                    "fallback_enabled": FALLBACK_ENABLED,
+                    "fallback_backend": FALLBACK_POLICY if FALLBACK_ENABLED else "none",
                     "fallback_ready": fb_ok,
                     "fallback_detail": fb_detail,
                     "last_error": LAST_ERROR or None,
@@ -715,11 +829,16 @@ class GatewayHandler(BaseHTTPRequestHandler):
                     "max_context": MAX_CONTEXT,
                     "effective_max_context": EFFECTIVE_MAX_CONTEXT,
                     "vram_total_mib": VRAM_TOTAL_MIB or None,
+                    "vram_source": VRAM_SOURCE,
+                    "declared_vram_mib": DECLARED_VRAM_MIB or None,
+                    "declared_vram_source": DECLARED_VRAM_SOURCE,
+                    "declared_vram_confidence": DECLARED_VRAM_CONFIDENCE,
                     "vram_limit_pct": VRAM_LIMIT_PCT,
                     "vram_budget_mib": VRAM_BUDGET_MIB or None,
                     "model_weight_mib": MODEL_WEIGHT_MIB or None,
                     "estimated_model_vram_mib": ESTIMATED_MODEL_VRAM_MIB or None,
                     "vram_policy_detail": VRAM_POLICY_DETAIL,
+                    "transformers_directml_compat": DIRECTML_TRANSFORMERS_COMPAT,
                     "requested_adapter_name": REQUESTED_ADAPTER_NAME or None,
                     "requested_gpu_vendor": REQUESTED_GPU_VENDOR or None,
                     "force_fallback": FORCE_FALLBACK,

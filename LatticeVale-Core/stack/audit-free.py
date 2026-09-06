@@ -24,15 +24,20 @@ def build_report(snapshot: StackSnapshot) -> dict:
         external_optional.append("Tailscale Windows-host integration (optional third-party service; pricing/plan terms are external to LatticeVale)")
     if opts.obsidian:
         external_optional.append("Obsidian Windows-host integration (optional proprietary application integration)")
-    if opts.hermes_local_ai and opts.ollama_backend == "windows-native":
+    if opts.ollama_role and opts.effective_ollama_backend == "windows-native":
         external_optional.append("Windows-native Ollama bridge (optional free/local host integration; not part of the WSL-only core runtime path)")
 
     # A free/local default Hermes model path is guaranteed when the installer-selected
-    # local AI path is enabled.  v14.5.3 can route text through the WSL-host DirectML
-    # gateway while retaining Ollama as automatic text fallback and Honcho embedding
-    # authority.  Other Hermes provider choices are user-owned and may be free or paid.
-    local_default = opts.hermes_local_ai and opts.ollama_backend in {"managed", "windows-native"} and opts.local_text_backend in {"ollama", "directml"}
-    wsl_native_default = opts.hermes_local_ai and opts.ollama_backend == "managed"
+    # local AI path is enabled. DirectML may use a configured Ollama text fallback or
+    # deliberately fail closed; Honcho embeddings remain an independent Ollama role.
+    # Other Hermes provider choices are user-owned and may be free or paid.
+    local_default = opts.hermes_local_ai and (
+        opts.local_text_backend == "ollama" or opts.directml_enabled
+    )
+    wsl_native_default = opts.hermes_local_ai and (
+        (opts.local_text_backend == "ollama" and opts.effective_ollama_backend == "managed")
+        or opts.directml_enabled
+    )
     honcho_local = (not opts.honcho) or opts.local_ai_enabled
     blockers: list[str] = []
     if not local_default:
@@ -51,14 +56,18 @@ def build_report(snapshot: StackSnapshot) -> dict:
         "wslNativeCoreAIPath": wsl_native_default,
         "localTextBackend": opts.local_text_backend if opts.local_ai_enabled else "not-selected",
         "directmlTextModel": opts.directml_text_model if opts.local_ai_enabled and opts.local_text_backend == "directml" else None,
-        "ollamaBackend": opts.ollama_backend if opts.local_ai_enabled else "not-selected",
+        "gpuAccelerationEnabled": opts.use_gpu_acceleration if opts.local_ai_enabled else False,
+        "directmlFallbackPolicy": opts.directml_fallback_policy if opts.directml_enabled else "not-selected",
+        "ollamaBackend": opts.effective_ollama_backend if opts.ollama_role else "not-selected",
+        "ollamaTextRole": opts.ollama_text_role,
+        "ollamaEmbeddingRole": opts.ollama_embedding_role,
         "selectedComponents": list(opts.selected_components()),
         "optionalExternalIntegrations": external_optional,
         "blockers": blockers,
         "notes": [
             "This audit does not promise that a third-party free tier will remain free in the future.",
             "Optional paid/external providers do not violate the project invariant; they only make the current profile non-free-only if selected as its required provider.",
-            "The managed Ollama backend is the WSL-native compatibility baseline; DirectML text acceleration remains local and keeps Ollama available for fallback and Honcho embeddings.",
+            "The managed Ollama backend is the WSL-native compatibility baseline; DirectML text acceleration remains local and may use managed/native Ollama fallback or deliberately fail closed, while Honcho embeddings are an independent Ollama role.",
             "Windows-native Ollama is reported as an optional host integration even though it can also be free/local.",
         ],
     }
@@ -81,7 +90,9 @@ def main() -> int:
         print(f"Local text backend: {report['localTextBackend']}")
         if report.get("directmlTextModel"):
             print(f"DirectML text model: {report['directmlTextModel']}")
-        print(f"Ollama fallback/embedding backend: {report['ollamaBackend']}")
+        if report.get("directmlFallbackPolicy") != "not-selected":
+            print(f"DirectML text fallback: {report['directmlFallbackPolicy']}")
+        print(f"Ollama selected-role backend: {report['ollamaBackend']}")
         if report["blockers"]:
             print("Current free-only blockers/unknowns:")
             for item in report["blockers"]:

@@ -7,6 +7,7 @@ They do not encode one developer/user machine topology as a policy target.
 from __future__ import annotations
 
 import hashlib
+import itertools
 import json
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from latticevale_arch import (  # noqa:E402
     _windows_gpu_normalize,
     atomic_write_json,
     classify_backends,
+    cpu_envelope_plan,
     cpu_quota_plan,
     directml_context_recommendation,
     fingerprint,
@@ -34,22 +36,24 @@ from latticevale_arch import (  # noqa:E402
 )
 
 compat = parse_compatibility(ROOT / "compatibility.conf")
-assert compat["INSTALL_OPTIONS_SCHEMA"] == "22"
+assert compat["INSTALL_OPTIONS_SCHEMA"] == "23"
 assert compat["HARDWARE_CAPABILITIES_SCHEMA"] == "1"
 assert compat["BACKEND_CAPABILITIES_SCHEMA"] == "1"
 assert compat["BACKEND_HEALTH_SCHEMA"] == "1"
-assert compat["RUNTIME_POLICY_SCHEMA"] == "12"
+assert compat["RUNTIME_POLICY_SCHEMA"] == "13"
 assert compat["DIAGNOSTICS_SCHEMA"] == "1"
 assert compat["MANAGED_REPAIR_REFRESH_REVISION"] == "4"
 
 # One canonical schema owner: current state passes, future state fails closed, and
 # corrected v14.5.47 schema-21 durable choices remain valid migration input.
 base_options = {
-    "schema": 22,
+    "schema": 23,
     "installerVersion": "14.6.0",
     "localTextBackend": "directml",
     "directmlTextModel": "Qwen/Qwen2.5-1.5B-Instruct",
     "ollamaBackend": "managed",
+    "directmlFallbackPolicy": "managed",
+    "useGpuAcceleration": True,
     "ollamaAcceleration": "auto",
     "gpuPreferenceMode": "explicit",
     "gpuPreferenceName": "AMD Radeon RX 6700 XT",
@@ -57,14 +61,15 @@ base_options = {
     "inferenceBackendPreference": "directml",
     "workers": [],
 }
-validate_install_options(dict(base_options), 22)
+validate_install_options(dict(base_options), 23)
+validate_install_options(dict(base_options, schema=22, installerVersion="14.6.0", repairOriginSchema=22), 23)
+validate_install_options(dict(base_options, schema=21, installerVersion="14.5.47", repairOriginSchema=21), 23)
 try:
-    validate_install_options(dict(base_options, schema=23), 22)
+    validate_install_options(dict(base_options, schema=24), 23)
 except ValueError:
     pass
 else:
     raise AssertionError("future install-options schema must fail closed")
-validate_install_options(dict(base_options, schema=21, installerVersion="14.5.47", repairOriginSchema=21), 22)
 
 # Host budgeting is continuously derived from live WSL RAM and selected paths.
 # Sweep deliberately irregular values so a hidden size table cannot satisfy this test.
@@ -90,6 +95,48 @@ for accel in ("cpu", "vulkan", "nvidia", "amd"):
                     assert dml == 0
                 previous_budget, previous_reserve = budget, reserve
 
+# DirectML host budgeting must be monotonic across arbitrary memory sizes, including
+# floor/ratio/cap boundaries. A larger WSL allocation may never produce a smaller
+# container budget merely because a percentage crossed a rounding/tier boundary.
+for managed in (False, True):
+    for accel in ("cpu", "vulkan", "nvidia", "amd"):
+        first_success = None
+        previous_budget = -1
+        previous_reserve = -1
+        for mem in range(512, 131073, 17):
+            try:
+                b = host_memory_budget(mem, accel, managed, True)
+            except ValueError:
+                assert first_success is None
+                continue
+            if first_success is None:
+                first_success = mem
+            assert b["reserveMiB"] + b["containerBudgetMiB"] == mem
+            assert b["directmlHostReserveMiB"] == b["reserveMiB"]
+            assert b["containerBudgetMiB"] >= previous_budget
+            assert b["reserveMiB"] >= previous_reserve
+            previous_budget = b["containerBudgetMiB"]
+            previous_reserve = b["reserveMiB"]
+        assert first_success is not None
+
+# Explicitly probe every MiB around the historical 6 GiB discontinuity and the
+# current 2 GiB floor / 30% crossover / 8 GiB cap. These are formula boundaries,
+# not machine profiles.
+for lo, hi in ((2300, 2500), (6700, 6950), (27000, 27600)):
+    last_budget = -1
+    for mem in range(lo, hi + 1):
+        b = host_memory_budget(mem, "cpu", True, True)
+        assert b["containerBudgetMiB"] >= last_budget
+        last_budget = b["containerBudgetMiB"]
+
+# A ~12 GiB regression example must leave at least 3 GiB outside Docker for the
+# host-side model loader while preserving a viable container budget. The formula
+# is generic; this number is not used as a production topology branch.
+rx6700_host = host_memory_budget(11962, "cpu", True, True)
+assert rx6700_host["directmlHostReserveMiB"] >= 3072
+assert rx6700_host["reserveMiB"] + rx6700_host["containerBudgetMiB"] == 11962
+assert rx6700_host["containerBudgetMiB"] >= 7600
+
 # Supported model contexts scale monotonically from arbitrary RAM/VRAM capacities.
 allowed_contexts = {4096, 8192, 16384, 32768, 65536}
 for fn in (ram_context_recommendation, gpu_context_recommendation):
@@ -106,16 +153,49 @@ for mem in [4097, 7169, 11213, 18433, 32771, 65537]:
         if vram:
             assert ctx <= gpu_context_recommendation(vram)
 
-# CPU ceilings derive from live nproc and workload topology. Every service ceiling is
-# bounded by the visible CPU envelope; adding CPUs never lowers a ceiling.
+# CPU ceilings derive from one conserved WSL-visible envelope. Sweep exactly 3,328
+# CPU/backend/service-topology combinations (13 CPU counts x 4 accel paths x 64
+# combinations of five Docker feature families plus DirectML host reservation).
+cpu_samples = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12, 16, 24, 32]
+service_names = {
+    "matrix": {"synapse-db", "synapse"},
+    "searxng": {"searxng-valkey", "searxng"},
+    "qmd": {"qmd", "qmd-indexer"},
+    "ollama": {"ollama"},
+    "honcho": {"honcho-db", "honcho-redis", "honcho-api", "honcho-deriver"},
+}
+sweep_count = 0
+for cpus in cpu_samples:
+    for accel in ("cpu", "vulkan", "nvidia", "amd"):
+        for matrix, searxng, qmd, ollama, honcho, directml in itertools.product((False, True), repeat=6):
+            envelope = cpu_envelope_plan(cpus, directml)
+            plan = cpu_quota_plan(
+                cpus, matrix_gateways=3 if matrix else 0, kanban_concurrency=6, accel=accel,
+                matrix=matrix, searxng=searxng, qmd=qmd, ollama=ollama,
+                honcho=honcho, directml_selected=directml,
+            )
+            expected = {"hermes"}
+            for enabled, name in ((matrix, "matrix"), (searxng, "searxng"), (qmd, "qmd"), (ollama, "ollama"), (honcho, "honcho")):
+                if enabled:
+                    expected |= service_names[name]
+            assert set(plan) == expected
+            assert all(50 <= q <= cpus * 1000 and q % 50 == 0 for q in plan.values())
+            assert sum(plan.values()) <= envelope["dockerEnvelopeMilli"]
+            assert envelope["systemHeadroomMilli"] + envelope["directmlReserveMilli"] + envelope["dockerEnvelopeMilli"] == cpus * 1000
+            assert envelope["directmlReserveMilli"] > 0 if directml else envelope["directmlReserveMilli"] == 0
+            assert envelope["dockerEnvelopeMilli"] == cpus * 1000 - envelope["systemHeadroomMilli"] - envelope["directmlReserveMilli"]
+            sweep_count += 1
+assert sweep_count == 3328
+
+# With a fixed topology, more visible CPUs never reduce an enabled service ceiling.
 for accel in ("cpu", "vulkan", "nvidia", "amd"):
-    prior = None
-    for cpus in [1, 2, 3, 5, 7, 11, 16, 24]:
-        plan = cpu_quota_plan(cpus, matrix_gateways=3, kanban_concurrency=6, accel=accel)
-        assert plan and all(250 <= q <= cpus * 1000 and q % 50 == 0 for q in plan.values())
-        if prior is not None:
-            assert all(plan[name] >= prior[name] for name in plan)
-        prior = plan
+    for directml in (False, True):
+        prior = None
+        for cpus in cpu_samples:
+            plan = cpu_quota_plan(cpus, 3, 6, accel, directml_selected=directml)
+            if prior is not None:
+                assert all(plan[name] >= prior[name] for name in plan)
+            prior = plan
 
 # Service memory has one water-filling algorithm. Increasing the budget for the same
 # workload cannot reduce an allocation; total allocation never exceeds live budget.
@@ -138,6 +218,57 @@ for budget in service_budgets:
     if previous_plan is not None:
         assert all(plan[name] >= previous_plan[name] for name in previous_plan)
     previous_plan = plan
+
+# Cross-product RAM/resource conservation: irregular live WSL RAM values, acceleration
+# paths, service topologies, and DirectML reservations must either fit inside the one
+# canonical container budget or fail closed because the explicit service minima exceed
+# that budget. A successful planner may never overcommit RAM or invent disabled services.
+ram_topology_cases = 0
+for mem in ram_samples:
+    for accel in ("cpu", "vulkan", "nvidia", "amd"):
+        for matrix, searxng, qmd, ollama, honcho, directml in itertools.product((False, True), repeat=6):
+            host = host_memory_budget(mem, accel, ollama, directml)
+            budget = host["containerBudgetMiB"]
+            minimum = 1024
+            if matrix:
+                minimum += 160 + 192
+            if searxng:
+                minimum += 64 + 192
+            if qmd:
+                minimum += 192 + 192
+            if honcho:
+                minimum += 192 + 64 + 384 + 256
+            if ollama:
+                minimum += 1536
+            try:
+                plan = service_memory_plan(
+                    budget, matrix=matrix, searxng=searxng, qmd=qmd,
+                    ollama=ollama, honcho=honcho, hermes_floor=1024,
+                    ollama_floor=1536,
+                )
+            except ValueError as exc:
+                assert minimum > budget
+                assert "cannot safely fit selected services" in str(exc)
+            else:
+                expected = {"hermes"}
+                if matrix:
+                    expected |= {"synapse-db", "synapse"}
+                if searxng:
+                    expected |= {"searxng-valkey", "searxng"}
+                if qmd:
+                    expected |= {"qmd", "qmd-indexer"}
+                if honcho:
+                    expected |= {"honcho-db", "honcho-redis", "honcho-api", "honcho-deriver"}
+                if ollama:
+                    expected.add("ollama")
+                assert set(plan) == expected
+                assert sum(plan.values()) <= budget
+                assert plan["hermes"] >= 1024
+                if ollama:
+                    assert plan["ollama"] >= 1536
+            assert host["reserveMiB"] + budget == mem
+            ram_topology_cases += 1
+assert ram_topology_cases == len(ram_samples) * 4 * 64
 
 # Model admission uses actual model/context/GPU inputs. A larger measured model cannot
 # produce a smaller host floor; usable GPU memory can reduce host pressure.
@@ -262,7 +393,7 @@ with tempfile.TemporaryDirectory() as td:
                  "dedicatedMemoryMiB": 6147, "vramMiB": 6147, "sharedMemoryMiB": 4096,
                  "memorySource": "windows-registry-qword", "memoryConfidence": "high"}
     other_opts = dict(base_options, gpuPreferenceName=other_gpu["name"], gpuPreferenceVendor="other", gpuPreferenceId="gpu-other")
-    validate_install_options(other_opts, 22)
+    validate_install_options(other_opts, 23)
     other_caps = classify_backends(hw(dxg=True, gpus=[other_gpu], memory_mib=14011), other_opts, stack, compat)
     assert other_caps["selection"]["textBackend"] == "directml"
     assert other_caps["adapterSelection"]["selected"]["vendor"] == "other"
@@ -276,13 +407,33 @@ with tempfile.TemporaryDirectory() as td:
     assert cpu["selection"]["inferenceBackend"] == "cpu"
     assert cpu["qualification"]["qualifiedForCoreStack"] is True
 
+    gpu_off = dict(base_options, useGpuAcceleration=False)
+    off = classify_backends(hw(dxg=True, nvidia=True, gpus=[amd_gpu]), gpu_off, stack, compat)
+    assert off["selection"]["gpuAccelerationEnabled"] is False
+    assert off["selection"]["inferenceBackend"] == "cpu"
+    assert off["selection"]["ollamaAcceleration"] == "cpu"
+
+    no_fallback = dict(base_options, directmlFallbackPolicy="none")
+    write_backend_health(stack, compat, "directml", "failed", "DML_GENERATION_FAILED", hw(dxg=True, gpus=[amd_gpu])["hardwareFingerprint"], "forced test failure")
+    closed = classify_backends(hw(dxg=True, gpus=[amd_gpu]), no_fallback, stack, compat)
+    # The health record may not apply if the generated test hardware fingerprint differs;
+    # force structural failure too and verify that no-fallback DirectML remains unavailable,
+    # never silently becoming Ollama text inference.
+    closed = classify_backends(hw(dxg=False, gpus=[amd_gpu]), no_fallback, stack, compat)
+    assert closed["selection"]["textFallbackEnabled"] is False
+    assert closed["selection"]["directmlFallbackPolicy"] == "none"
+    assert closed["selection"]["activeTextBackend"] == "unavailable"
+    assert closed["selection"]["runtimeFailClosed"] is True
+    assert closed["selection"]["fallbackChain"] == []
+
 # Persisted writer/verifier agreement is tested from dynamically calculated values,
 # never from one known machine's numbers.
 for mem in [4099, 7331, 10103, 15401, 27109, 50021]:
     budget = host_memory_budget(mem, "cpu", True, True)
     state = {
-        "POLICY_VERSION": "12",
+        "POLICY_VERSION": "13",
         "MEM_MIB": str(mem),
+        "CPUS": "7",
         "OLLAMA_ACCELERATION": "cpu",
         "MANAGED_OLLAMA_SELECTED": "true",
         "DIRECTML_SELECTED": "true",
@@ -291,6 +442,11 @@ for mem in [4099, 7331, 10103, 15401, 27109, 50021]:
         "BUDGET_MIB": str(budget["containerBudgetMiB"]),
         "RESOURCE_POLICY_MODE": "adaptive",
     }
+    env = cpu_envelope_plan(7, True)
+    state["CPU_SYSTEM_HEADROOM_MILLI"] = str(env["systemHeadroomMilli"])
+    state["CPU_DIRECTML_RESERVE_MILLI"] = str(env["directmlReserveMilli"])
+    state["CPU_DOCKER_ENVELOPE_MILLI"] = str(env["dockerEnvelopeMilli"])
+    state["CPU_DOCKER_ALLOCATED_MILLI"] = "0"
     material = "".join(f"{k}={state[k]}\n" for k in sorted(state))
     state["POLICY_FINGERPRINT"] = hashlib.sha256(material.encode()).hexdigest()
     valid = validate_runtime_policy_state(state, compat)
@@ -312,6 +468,10 @@ with tempfile.TemporaryDirectory() as td:
 cfg = (ROOT / "stack/configure-stack.sh").read_text()
 arch = (ROOT / "stack/latticevale_arch.py").read_text()
 runtime = (ROOT / "stack/runtime-policy.py").read_text()
+manage = (ROOT / "stack/manage.sh").read_text()
+assert "HEALTHY is a two-stage decision" in manage
+assert "LatticeVale verification: HEALTHY (confirmed twice)" in manage
+assert manage.count("state-audit.py --stack . --json") >= 2
 assert "latticevale_arch.py validate-options install-options.json" in cfg
 assert "PY_OPTIONS_VALIDATE" not in cfg
 assert "DEFAULT_SCHEMAS" not in arch
@@ -321,6 +481,9 @@ for marker in ("runtime-policy.py host-budget", "runtime-policy.py cpu-plan", "r
 assert "LOW_MEMORY_PROFILE" not in cfg and "mem_mib <= 12288" not in cfg
 assert "lowmem" not in runtime.lower()
 assert "resource_cpu_limit_string" in cfg
+assert "runtime-policy.py cpu-envelope" in cfg
+for marker in ("CPU_SYSTEM_HEADROOM_MILLI", "CPU_DIRECTML_RESERVE_MILLI", "CPU_DOCKER_ENVELOPE_MILLI", "CPU_DOCKER_ALLOCATED_MILLI"):
+    assert marker in cfg
 assert "directml_reserve_mib=$((mem_mib/4))" not in cfg
 assert "PY_RESOURCE_PLAN" not in cfg and "hermes_cpu=$(((" not in cfg
 # Current architecture code may contain safety minima/caps, but no known-user topology

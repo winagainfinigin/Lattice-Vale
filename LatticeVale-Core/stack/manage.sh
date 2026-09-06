@@ -11,6 +11,10 @@ Usage: ./manage.sh COMMAND [ARG]
   status                 Show current Hermes/service state without treating normal startup as failure
   verify [seconds]       Wait up to 300s (or supplied timeout) for the selected stack to become healthy
   audit                  State-aware read-only audit (includes incomplete/legacy state)
+  diagnose               Canonical hardware/backend/resource diagnostic summary
+  diagnose-gpu           Refresh and print canonical Windows/WSL hardware capabilities
+  diagnose-backends      Refresh and print backend capabilities/selection
+  diagnose-policy        Validate and print canonical runtime resource policy
   audit-free             Read-only check of the current free/local operating path
   plan [--offline]       Show a read-only repair plan; never changes the stack
   repair --plan [--offline]
@@ -47,13 +51,18 @@ HONCHO_HOST_PORT="$(opt_port honchoLocalPort 8000)"
 WINDOWS_OLLAMA_BRIDGE_PORT="$(opt_port windowsOllamaBridgePort 11435)"
 DIRECTML_PORT="$(opt_port directmlPort 11436)"
 local_ai_enabled() { [[ "$(opt_bool honcho)" == true || "$(opt_bool hermesLocalAI)" == true ]]; }
+gpu_acceleration_enabled() { jq -e '(.useGpuAcceleration // true) == true' install-options.json >/dev/null 2>&1; }
 local_text_backend() { local v; v="$(opt_text localTextBackend)"; [[ "$v" == ollama || "$v" == directml ]] || v=ollama; printf '%s' "$v"; }
-directml_text_enabled() { local_ai_enabled && [[ "$(local_text_backend)" == directml ]]; }
+directml_fallback_policy() { local v; v="$(opt_text directmlFallbackPolicy)"; if [[ "$v" != managed && "$v" != windows-native && "$v" != none ]]; then if [[ "$(local_text_backend)" == directml ]]; then v="$(opt_text ollamaBackend)"; [[ "$v" == managed || "$v" == windows-native ]] || v=managed; else v=none; fi; fi; printf '%s' "$v"; }
+directml_text_enabled() { local_ai_enabled && gpu_acceleration_enabled && [[ "$(local_text_backend)" == directml ]]; }
 directml_text_model() { local v; v="$(opt_text directmlTextModel)"; [[ -n "$v" ]] || v='Qwen/Qwen2.5-1.5B-Instruct'; printf '%s' "$v"; }
-
-ollama_backend() { local v; v="$(opt_text ollamaBackend)"; [[ "$v" == managed || "$v" == windows-native ]] || v=managed; printf '%s' "$v"; }
-managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed ]]; }
-windows_native_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == windows-native ]]; }
+text_fallback_enabled() { directml_text_enabled && [[ "$(directml_fallback_policy)" != none ]]; }
+ollama_text_role_enabled() { local_ai_enabled && { [[ "$(local_text_backend)" == ollama ]] || text_fallback_enabled; }; }
+ollama_embedding_role_enabled() { [[ "$(opt_bool honcho)" == true ]]; }
+ollama_role_enabled() { ollama_text_role_enabled || ollama_embedding_role_enabled; }
+ollama_backend() { local v; if directml_text_enabled && text_fallback_enabled; then v="$(directml_fallback_policy)"; else v="$(opt_text ollamaBackend)"; fi; [[ "$v" == managed || "$v" == windows-native ]] || v=managed; printf '%s' "$v"; }
+managed_ollama_enabled() { ollama_role_enabled && [[ "$(ollama_backend)" == managed ]]; }
+windows_native_ollama_enabled() { ollama_role_enabled && [[ "$(ollama_backend)" == windows-native ]]; }
 native_info_field() {
   local key="$1" default="${2:-}" value=''
   if [[ -r .windows-native-info ]]; then
@@ -179,13 +188,14 @@ show_hardware_summary() {
     echo "  DirectML endpoint:     WSL-host Docker gateway:${DIRECTML_PORT} (container-only route)"
     echo '  DirectML policy:       serial inference; 8192-token cap; 300s idle model unload'
     if [[ -s data/directml/last-backend ]]; then echo "  Last text backend:     $(cat data/directml/last-backend 2>/dev/null || true)"; fi
-    echo "  Ollama fallback model: $(opt_text localTextModel)"
+    if text_fallback_enabled; then echo "  Ollama fallback model: $(opt_text localTextModel) ($(directml_fallback_policy))"; else echo "  Ollama text fallback:  disabled (fail closed)"; fi
   fi
   if windows_native_ollama_enabled; then
     local native_base native_version native_ps
     native_base="$(native_ollama_base_url 2>/dev/null || true)"
     echo '  Ollama backend:        native Windows Ollama via WSL-only relay'
-    echo "  Ollama $(if directml_text_enabled; then printf fallback; else printf text; fi) model: $(opt_text localTextModel)"
+    if ollama_text_role_enabled; then echo "  Ollama text/fallback:  $(opt_text localTextModel)"; fi
+    if ollama_embedding_role_enabled; then echo "  Ollama embeddings:     $(opt_text localEmbeddingModel)"; fi
     echo '  Acceleration config:   owned by native Windows Ollama (not modified by LatticeVale)'
     if [[ -n "$native_base" ]]; then
       native_version="$(curl -fsS --connect-timeout 2 --max-time 5 "$native_base/api/version" 2>/dev/null | jq -r '.version // empty' 2>/dev/null || true)"
@@ -196,10 +206,15 @@ show_hardware_summary() {
     echo '  GPU/VRAM reporting:    delegated to native Windows Ollama; WSL device files are not used for this backend.'
     return 0
   fi
+  if ! managed_ollama_enabled; then
+    echo '  Ollama role:           none'
+    return 0
+  fi
   accel="$(env_value LATTICEVALE_OLLAMA_ACCELERATION "$(opt_text ollamaAcceleration)")"
   [[ -n "$accel" ]] || accel=cpu
   model="$(opt_text localTextModel)"
-  echo "  Ollama $(if directml_text_enabled; then printf fallback; else printf text; fi) model: ${model:-unknown}"
+  if ollama_text_role_enabled; then echo "  Ollama text/fallback:  ${model:-unknown}"; fi
+  if ollama_embedding_role_enabled; then echo "  Ollama embeddings:     $(opt_text localEmbeddingModel)"; fi
   echo "  Acceleration config:   $accel"
   if vram_mib="$(gpu_vram_mib "$accel" 2>/dev/null)"; then
     echo "  Detected GPU VRAM:     $((vram_mib/1024)) GiB (${vram_mib} MiB aggregate)"
@@ -409,6 +424,7 @@ control_directml_gateway() {
 
 ensure_directml_fallback_ready() {
   directml_text_enabled || return 0
+  text_fallback_enabled || return 0
   if managed_ollama_enabled; then
     timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --no-build ollama >/dev/null
     for _ in $(seq 1 60); do
@@ -423,6 +439,7 @@ ensure_directml_fallback_ready() {
 
 pull_ollama_model() {
   local model="$1" base rc=0
+  [[ -n "$model" ]] || return 0
   if windows_native_ollama_enabled; then
     base="$(native_ollama_base_url)" || return 1
     echo "Pulling '$model' into native Windows Ollama through the verified WSL relay."
@@ -522,7 +539,11 @@ status() {
   [[ "$(opt_bool qmd)" == true ]] && check_qmd
   if managed_ollama_enabled; then
     if docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null | grep -qx healthy; then
-      printf '%-12s OK (%s)\n' Ollama "$(opt_text localTextModel)"
+      if ollama_text_role_enabled; then
+        printf '%-12s OK (text=%s%s)\n' Ollama "$(opt_text localTextModel)" "$(if ollama_embedding_role_enabled; then printf '; embeddings=%s' "$(opt_text localEmbeddingModel)"; fi)"
+      else
+        printf '%-12s OK (embeddings=%s)\n' Ollama "$(opt_text localEmbeddingModel)"
+      fi
     elif container_is_starting hermes-ollama; then
       printf '%-12s STARTING\n' Ollama
     elif container_stopped_cleanly hermes-ollama; then
@@ -533,7 +554,11 @@ status() {
   elif windows_native_ollama_enabled; then
     native_base="$(native_ollama_base_url 2>/dev/null || true)"
     if [[ -n "$native_base" ]] && curl -fsS --connect-timeout 2 --max-time 5 "$native_base/api/version" >/dev/null 2>&1; then
-      printf '%-12s OK (%s; native Windows)\n' Ollama "$(opt_text localTextModel)"
+      if ollama_text_role_enabled; then
+        printf '%-12s OK (text=%s%s; native Windows)\n' Ollama "$(opt_text localTextModel)" "$(if ollama_embedding_role_enabled; then printf '; embeddings=%s' "$(opt_text localEmbeddingModel)"; fi)"
+      else
+        printf '%-12s OK (embeddings=%s; native Windows)\n' Ollama "$(opt_text localEmbeddingModel)"
+      fi
     else
       printf '%-12s FAILED (native Windows relay/API unavailable)\n' Ollama
     fi
@@ -544,7 +569,11 @@ status() {
       directml_ready="$(jq -r '.directml_ready // false' <<<"$directml_health")"
       fallback_ready="$(jq -r '.fallback_ready // false' <<<"$directml_health")"
       last_backend="$(cat data/directml/last-backend 2>/dev/null || true)"
-      printf '%-12s OK (model=%s; DirectML=%s; fallback=%s%s)\n' DirectML "$(directml_text_model)" "$directml_ready" "$fallback_ready" "$(if [[ -n "$last_backend" ]]; then printf '; last=%s' "$last_backend"; fi)"
+      if [[ "$directml_ready" == true || ( "$fallback_ready" == true && "$(directml_fallback_policy)" != none ) ]]; then
+        printf '%-12s OK (model=%s; DirectML=%s; fallback=%s/%s%s)\n' DirectML "$(directml_text_model)" "$directml_ready" "$(directml_fallback_policy)" "$fallback_ready" "$(if [[ -n "$last_backend" ]]; then printf '; last=%s' "$last_backend"; fi)"
+      else
+        printf '%-12s FAILED (model=%s; DirectML=%s; fallback=%s/%s)\n' DirectML "$(directml_text_model)" "$directml_ready" "$(directml_fallback_policy)" "$fallback_ready"
+      fi
     else
       printf '%-12s FAILED (gateway unavailable)\n' DirectML
     fi
@@ -566,23 +595,36 @@ status() {
 }
 
 verify() {
-  local timeout="${1:-300}" deadline overall
+  local timeout="${1:-300}" deadline overall first_audit confirmed_audit confirmed_overall followup
   [[ "$timeout" =~ ^[0-9]+$ && "$timeout" -ge 1 && "$timeout" -le 1800 ]] || { echo 'verify timeout must be 1-1800 seconds.' >&2; return 2; }
   docker_ready || { echo 'Docker daemon is not running. Start the stack first with ./manage.sh start.' >&2; return 2; }
   deadline=$(( $(date +%s) + timeout ))
   while :; do
-    overall="$(python3 ./state-audit.py --stack . --json | jq -r '.overall // "UNKNOWN"')"
+    first_audit="$(python3 ./state-audit.py --stack . --json)" || { echo 'State audit failed during verification.' >&2; return 2; }
+    overall="$(jq -r '.overall // "UNKNOWN"' <<<"$first_audit")"
     case "$overall" in
       HEALTHY)
-        followup="$(python3 ./state-audit.py --stack . --json | jq -r '.windowsFollowup | length')"
+        # HEALTHY is a two-stage decision. Re-probe before reporting success so a
+        # service transition cannot print HEALTHY and then immediately require repair.
+        confirmed_audit="$(python3 ./state-audit.py --stack . --json)" || { echo 'Confirmation audit failed during verification.' >&2; return 2; }
+        confirmed_overall="$(jq -r '.overall // "UNKNOWN"' <<<"$confirmed_audit")"
+        if [[ "$confirmed_overall" != HEALTHY ]]; then
+          if (( $(date +%s) >= deadline )); then
+            echo "Verification changed from HEALTHY to $confirmed_overall during confirmation and did not stabilize before timeout." >&2
+            python3 ./state-audit.py --stack .
+            return 3
+          fi
+          echo "Health changed during confirmation ($confirmed_overall); rechecking before reporting success..." >&2
+          sleep 2
+          continue
+        fi
+        followup="$(jq -r '.windowsFollowup | length' <<<"$confirmed_audit")"
         if [[ "$followup" =~ ^[0-9]+$ && "$followup" -gt 0 ]]; then
           echo 'LatticeVale verification: HEALTHY (optional Windows follow-up remains)'
-          python3 ./state-audit.py --stack .
-          echo
-          echo 'Core LatticeVale/WSL services are healthy. Windows-only PARTIAL hints do not require Linux stack repair.'
+          echo "Core LatticeVale/WSL services passed two consecutive health audits; $followup optional Windows follow-up item(s) remain."
           echo 'Rerun the Windows installer only if you want it to reconcile Tailscale, Windows apps, or auto-start.'
         else
-          echo 'LatticeVale verification: HEALTHY'
+          echo 'LatticeVale verification: HEALTHY (confirmed twice)'
         fi
         status
         return 0
@@ -1074,7 +1116,7 @@ backup() {
   fi
   local -a items=()
   for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-managed-profiles .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
-    compose.yaml directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
+    compose.yaml compatibility.conf latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/latticevale data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
     [[ -e "$p" ]] && items+=("$p")
   done
   [[ "$matrix_dumped" == false && -e data/synapse-db ]] && items+=(data/synapse-db)
@@ -1100,6 +1142,25 @@ if [[ "$cmd" == matrix-profile-finish ]]; then
   }
   ensure_docker_for_user
   finish_matrix_profile "$2"
+  exit $?
+fi
+
+if [[ "$cmd" == diagnose || "$cmd" == diagnose-gpu || "$cmd" == diagnose-backends || "$cmd" == diagnose-policy ]]; then
+  [[ -s install-options.json && -s compatibility.conf && -s latticevale_arch.py ]] || {
+    echo 'Canonical diagnostics are not staged far enough to run safely. Rerun the Windows installer or use its Windows-side diagnostics.' >&2
+    exit 1
+  }
+  case "$cmd" in
+    diagnose) python3 ./diagnostics.py --stack . ;;
+    diagnose-gpu)
+      python3 ./hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json --json ;;
+    diagnose-backends)
+      python3 ./hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json >/dev/null
+      python3 ./backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json --json ;;
+    diagnose-policy)
+      python3 ./runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json
+      python3 -m json.tool data/latticevale/runtime-policy.json ;;
+  esac
   exit $?
 fi
 
@@ -1194,8 +1255,8 @@ case "$cmd" in
       if managed_ollama_enabled; then
         for _ in $(seq 1 60); do timeout --foreground --kill-after=5s 15s docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null | grep -qx healthy && break; sleep 2; done
       fi
-      pull_ollama_model "$(opt_text localTextModel)"
-      if [[ "$(opt_bool honcho)" == true ]]; then pull_ollama_model "$(opt_text localEmbeddingModel)"; fi
+      if ollama_text_role_enabled; then pull_ollama_model "$(opt_text localTextModel)"; fi
+      if ollama_embedding_role_enabled; then pull_ollama_model "$(opt_text localEmbeddingModel)"; fi
       if directml_text_enabled; then
         control_directml_gateway install
         ensure_directml_fallback_ready

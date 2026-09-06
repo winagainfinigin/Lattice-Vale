@@ -3,7 +3,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}, version
+assert version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, version
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 relay = (ROOT / 'windows/LatticeVale-WslNativeRelay.ps1').read_text(encoding='ascii')
 configure = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
@@ -14,7 +14,7 @@ compose = (ROOT / 'stack/compose.yaml').read_text(encoding='utf-8')
 assert 'wslNetworkingMode = $wslNetworkingModePolicy' in ps
 assert 'wslNetworkingModeOwner = $wslNetworkingModeOwner' in ps
 assert 'The existing native-Ollama path verified' not in ps or version != '14.3.41'
-if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'}:
+if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}:
     assert "user-existing-mirrored" in ps
     assert 'v14.3.41 no longer owns or mutates networkingMode' in ps
     assert 'will not create, reapply, or require mirrored mode' in ps
@@ -66,6 +66,6 @@ assert 'WSL_NETWORKING_MODE_OWNER' in ps
 # Read-only health reports the real dependency chain and a stale saved/live topology.
 assert 'native Ollama/model dependency is not healthy' in audit
 assert 'live WSL networking mode is {live_mode}, saved shared policy is {networking_mode}' in audit
-assert ('shared native-Ollama/Tailscale networking policy must record a verified non-mirrored topology' in audit) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'} else ('shared native-Ollama/Tailscale networking policy must record a verified NAT or mirrored topology' in audit)
+assert ('shared native-Ollama/Tailscale networking policy must record a verified non-mirrored topology' in audit) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'} else ('shared native-Ollama/Tailscale networking policy must record a verified NAT or mirrored topology' in audit)
 
 print('v14.3.30 shared WSL networking policy fixtures: PASS')

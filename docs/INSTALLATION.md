@@ -1,5 +1,9 @@
 # LatticeVale 14.6.0 Installation
 
+## v14.6.0 schema-23 local-AI choices
+
+Local-AI setup now records whether GPU acceleration is wanted before backend selection. CPU-only is fully supported. DirectML users explicitly choose native-Windows Ollama fallback, managed WSL/Docker Ollama fallback, or no text fallback. These choices are durable and are preserved during Resume / repair. Honcho embeddings can use Ollama independently of the DirectML text-fallback choice.
+
 ## Installation model
 
 LatticeVale is a Windows-driven installer for an existing Ubuntu WSL2 distribution. Windows performs host discovery/integration; the selected Linux user owns the WSL stack; narrowly scoped root operations install system prerequisites and manage the installer-owned Docker Engine.
