@@ -1,4 +1,4 @@
-# LatticeVale 14.6.0 Test Confidence Levels
+# LatticeVale 14.6.1 Test Confidence Levels
 
 ## v14.6.0 policy-13 release additions
 

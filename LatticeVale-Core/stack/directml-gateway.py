@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-VERSION = "14.6.0"
+VERSION = "14.6.1"
 MAX_BODY_BYTES = 2 * 1024 * 1024
 MODEL_ID = os.environ.get("LATTICEVALE_DIRECTML_MODEL", "Qwen/Qwen2.5-1.5B-Instruct").strip()
 FALLBACK_MODEL = os.environ.get("LATTICEVALE_OLLAMA_TEXT_MODEL", "qwen3.5:4b").strip()

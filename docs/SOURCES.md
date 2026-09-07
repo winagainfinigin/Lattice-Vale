@@ -1,4 +1,4 @@
-## v14.6.0 canonical architecture source policy
+## v14.6.1 canonical architecture source policy
 
 - **No new redistributed GPU/runtime binary:** the canonical hardware/backend/resource architecture is first-party Python/PowerShell/Bash and uses standard OS/runtime interfaces already required by LatticeVale.
 - **Capability evidence remains upstream-owned:** Microsoft documents PyTorch with DirectML inside WSL2 (`https://learn.microsoft.com/windows/ai/directml/pytorch-wsl`) on supported Windows 11/DirectX 12 systems; LatticeVale uses that WSL DirectX/`torch-directml` path rather than assuming AMD DirectML must run natively on Windows. CUDA uses the existing NVIDIA WSL/container path; ROCm uses existing AMD Linux devices/runtime; Vulkan uses the existing WSL DRM/Vulkan/Ollama path; CPU remains the portable fallback. LatticeVale does not install or replace Windows/vendor display drivers.

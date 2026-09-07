@@ -2,7 +2,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.46','14.5.47','14.6.0'}, version
+assert version in {'14.5.46','14.5.47','14.6.0','14.6.1'}, version
 ps = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
 boot = (ROOT / 'linux' / 'bootstrap.sh').read_text(encoding='utf-8')
 cfg = (ROOT / 'stack' / 'configure-stack.sh').read_text(encoding='utf-8')
@@ -61,7 +61,7 @@ assert cfg.index('apply_honcho_timeout_policy data/hermes/honcho.json') > cfg.in
 
 # DirectML adds a WSL-host workload that did not exist in the stable v14.5.2 topology.
 assert 'resource_host_memory_budget() {' in cfg
-if version == '14.6.0':
+if version in {'14.6.0','14.6.1'}:
     assert 'runtime-policy.py host-budget' in cfg
     assert 'RESOURCE_POLICY_MODE]=adaptive' in cfg
     assert 'directml_reserve_mib=$((mem_mib/4))' not in cfg

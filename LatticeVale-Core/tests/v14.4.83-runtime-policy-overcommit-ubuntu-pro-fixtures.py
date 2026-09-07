@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert VERSION in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}, VERSION
+assert VERSION in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}, VERSION
 
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
@@ -25,7 +25,7 @@ assert "printf 'POLICY_VERSION=%s\\n'" in cfg
 assert 'runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state' in cfg
 assert './configure-stack.sh --refresh-resource-policy' in manage
 assert './configure-stack.sh --refresh-resource-policy' in boot
-if VERSION == '14.6.0':
+if VERSION in {'14.6.0','14.6.1'}:
     assert 'validate_runtime_policy_state' in audit
     assert 'validate_runtime_policy_document' in audit
     assert 'probe_hardware' in audit and 'classify_backends' in audit

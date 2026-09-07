@@ -7,7 +7,7 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]; REPO=ROOT.parent
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.47','14.6.0'}, version
+assert version in {'14.5.47','14.6.0','14.6.1'}, version
 sys.path.insert(0,str(ROOT/'stack'))
 from latticevale_arch import (  # noqa:E402
     classify_backends, fingerprint, host_memory_budget, parse_compatibility, validate_install_options
@@ -29,10 +29,10 @@ sh=(ROOT/'stack/directml-gateway.sh').read_text(encoding='utf-8')
 for token in ('MESA_D3D12_DEFAULT_ADAPTER_NAME','directml_runtime_fingerprint','reconcile_force_fallback',
               'LATTICEVALE_DIRECTML_VRAM_MIB','diagnose)'):
     assert token in sh, token
-assert 'VERSION=14.6.0' in sh
+assert f'VERSION={version}' in sh
 
 py=(ROOT/'stack/directml-gateway.py').read_text(encoding='utf-8')
-for token in ('VERSION = "14.6.0"','DECLARED_VRAM_MIB','DECLARED_VRAM_SOURCE','DECLARED_VRAM_CONFIDENCE','vram_source','canonical:'):
+for token in (f'VERSION = "{version}"','DECLARED_VRAM_MIB','DECLARED_VRAM_SOURCE','DECLARED_VRAM_CONFIDENCE','vram_source','canonical:'):
     assert token in py, token
 
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
@@ -92,5 +92,5 @@ assert 'vulkan' in audit and 'OLLAMA_VULKAN' in audit
 tool=ROOT/'tools/Audit-LatticeVale-Gpu.ps1'; assert tool.is_file()
 for token in ('READ-ONLY','directml-gateway.sh diagnose','/dev/dri/renderD','/dev/dxg'):
     assert token in tool.read_text(encoding='utf-8'), token
-assert (REPO/'README.md').read_text(encoding='utf-8').startswith('# LatticeVale v14.6.0')
-print('PASS: v14.5.47 GPU recovery regressions preserved by v14.6.0')
+assert (REPO/'README.md').read_text(encoding='utf-8').startswith(f'# LatticeVale v{version}')
+print(f'PASS: v14.5.47 GPU recovery regressions preserved by v{version}')

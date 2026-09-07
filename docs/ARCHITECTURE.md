@@ -1,4 +1,4 @@
-# LatticeVale 14.6.0 Architecture
+# LatticeVale 14.6.1 Architecture
 
 ## Schema 23 / policy 13 ownership
 

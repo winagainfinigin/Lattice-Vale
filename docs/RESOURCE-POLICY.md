@@ -1,4 +1,4 @@
-# LatticeVale 14.6.0 Canonical Resource Policy v13
+# LatticeVale 14.6.1 Canonical Resource Policy v13
 
 ## Policy v13 conserved CPU envelope
 

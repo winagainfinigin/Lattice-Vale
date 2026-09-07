@@ -143,7 +143,7 @@ write_force_fallback() {
   fi
   fp="$(directml_runtime_fingerprint 2>/dev/null || true)"
   {
-    printf 'VERSION=14.6.0\n'
+    printf 'VERSION=14.6.1\n'
     printf 'TIME=%s\n' "$(date --iso-8601=seconds)"
     printf 'FINGERPRINT=%s\n' "$fp"
     printf 'REASON=%s\n' "$reason"
@@ -165,7 +165,7 @@ reconcile_force_fallback() {
   # v14.5.46 markers carried no fingerprint.  Retry once after upgrading to the
   # corrected adapter-selection/runtime fingerprint implementation.  Thereafter
   # retry automatically only when the relevant WSL GPU/runtime shape changes.
-  if [[ "$marker_version" != 14.6.0 || -z "$saved" || ( -n "$current" && "$saved" != "$current" ) ]]; then
+  if [[ "$marker_version" != 14.6.1 || -z "$saved" || ( -n "$current" && "$saved" != "$current" ) ]]; then
     log_msg 'DirectML runtime fingerprint changed (or legacy fallback marker found); clearing fallback marker for one fresh hardware probe'
     rm -f "$force_fallback_file"
   fi

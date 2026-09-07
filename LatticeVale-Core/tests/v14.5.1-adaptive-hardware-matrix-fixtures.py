@@ -5,7 +5,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
+assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}
 cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 sys.path.insert(0, str(ROOT / 'stack'))
 from latticevale_arch import cpu_envelope_plan, cpu_quota_plan, host_memory_budget, service_memory_plan  # noqa:E402

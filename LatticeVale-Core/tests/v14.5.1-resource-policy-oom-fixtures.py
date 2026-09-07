@@ -9,7 +9,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / "VERSION.txt").read_text(encoding="ascii").strip()
-assert version in {"14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}, version
+assert version in {"14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}, version
 
 cfg = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
 manage = (ROOT / "stack/manage.sh").read_text(encoding="utf-8")

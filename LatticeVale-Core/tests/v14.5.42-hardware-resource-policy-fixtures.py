@@ -11,7 +11,7 @@ import tempfile
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
-assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() in {"14.5.42", "14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}
+assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() in {"14.5.42", "14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}
 cfg = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
 audit = (ROOT / "stack/state-audit.py").read_text(encoding="utf-8")
 compose = (ROOT / "stack/compose.yaml").read_text(encoding="utf-8")
@@ -148,7 +148,7 @@ for bad in ("__pycache__", ".pyc", ".pyo"):
     assert bad in runner, bad
 assert "PYTHONDONTWRITEBYTECODE" in runner
 
-# Active documentation describes 14.6.0/policy v13; historical release notes retain
+# Active documentation describes 14.6.1/policy v13; historical release notes retain
 # the 14.5.42 provenance this fixture protects.
 current_docs = [
     REPO / "README.md", ROOT / "README.md", ROOT / "AUDIT.md", REPO / "docs/README.md",
@@ -157,7 +157,7 @@ current_docs = [
 ]
 for path in current_docs:
     text = path.read_text(encoding="utf-8")
-    assert "14.6.0" in text, path
+    assert "14.6.1" in text, path
 for path in (REPO / "README.md", ROOT / "README.md", REPO / "docs/README.md", REPO / "docs/FEATURES.md", REPO / "docs/RESOURCE-POLICY.md"):
     text = path.read_text(encoding="utf-8").lower()
     assert "policy v13" in text or "resource policy v13" in text, path

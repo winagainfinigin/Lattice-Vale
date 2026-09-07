@@ -10,11 +10,11 @@ ROOT = Path(__file__).resolve().parents[1]
 STATE_AUDIT = ROOT / "stack" / "state-audit.py"
 ARCH = ROOT / "stack" / "latticevale_arch.py"
 VERSION = (ROOT / "VERSION.txt").read_text(encoding="utf-8").strip()
-assert VERSION in {"14.4.6","14.4.7","14.4.8","14.4.81","14.4.82","14.4.83","14.4.84","14.4.85","14.5.0","14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0'}, VERSION
+assert VERSION in {"14.4.6","14.4.7","14.4.8","14.4.81","14.4.82","14.4.83","14.4.84","14.4.85","14.5.0","14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}, VERSION
 
 audit_text = STATE_AUDIT.read_text(encoding="utf-8")
 arch_text = ARCH.read_text(encoding="utf-8")
-if VERSION == "14.6.0":
+if VERSION in {"14.6.0","14.6.1"}:
     assert "def visible_cpu_count() -> int:" in arch_text
     assert "os.sched_getaffinity(0)" in arch_text
     assert "cpus = visible_cpu_count()" in arch_text
@@ -49,7 +49,7 @@ try:
     def no_affinity(_pid):
         raise OSError("not available")
     mod.os.sched_getaffinity = no_affinity
-    if VERSION == "14.6.0":
+    if VERSION in {"14.6.0","14.6.1"}:
         orig_runner = mod.run_capture
         mod.run_capture = lambda cmd, timeout=8: (0, "6", "") if cmd == ["nproc"] else (127, "", "")
     else:
@@ -58,7 +58,7 @@ try:
     assert mod.visible_cpu_count() == 6
 
     # Last-resort fallback remains safe on platforms without affinity/nproc.
-    if VERSION == "14.6.0":
+    if VERSION in {"14.6.0","14.6.1"}:
         mod.run_capture = lambda cmd, timeout=8: (127, "", "")
     else:
         mod.run = lambda cmd, cwd=None, timeout=8: (127, "")
@@ -72,7 +72,7 @@ finally:
         except AttributeError:
             pass
     mod.os.cpu_count = orig_cpu_count
-    if VERSION == "14.6.0":
+    if VERSION in {"14.6.0","14.6.1"}:
         mod.run_capture = orig_runner
     else:
         mod.run = orig_run

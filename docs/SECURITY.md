@@ -1,4 +1,4 @@
-## v14.6.0 derived-state and privilege boundary
+## v14.6.1 derived-state and privilege boundary
 
 Canonical architecture JSON is derived state, written atomically and validated before trust. Durable user intent remains separate. GPU probing does not grant permission to install/replace vendor drivers, and explicit adapter preference is not silently redirected. Diagnostic commands are read-only except that explicit `diagnose-gpu`/`diagnose-backends` refresh their installer-owned derived capability documents; they do not mutate application data or credentials. Existing least-privilege/root-scope and Docker-daemon environment sanitization requirements remain inherited.
 

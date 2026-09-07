@@ -1,4 +1,4 @@
-# LatticeVale v14.6.0 audit
+# LatticeVale v14.6.1 audit
 
 > **Policy-13 audit gate:** verify `useGpuAcceleration` and `directmlFallbackPolicy` survive Resume / repair; verify DirectML `none` never creates/retains a forced-Ollama marker; verify `torch.no_grad()` is used instead of `torch.inference_mode()`; and verify the sum of all enabled Docker CPU quotas never exceeds `CPU_DOCKER_ENVELOPE_MILLI`. The canonical regression sweep covers 3,328 CPU/backend/service-topology combinations plus irregular RAM envelopes.
 

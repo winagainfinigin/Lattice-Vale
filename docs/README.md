@@ -1,9 +1,9 @@
-# LatticeVale v14.6.0 — Stable
+# LatticeVale v14.6.1 — Stable
 
-> **Current documentation set:** v14.6.0. Repository/release packaging rules are documented in [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md); historical v13 notes are repository-only archives.
+> **Current documentation set:** v14.6.1. Repository/release packaging rules are documented in [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md); historical v13 notes are repository-only archives.
 
 
-**Current release:** v14.6.0 consolidates hardware discovery, backend capability/health/selection, resource-policy calculation, canonical validation, diagnostics, and repair dependency tracking. Start with [QUICKSTART.md](QUICKSTART.md); task-oriented current docs are now separate from historical changelog material.
+**Current release:** v14.6.1 consolidates hardware discovery, backend capability/health/selection, resource-policy calculation, canonical validation, diagnostics, and repair dependency tracking. Start with [QUICKSTART.md](QUICKSTART.md); task-oriented current docs are now separate from historical changelog material.
 
 **Architecture:** durable choices stay in `install-options.json`; generated Windows/WSL hardware, backend, health, and resource-policy state lives under `data/latticevale/` with explicit schemas and fingerprints. DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU are capabilities rather than vendor assumptions.
 
@@ -15,7 +15,7 @@
 
 **Resource diagnostics:** `~/hermes-stack/resource-policy-report.txt` remains the secret-free explanation of resource policy v13, GPU/offload state, generated ceilings, and hardware/policy fingerprints; `./manage.sh audit` independently verifies the same state.
 
-> **v14.5.2:** historical cleanup/recovery release. It added the isolated Option 7 cleanup/reclaim path and a low-space recovery gate that permits only Verify or Cleanup for a recognized managed stack below the ordinary repair floor. It otherwise inherited v14.5.1 resource policy v9, OOM-aware audit/repair detection, model-aware managed-Ollama sizing, and live Docker CPU/RAM convergence unchanged. Current installs and repairs should use v14.6.0; Option 7 remains available there.
+> **v14.5.2:** historical cleanup/recovery release. It added the isolated Option 7 cleanup/reclaim path and a low-space recovery gate that permits only Verify or Cleanup for a recognized managed stack below the ordinary repair floor. It otherwise inherited v14.5.1 resource policy v9, OOM-aware audit/repair detection, model-aware managed-Ollama sizing, and live Docker CPU/RAM convergence unchanged. Current installs and repairs should use v14.6.1; Option 7 remains available there.
 
 > **v14.4.85:** prior direct-install release. It promotes the accumulated pre-release reliability fixes into a normal versioned release, retaining the v14.4.84 WSL lifecycle repair while adding startup-aware reconcile/post-gateway readiness, exact checked gateway lifecycle handling, a bundle-owned Option 6 pre-update safety backup that can safely read container-owned persistent files, and a useful Option 3 read-only verification report. Existing v14.4.84 installs should run the full v14.4.85 release and choose Resume / repair.
 
@@ -29,7 +29,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retained those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4; v14.5.1 advanced enabled adaptive state to policy v9; v14.5.2 retained that policy unchanged while adding cleanup/recovery; v14.5.4 advanced the DirectML/low-memory branch to policy v10; and v14.5.42 advanced enabled adaptive state to policy v11; v14.5.47 retained policy v11 and the v14.5.44 DirectML/v14.5.43 migration work; current v14.6.0 advances to canonical policy v13 while retaining those repair-convergence, Hermes/web maintenance, and managed-refresh guarantees.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retained those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4; v14.5.1 advanced enabled adaptive state to policy v9; v14.5.2 retained that policy unchanged while adding cleanup/recovery; v14.5.4 advanced the DirectML/low-memory branch to policy v10; and v14.5.42 advanced enabled adaptive state to policy v11; v14.5.47 retained policy v11 and the v14.5.44 DirectML/v14.5.43 migration work; current v14.6.1 retains to canonical policy v13 while retaining those repair-convergence, Hermes/web maintenance, and managed-refresh guarantees.
 
 For detailed history, use `CHANGELOG.md`. Detailed implementation/audit notes for the v14.x patch line are consolidated in `PATCH-NOTES.md`; the v13 archive remains under `legacy-patch-notes/`.
 

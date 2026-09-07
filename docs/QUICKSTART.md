@@ -1,4 +1,4 @@
-# LatticeVale 14.6.0 Quickstart
+# LatticeVale 14.6.1 Quickstart
 
 ## Current local-AI choice
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only repair planner for LatticeVale v14.6.0.
+"""Read-only repair planner for LatticeVale v14.6.1.
 
 The planner is deliberately advisory.  It never writes stack state and it does not replace
 the proven configure-stack.sh reconciliation path.  Applying a repair still happens through

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v14.6.0 canonical hardware/backend/resource architecture regressions.
+"""v14.6.1 canonical hardware/backend/resource architecture regressions.
 
 The resource tests intentionally assert invariants over many arbitrary envelopes.
 They do not encode one developer/user machine topology as a policy target.
@@ -48,7 +48,7 @@ assert compat["MANAGED_REPAIR_REFRESH_REVISION"] == "4"
 # corrected v14.5.47 schema-21 durable choices remain valid migration input.
 base_options = {
     "schema": 23,
-    "installerVersion": "14.6.0",
+    "installerVersion": "14.6.1",
     "localTextBackend": "directml",
     "directmlTextModel": "Qwen/Qwen2.5-1.5B-Instruct",
     "ollamaBackend": "managed",
@@ -62,7 +62,7 @@ base_options = {
     "workers": [],
 }
 validate_install_options(dict(base_options), 23)
-validate_install_options(dict(base_options, schema=22, installerVersion="14.6.0", repairOriginSchema=22), 23)
+validate_install_options(dict(base_options, schema=22, installerVersion="14.6.1", repairOriginSchema=22), 23)
 validate_install_options(dict(base_options, schema=21, installerVersion="14.5.47", repairOriginSchema=21), 23)
 try:
     validate_install_options(dict(base_options, schema=24), 23)
@@ -498,4 +498,4 @@ for marker in ("HardwareInformation.qwMemorySize", "MatchingDeviceId", "SharedMe
     assert marker in ps
 assert "gpuPreferenceId = if ($localTextBackend" in ps and "gpuPreferencePnpDeviceId = if ($localTextBackend" in ps
 assert "stableId = [string]$_.StableId" in ps
-print("v14.6.0 canonical architecture fixtures: PASS")
+print("v14.6.1 canonical architecture fixtures: PASS")

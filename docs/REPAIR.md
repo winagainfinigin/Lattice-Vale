@@ -1,4 +1,4 @@
-# LatticeVale 14.6.0 Resume / Repair
+# LatticeVale 14.6.1 Resume / Repair
 
 ## Schema 21/22 to schema 23 migration
 
@@ -6,7 +6,7 @@ Resume / repair accepts recognized schema-21 and schema-22 managed state and nor
 
 ## Use Option 1 for an existing installation
 
-Launch the **full 14.6.0 release** and select **Resume / repair installation**. The repair engine proves managed ownership, reads historical installer metadata, creates the required rollback backup before managed-source refresh, stages the current management layer, migrates schemas, regenerates derived architecture state, and resumes from the earliest stale/incomplete dependency.
+Launch the **full 14.6.1 release** and select **Resume / repair installation**. The repair engine proves managed ownership, reads historical installer metadata, creates the required rollback backup before managed-source refresh, stages the current management layer, migrates schemas, regenerates derived architecture state, and resumes from the earliest stale/incomplete dependency.
 
 ## Repair dependency order
 

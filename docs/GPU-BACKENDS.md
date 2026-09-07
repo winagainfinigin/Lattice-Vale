@@ -1,4 +1,4 @@
-# LatticeVale 14.6.0 GPU and Inference Backends
+# LatticeVale 14.6.1 GPU and Inference Backends
 
 ## Current GPU-choice and DirectML fallback contract
 

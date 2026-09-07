@@ -5,7 +5,7 @@ import importlib.util
 import sys
 sys.dont_write_bytecode=True
 ROOT=Path(__file__).resolve().parents[1]; REPO=ROOT.parent
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0'}
+assert (ROOT/'VERSION.txt').read_text().strip() in {'14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}
 sys.path.insert(0,str(ROOT/'stack'))
 from latticevale_arch import host_memory_budget, service_memory_plan  # noqa:E402
 cfg=(ROOT/'stack/configure-stack.sh').read_text(); py=(ROOT/'stack/directml-gateway.py').read_text(); req=(ROOT/'stack/directml-requirements.txt').read_text(); audit=(ROOT/'stack/state-audit.py').read_text()
@@ -92,6 +92,6 @@ except RuntimeError as exc: assert 'admission refused' in str(exc)
 else: raise AssertionError('oversized model was admitted to a 4 GiB adapter')
 
 readme=(REPO/'README.md').read_text(); release=(REPO/'docs/RELEASE.md').read_text(); changelog=(REPO/'docs/CHANGELOG.md').read_text()
-assert readme.startswith('# LatticeVale v14.6.0') and 'VRAM' in readme
-assert 'v14.6.0 current release' in release and '14.5.4' in changelog
+assert readme.startswith('# LatticeVale v14.6.1') and 'VRAM' in readme
+assert 'v14.6.1 current release' in release and '14.5.4' in changelog
 print('v14.5.4 VRAM / ADAPTIVE SMALL-RESOURCE FIXTURES: PASS')
