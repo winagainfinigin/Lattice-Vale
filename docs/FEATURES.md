@@ -1,4 +1,4 @@
-# LatticeVale v14.6.0 — Complete Features and Install Options Reference
+# LatticeVale v14.6.1 — Complete Features and Install Options Reference
 
 ## v14.6.0 schema-23 / policy-13 additions
 
@@ -8,7 +8,7 @@
 - Conserved automatic CPU allocation: system/DirectML reservations are removed before enabled Docker services share one aggregate envelope.
 - DirectML generation uses `torch.no_grad()`; no-fallback mode cannot create or retain forced-Ollama fallback markers.
 
-> **Current managed software/source pins documented by v14.6.0.** Release pin ownership remains declared by the installer/compatibility policy; repair validates the current bundle before managed refresh.
+> **Current managed software/source pins documented by v14.6.1.** Release pin ownership remains declared by the installer/compatibility policy; repair validates the current bundle before managed refresh.
 
 > **v14.6.0 architecture:** canonical hardware/backend/resource state separates durable user intent from machine-derived capability. Current task docs: `QUICKSTART.md`, `INSTALLATION.md`, `REPAIR.md`, `GPU-BACKENDS.md`, `DIAGNOSTICS.md`, `RESOURCE-POLICY.md`, and `ARCHITECTURE.md`.
 
@@ -25,7 +25,7 @@
 > **v14.5.43 universal repair migration:** the full installer can directly repair/migrate any older recognized installer-managed stack without intermediate releases. It proves ownership, checks version/schema/downgrade safety, takes a verified rollback backup, refreshes installer-owned files and managed pins, replays cumulative checkpoint migrations, and regenerates policy v11. Same-version repair stays local-first; unrecognized/corrupt stacks fail closed.
 > **Migration preservation rule:** v14.5.43 introduced cumulative preservation-first migration. v14.6.0 normalizes recognized historical/versionless durable choices to current schema 23 while application/user state is preserved; legacy managed Ollama with no acceleration setting remains safely adoptable as explicit CPU rather than being silently switched to GPU.
 > **v14.5.42 hardware-resource policy v11:** WSL RAM and CPU profiles, per-GPU NVIDIA/AMD VRAM inventory, single-GPU-first/multi-GPU-spread model-fit planning, GPU-aware context, `OLLAMA_GPU_OVERHEAD`, shared DirectML/Ollama VRAM coordination, lower GPU-backed CPU quota, and bounded `ollama ps` offload proof with safe Auto CPU fallback.
-> **v14.5.42 canonical-policy diagnostics:** one finalized resource object drives Compose/state/audit; separate hardware and policy SHA-256 fingerprints plus secret-free `resource-policy-report.txt` explain exactly why each CPU/RAM/VRAM/context limit was chosen. v14.5.42 used a six-shard 135-fixture deterministic suite; v14.5.43 extended that contract to 136 fixtures; v14.5.44 extended it to 137 fixtures; v14.5.45 extended it to 138 fixtures; v14.5.46 extended it to 139 fixtures; v14.5.47 extended it to 140 fixtures; current v14.6.0 extends the deterministic contract to 142 fixtures with canonical-architecture and release-content-policy gates.
+> **v14.5.42 canonical-policy diagnostics:** one finalized resource object drives Compose/state/audit; separate hardware and policy SHA-256 fingerprints plus secret-free `resource-policy-report.txt` explain exactly why each CPU/RAM/VRAM/context limit was chosen. v14.5.42 used a six-shard 135-fixture deterministic suite; v14.5.43 extended that contract to 136 fixtures; v14.5.44 extended it to 137 fixtures; v14.5.45 extended it to 138 fixtures; v14.5.46 extended it to 139 fixtures; v14.5.47 extended it to 140 fixtures; current v14.6.1 retains the deterministic contract to 142 fixtures with canonical-architecture and release-content-policy gates.
 
 > **v14.5.4 local-AI hardening:** DirectML adds developer-managed dedicated-VRAM admission, context reduction, low-memory model loading, and automatic Ollama fallback; WSL allocations of 12 GiB or less use a tighter supporting-service profile while preserving the Hermes safety floor.
 
@@ -49,9 +49,9 @@
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.6.0 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.6.1 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.0 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.1 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -326,6 +326,9 @@ Pending activation alone is not grounds to rebuild a valid identity.
 
 ## 3.9 Windows Tailscale private remote access
 
+**v14.6.1 remote-health contract:** LatticeVale now separates host-local readiness from real remote proof. It verifies client policy/preferences, MagicDNS/HTTPS prerequisites, the Windows-native relay, deterministic Serve listeners, direct-100.x HTTPS/TLS, and the Matrix client path. A current-run second-device HTTPS token is required for `PASS`; skipping it is `PARTIAL`.
+
+
 **Prompt:** Use Windows Tailscale for private remote access?
 
 - Fresh suggestion: **No**
@@ -361,6 +364,10 @@ Available only when Matrix and Tailscale are selected.
 - user can select another valid TCP port distinct from another selected Serve listener
 
 LatticeVale uses **Tailscale Serve**, not public Funnel.
+
+v14.6.1 validates remote Matrix as a client path, not only a transport path: the Synapse `public_baseurl` update must succeed, `/_matrix/client/versions` must be reachable, `/.well-known/matrix/client` must advertise the exact Tailscale HTTPS URL, and the login endpoint must expose at least one flow. If those checks fail, the installer-owned Serve mapping is removed and the advertised base URL is rolled back to localhost.
+
+The managed Matrix stack keeps its existing authentication ownership. v14.6.1 does **not** install or migrate Matrix Authentication Service (MAS), change `server_name`, or rewrite existing Matrix IDs; the hotfix is limited to making the already-selected public client URL verifiable and convergent.
 
 Windows loopback relay ports normally target:
 
@@ -865,7 +872,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.6.0
+# 8. Current managed software/source pins documented by v14.6.1
 
 The release's declared managed references include:
 

@@ -1,9 +1,17 @@
-# LatticeVale v14.6.0
+# LatticeVale v14.6.1
 
-> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.0 release** and choose **Resume / repair installation**. v14.6.0 adds the canonical hardware/backend/resource architecture while retaining v14.5.46 GPU onboarding, v14.5.45 PowerShell compatibility, v14.5.44 DirectML preflight, v14.5.43 cumulative migration, and upgrades the canonical resource layer to policy v13. No intermediate release is required.
+> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.1 release** and choose **Resume / repair installation**. v14.6.1 inherits the v14.6.0 canonical hardware/backend/resource architecture and adds Matrix/Tailscale client-discovery validation plus true second-device remote-access validation. No intermediate release is required.
 
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
+
+## v14.6.1 — Matrix/Tailscale client-discovery validation hotfix
+
+v14.6.1 fixes a false-positive health path in Windows Tailscale Matrix exposure. The installer now requires the Synapse `public_baseurl` update/restart to succeed, validates the public `/_matrix/client/versions` endpoint, verifies `/.well-known/matrix/client` advertises the exact Tailscale URL, and verifies the Matrix login endpoint before retaining the Serve mapping. Failed client discovery disables the installer-owned Matrix Serve listener and rolls `public_baseurl` back to localhost instead of advertising a remote endpoint that browser transport probes alone made look healthy.
+
+The hotfix remains authentication-neutral: it does not add or migrate Matrix Authentication Service (MAS). It validates the Synapse client-discovery and login path that LatticeVale already manages, without changing the immutable `server_name` or existing Matrix user IDs.
+
+**Same-version remote-access hardening:** v14.6.1 now treats host-local Tailscale Serve checks as local evidence rather than proof that another device can connect. The installer verifies Windows Tailscale client/authentication state, a valid 100.x address and MagicDNS hostname, HTTPS capability, inbound-connections policy, relay health, exact Serve listeners, and the Matrix client path. A final **PASS** requires a one-time token to be opened and confirmed from a second Tailscale device during the current run; skipped validation is **PARTIAL**, and classified DNS/transport/TLS/Serve/Matrix failures are **FAIL**. Existing Windows Tailscale DNS preference is preserved rather than rewritten, while DNS health is tested independently.
 
 ## v14.6.0 — Canonical hardware, backend, and resource architecture
 

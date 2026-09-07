@@ -1,4 +1,28 @@
-# Current v14.6.0 patch notes
+# Current v14.6.1 patch notes
+
+## v14.6.1 live Matrix/Tailscale repair convergence hotfix
+
+- Fixes the Synapse post-restart readiness check using a nested `bash -lc` command whose quoting could be corrupted by the Windows/WSL process boundary, producing a false "Matrix endpoint did not become ready" result while Synapse was healthy. The installer now reads `MATRIX_HOST_PORT` and probes `/_matrix/client/versions` with direct argv calls.
+- Fixes Tailscale Serve backend matching on Windows: the loopback IPv4 regex now correctly matches `127.0.0.1:<port>` instead of interpreting doubled backslashes literally. Existing correct Serve mappings are no longer misclassified as foreign/untracked.
+- Preserves the original failure category during final reconciliation so a Matrix validation failure cannot be overwritten by the downstream bridge-metadata summary and mislabeled as `RELAY`.
+- These fixes were derived from a real second-device PASS on cellular followed by a false local Matrix failure; version remains **14.6.1** and ordinary **Resume / repair installation** is sufficient.
+
+## v14.6.1 true Tailscale remote-access validation repair
+
+- Replaces the old same-host definition of Tailscale health with a layered contract: Windows client preflight, relay verification, deterministic Serve state, exact listener checks, direct-100.x HTTPS/TLS validation, Matrix client-path validation, and a second-device challenge.
+- The installer normalizes only the Tailscale preferences required for the selected integration (`Shields Up` off; the Windows DNS preference is preserved and tested rather than rewritten) and refuses to override a system policy that explicitly blocks inbound traffic.
+- Host-local MagicDNS is checked both through the Windows resolver and directly against Tailscale's MagicDNS resolver; a second device is still authoritative for real remote usability.
+- Remote results are explicit: `PASS` requires the current run's second-device token, `PARTIAL` means local validation passed but the cross-device proof was skipped, and `FAIL` identifies DNS, transport, TLS, Serve, relay, or Matrix client-path failure.
+- Existing matching installer-owned Serve mappings are rebuilt rather than adopted blindly; unrelated Serve listeners remain preserved and `tailscale serve reset` is still prohibited.
+- Release identity remains **14.6.1** because 14.6.0 is already released.
+
+## v14.6.1 Matrix/Tailscale client-discovery validation hotfix
+
+- Stops ignoring `Set-SynapsePublicBaseUrl` failure when publishing Matrix through Windows Tailscale Serve.
+- Validates the public Matrix versions endpoint, exact client well-known base URL, and login-flow endpoint before preserving the Serve mapping.
+- Rolls the installer-owned Matrix Serve mapping and Synapse public base URL back when client-path validation fails.
+- Leaves authentication ownership unchanged: no MAS deployment/migration, `server_name` change, or Matrix-ID rewrite is introduced by this hotfix.
+- Retains schema 23, policy 13, managed-refresh revision 4, and 142 deterministic fixtures.
 
 ## v14.6.0 same-version schema-23 / policy-13 completion
 

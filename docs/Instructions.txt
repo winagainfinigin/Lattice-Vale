@@ -1,4 +1,4 @@
-LATTICEVALE v14.6.0 — INSTRUCTIONS
+LATTICEVALE v14.6.1 — INSTRUCTIONS
 
 V14.6.0 SCHEMA-23 / POLICY-13 COMPLETION: local-AI setup asks whether to use GPU acceleration and preserves CPU-only operation when selected. DirectML text fallback is explicitly native-Windows Ollama, managed WSL/Docker Ollama, or none/fail-closed; Honcho embeddings may still use Ollama independently. Policy v13 conserves one WSL-visible CPU envelope: about 10% system headroom, about 25% DirectML host reserve when DirectML is selected, and the remaining about 65% shared by enabled Docker services (about 90% Docker without DirectML). DirectML generation uses torch.no_grad(), and no-fallback mode removes/refuses forced-Ollama markers.
 V14.6.0 CANONICAL ARCHITECTURE: durable installer choices are separated from derived Windows/WSL hardware, backend capability/health/selection, and runtime policy. DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU are classified independently; generated architecture state is schema-versioned, fingerprinted, atomically written, and canonically validated. Resume / repair migrates recognized managed 14.x installations preservation-first.
@@ -16,7 +16,7 @@ V14.5.42 HARDWARE RESOURCE POLICY UPDATE: Managed WSL/Docker Ollama now uses res
 
 V14.5.4 DIRECTML / LOW-MEMORY UPDATE: Local AI setup can explicitly choose stable Ollama or the experimental PyTorch DirectML text gateway. DirectML is opt-in; existing installs stay on Ollama unless changed. When selected, Hermes and Honcho text use the shared WSL-host gateway, Ollama remains fallback, and Honcho embeddings stay on Ollama. DirectML setup is isolated and failure-safe; unsupported model/operator execution falls back to Ollama.
 
-CURRENT RELEASE: v14.6.0 is the version to install first. New installs should use the full v14.6.0 release directly. Existing recognized installs should launch the full v14.6.0 release and choose Resume / repair so canonical hardware/backend state and resource policy v13 are regenerated while persistent state is preserved. Option 7 remains the explicit cleanup path. The v14.5.4 DirectML VRAM guard, v14.5.2 cleanup behavior, v14.5.1 OOM/live-limit convergence, and v14.5.0 read-only planner are retained.
+CURRENT RELEASE: v14.6.1 is the version to install first. New installs should use the full v14.6.1 release directly. Existing recognized installs should launch the full v14.6.1 release and choose Resume / repair so canonical hardware/backend state and resource policy v13 are regenerated while persistent state is preserved. Option 7 remains the explicit cleanup path. The v14.5.4 DirectML VRAM guard, v14.5.2 cleanup behavior, v14.5.1 OOM/live-limit convergence, and v14.5.0 read-only planner are retained.
 
 V14.5.0 READ-ONLY PLAN / ARCHITECTURE: `./manage.sh repair --plan` and `./manage.sh plan` inspect existing checkpoint revisions plus live/offline state without modifying the stack. `./manage.sh audit-free` reports whether the current default Hermes path is installer-declared local/free and whether the selected local-AI path is fully WSL-native (managed Ollama). `compose.override.yaml` remains user-owned and opaque to the planner. Windows remains bootstrap/host-integration; core operation stays in WSL.
 
@@ -245,7 +245,7 @@ Use installer option 4 when you want the installer to rerun provider/profile set
 8A. RAM / ADAPTIVE RESOURCE POLICY
 ================================================================================
 
-If you selected adaptive CPU/RAM ceilings, current v14.6.0 uses canonical resource policy v13. The audit measures CPUs actually available to the WSL process using the same effective semantics as `nproc`, while RAM fingerprint comparison uses the current WSL-visible allocation. These are per-stack ceilings/tuning defaults; they do not write or replace host-wide WSL memory policy.
+If you selected adaptive CPU/RAM ceilings, current v14.6.1 uses canonical resource policy v13. The audit measures CPUs actually available to the WSL process using the same effective semantics as `nproc`, while RAM fingerprint comparison uses the current WSL-visible allocation. These are per-stack ceilings/tuning defaults; they do not write or replace host-wide WSL memory policy.
 
 Policy v13 has no fixed host-RAM band table and no machine/model-specific tuning branch. The canonical architecture library derives host reserve, DirectML WSL-host reserve, total container budget, CPU quotas, service-memory water filling, model/context/concurrency limits, GPU coordination, and allocator/PostgreSQL/Synapse tuning from live WSL CPU/RAM plus enabled services, actual model information, selected backend, and measured GPU/UMA capability. Generation, verification, diagnostics, repair planning, and state audit consume the same canonical calculations.
 
@@ -286,7 +286,7 @@ LatticeVale can provision Synapse, the default bot, and selected named-profile b
 
 If a named profile remains pending after installation, use the exact matrix-profile-finish procedure in section 6. Do not rebuild an identity simply because activation is pending.
 
-If exposing Matrix through Windows Tailscale, verify the Tailscale client is signed in and that your tailnet ACLs/grants permit only the access you intend.
+If exposing Matrix through Windows Tailscale, verify the Tailscale client is signed in and that your tailnet ACLs/grants permit only the access you intend. During current v14.6.1 setup/repair, complete the one-time second-device validation when prompted: open the generated private Tailscale HTTPS URL on the phone or other peer you will actually use remotely (cellular is preferred for the strongest external-path check) and enter the displayed token back into the installer. PASS requires that current-run second-device proof; skipping it reports PARTIAL, while DNS, transport, TLS, Serve, relay, or Matrix failures report FAIL with the corresponding category.
 
 ================================================================================
 11. OLLAMA / LOCAL AI

@@ -1,4 +1,13 @@
-# LatticeVale 14.6.0 Installation
+# LatticeVale 14.6.1 Installation
+
+## v14.6.1 Tailscale remote-access completion
+
+When Windows Tailscale remote access is selected, installation is not considered fully healthy merely because the same PC can open its own `.ts.net` URL. The installer verifies the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and the selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
+
+For a `PASS`, complete the temporary second-device challenge when prompted. Open the one-time private HTTPS URL from another Tailscale device, preferably the phone on cellular, and type the displayed `LV-...` token back into the installer. Skipping this check leaves remote access `PARTIAL`; a diagnosed remote failure is `FAIL`.
+
+The installer does not rewrite tailnet-wide Admin Console DNS policy. If another device reports DNS unavailable, repair the tailnet/client DNS configuration and rerun Resume / repair.
+
 
 ## v14.6.0 schema-23 local-AI choices
 

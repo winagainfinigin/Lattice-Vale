@@ -1,6 +1,9 @@
 # Windows integration test matrix
 
-> **Current release: v14.6.0.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+> **v14.6.1 true remote Tailscale case:** select Matrix + Windows Tailscale, verify the Windows client is Running with Shields Up disabled, a valid 100.x address, MagicDNS FQDN, and HTTPS capability; verify the Windows-native relay before Serve; verify exact IPv4/IPv6 Tailscale listeners and `/versions`, exact client well-known, and `/login` through the final hostname while connecting directly to the 100.x address. Then open the temporary challenge from a second Tailscale peer on both Wi-Fi and cellular where available. Only an exact current-run token may produce `PASS`; skip must produce `PARTIAL`; DNS/transport/TLS/Serve failure must produce `FAIL` with the corresponding diagnostic category. A prior saved PASS must not satisfy the current run.
+
+
+> **Current release: v14.6.1.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
 
 ## v14.6.0 confidence levels and architecture cases
 

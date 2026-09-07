@@ -12,6 +12,28 @@ $ProgressPreference = 'SilentlyContinue'
 # deliberately invokes the core installer with PowerShell StrictMode enabled.
 $script:HermesCompatibility = $null
 $script:RequireExplicitQuestionnaireChoices = $false
+$script:RemoteAccessLogPath = ''
+
+function Start-LatticeValeRemoteAccessLog {
+    try {
+        $base = if ($env:LOCALAPPDATA) { Join-Path $env:LOCALAPPDATA 'LatticeVale\logs' } else { Join-Path $env:TEMP 'LatticeVale-logs' }
+        New-Item -ItemType Directory -Path $base -Force | Out-Null
+        $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+        $script:RemoteAccessLogPath = Join-Path $base "remote-access-$stamp.log"
+        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.1 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
+        return $script:RemoteAccessLogPath
+    } catch {
+        $script:RemoteAccessLogPath = ''
+        return ''
+    }
+}
+
+function Write-RemoteAccessLog([string]$Message) {
+    if ([string]::IsNullOrWhiteSpace($script:RemoteAccessLogPath)) { return }
+    try {
+        Add-Content -LiteralPath $script:RemoteAccessLogPath -Value ("{0:o} {1}" -f (Get-Date),$Message) -Encoding UTF8
+    } catch { }
+}
 
 function Write-Step([string]$Message) {
     Write-Host "`n==> $Message" -ForegroundColor Cyan
@@ -4853,9 +4875,11 @@ function Get-WindowsTailscaleExe {
 }
 
 function Get-WindowsTailscaleStatus([string]$TailscaleExe) {
-    if (-not $TailscaleExe) {
-        return [pscustomobject]@{ BackendState = 'NotInstalled'; DNSName = ''; HostName = '' }
+    $empty = [ordered]@{
+        BackendState = 'NotInstalled'; DNSName = ''; HostName = ''; IPv4 = ''; IPv6 = ''
+        Online = $false; Authenticated = $false; HttpsEnabled = $false; CertDomains = @(); RawStatus = $null
     }
+    if (-not $TailscaleExe) { return [pscustomobject]$empty }
     try {
         # Some non-Running Tailscale states can return a non-zero process exit while still
         # providing useful status JSON. Parse valid JSON first; use the exit code only when
@@ -4868,26 +4892,167 @@ function Get-WindowsTailscaleStatus([string]$TailscaleExe) {
                 $status = $raw | ConvertFrom-Json -ErrorAction Stop
                 $dns = ''
                 $hostName = ''
+                $ipv4 = ''
+                $ipv6 = ''
+                $online = $false
+                $authenticated = $false
+                if ($status.PSObject.Properties.Name -contains 'HaveNodeKey') { $authenticated = [bool]$status.HaveNodeKey }
                 if ($status.Self) {
                     if ($status.Self.DNSName) { $dns = ([string]$status.Self.DNSName).TrimEnd('.') }
                     if ($status.Self.HostName) { $hostName = [string]$status.Self.HostName }
+                    if ($status.Self.PSObject.Properties.Name -contains 'Online') { $online = [bool]$status.Self.Online }
                 }
+                $ipCandidates = @()
+                if ($status.PSObject.Properties.Name -contains 'TailscaleIPs') { $ipCandidates += @($status.TailscaleIPs) }
+                if ($status.Self -and ($status.Self.PSObject.Properties.Name -contains 'TailscaleIPs')) { $ipCandidates += @($status.Self.TailscaleIPs) }
+                foreach ($candidate in @($ipCandidates | Select-Object -Unique)) {
+                    $parsed = $null
+                    if (-not [System.Net.IPAddress]::TryParse([string]$candidate,[ref]$parsed)) { continue }
+                    if (-not $ipv4 -and $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and ([string]$candidate).StartsWith('100.')) { $ipv4 = [string]$candidate }
+                    if (-not $ipv6 -and $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6 -and ([string]$candidate).StartsWith('fd7a:')) { $ipv6 = [string]$candidate }
+                }
+                $certDomains = @()
+                if ($status.PSObject.Properties.Name -contains 'CertDomains' -and $status.CertDomains) {
+                    $certDomains = @($status.CertDomains | ForEach-Object { ([string]$_).TrimEnd('.') } | Where-Object { $_ } | Select-Object -Unique)
+                }
+                $httpsEnabled = $false
+                if ($dns -and $certDomains -contains $dns) { $httpsEnabled = $true }
+                if ($status.Self -and $status.Self.Capabilities -and (@($status.Self.Capabilities) -contains 'https')) { $httpsEnabled = $true }
+                if ($status.Self -and ($status.Self.PSObject.Properties.Name -contains 'CapMap') -and $status.Self.CapMap -and ($status.Self.CapMap.PSObject.Properties.Name -contains 'https')) { $httpsEnabled = $true }
                 return [pscustomobject]@{
                     BackendState = if ($status.BackendState) { [string]$status.BackendState } else { 'Unknown' }
                     DNSName = $dns
                     HostName = $hostName
+                    IPv4 = $ipv4
+                    IPv6 = $ipv6
+                    Online = $online
+                    Authenticated = $authenticated
+                    HttpsEnabled = $httpsEnabled
+                    CertDomains = $certDomains
+                    RawStatus = $status
                 }
             } catch {
                 # Fall through to Unavailable below.
             }
         }
         if ($commandExit -ne 0) {
-            return [pscustomobject]@{ BackendState = 'Unavailable'; DNSName = ''; HostName = '' }
+            $empty['BackendState'] = 'Unavailable'
+            return [pscustomobject]$empty
         }
     } catch {
-        return [pscustomobject]@{ BackendState = 'Unavailable'; DNSName = ''; HostName = '' }
+        $empty['BackendState'] = 'Unavailable'
+        return [pscustomobject]$empty
     }
-    return [pscustomobject]@{ BackendState = 'Unavailable'; DNSName = ''; HostName = '' }
+    $empty['BackendState'] = 'Unavailable'
+    return [pscustomobject]$empty
+}
+
+function Get-WindowsTailscalePreferences([string]$TailscaleExe) {
+    $result = [ordered]@{ Known=$false; ShieldsUp=$null; AcceptDns=$null; Detail='' }
+    if (-not $TailscaleExe) { $result.Detail='Tailscale executable unavailable'; return [pscustomobject]$result }
+    try {
+        $probe = Invoke-NativeProcessCapture $TailscaleExe @('debug','prefs') 15
+        $raw = ([string]$probe.StdOut).Trim()
+        if (-not $probe.Success -or [string]::IsNullOrWhiteSpace($raw)) {
+            $result.Detail = Get-SafeDiagnosticExcerpt $probe.Text 320
+            return [pscustomobject]$result
+        }
+        $prefs = $raw | ConvertFrom-Json -ErrorAction Stop
+        $result.Known = $true
+        if ($prefs.PSObject.Properties.Name -contains 'ShieldsUp') { $result.ShieldsUp = [bool]$prefs.ShieldsUp }
+        if ($prefs.PSObject.Properties.Name -contains 'CorpDNS') { $result.AcceptDns = [bool]$prefs.CorpDNS }
+        return [pscustomobject]$result
+    } catch {
+        $result.Detail = $_.Exception.Message
+        return [pscustomobject]$result
+    }
+}
+
+function Get-WindowsTailscaleSystemPolicyState([string]$TailscaleExe) {
+    $result = [ordered]@{ Known=$false; AllowIncomingConnections=''; UseTailscaleDNSSettings=''; Detail='' }
+    if (-not $TailscaleExe) { $result.Detail='Tailscale executable unavailable'; return [pscustomobject]$result }
+    try {
+        $probe = Invoke-NativeProcessCapture $TailscaleExe @('syspolicy','list') 15
+        $text = [string]$probe.Text
+        if (-not $probe.Success -and $text -notmatch '(?i)No policy settings') {
+            $result.Detail = Get-SafeDiagnosticExcerpt $text 320
+            return [pscustomobject]$result
+        }
+        $result.Known = $true
+        foreach ($line in ($text -split "`r?`n")) {
+            $trimmed = ([string]$line).Trim()
+            if (-not $trimmed) { continue }
+            if ($trimmed -match '^AllowIncomingConnections\s+.*?\s+(always|never|user-decides)\s*$') { $result.AllowIncomingConnections = $Matches[1].ToLowerInvariant() }
+            if ($trimmed -match '^UseTailscaleDNSSettings\s+.*?\s+(always|never|user-decides)\s*$') { $result.UseTailscaleDNSSettings = $Matches[1].ToLowerInvariant() }
+        }
+        return [pscustomobject]$result
+    } catch {
+        $result.Detail = $_.Exception.Message
+        return [pscustomobject]$result
+    }
+}
+
+function Ensure-WindowsTailscaleRemoteAccessPreferences([string]$TailscaleExe) {
+    $result = [ordered]@{ Ready=$true; DnsPreferenceReady=$true; Detail='' }
+    $policy = Get-WindowsTailscaleSystemPolicyState $TailscaleExe
+    if ($policy.Known -and $policy.AllowIncomingConnections -eq 'never') {
+        $result.Ready = $false
+        $result.Detail = 'Tailscale system policy AllowIncomingConnections=never blocks inbound tailnet traffic.'
+        Write-RemoteAccessLog $result.Detail
+        return [pscustomobject]$result
+    }
+
+    $shieldProbe = Invoke-NativeProcessCapture $TailscaleExe @('set','--shields-up=false') 20
+    if (-not $shieldProbe.Success) {
+        $result.Ready = $false
+        $result.Detail = 'Could not disable Shields Up: ' + (Get-SafeDiagnosticExcerpt $shieldProbe.Text 320)
+        Write-RemoteAccessLog $result.Detail
+        return [pscustomobject]$result
+    }
+
+    # The Windows host does not need to accept tailnet DNS settings in order to Serve a
+    # Tailscale HTTPS endpoint. Preserve this user/admin preference rather than changing
+    # unrelated resolver behavior; DNS is tested independently below and the second-device
+    # challenge is authoritative for real remote name resolution.
+    if ($policy.Known -and $policy.UseTailscaleDNSSettings -eq 'never') {
+        $result.DnsPreferenceReady = $false
+        Write-RemoteAccessLog 'System policy UseTailscaleDNSSettings=never is present; preserving it and testing MagicDNS directly.'
+    }
+
+    $prefs = Get-WindowsTailscalePreferences $TailscaleExe
+    if ($prefs.Known -and $prefs.ShieldsUp -eq $true) {
+        $result.Ready = $false
+        $result.Detail = 'Shields Up remained enabled after normalization.'
+    }
+    if ($prefs.Known -and $null -ne $prefs.AcceptDns -and -not [bool]$prefs.AcceptDns) { $result.DnsPreferenceReady = $false }
+    if (-not $result.Detail) { $result.Detail = 'Inbound Tailscale connections are allowed; the existing Windows Tailscale DNS preference was preserved and will be validated separately.' }
+    Write-RemoteAccessLog ("Preference normalization: Ready={0}; DnsPreferenceReady={1}; {2}" -f $result.Ready,$result.DnsPreferenceReady,$result.Detail)
+    return [pscustomobject]$result
+}
+
+function Test-WindowsTailscaleDnsResolution([string]$DnsName, [string]$ExpectedIpv4) {
+    $result = [ordered]@{ Status='FAIL'; SystemResolution=$false; MagicDnsResolution=$false; Detail='' }
+    if ([string]::IsNullOrWhiteSpace($DnsName) -or [string]::IsNullOrWhiteSpace($ExpectedIpv4)) {
+        $result.Detail = 'A Tailscale DNS name and IPv4 address are required.'
+        return [pscustomobject]$result
+    }
+    try {
+        $answers = @(Resolve-DnsName -Name $DnsName -Type A -DnsOnly -ErrorAction Stop)
+        if (@($answers | Where-Object { [string]$_.IPAddress -eq $ExpectedIpv4 }).Count -gt 0) { $result.SystemResolution = $true }
+    } catch { }
+    try {
+        $answers = @(Resolve-DnsName -Name $DnsName -Type A -Server '100.100.100.100' -DnsOnly -ErrorAction Stop)
+        if (@($answers | Where-Object { [string]$_.IPAddress -eq $ExpectedIpv4 }).Count -gt 0) { $result.MagicDnsResolution = $true }
+    } catch { }
+    if ($result.SystemResolution -and $result.MagicDnsResolution) {
+        $result.Status = 'PASS'; $result.Detail = "$DnsName resolves to $ExpectedIpv4 through Windows DNS and the Tailscale MagicDNS resolver."
+    } elseif ($result.MagicDnsResolution) {
+        $result.Status = 'PARTIAL'; $result.Detail = "MagicDNS resolves $DnsName to $ExpectedIpv4, but the Windows system resolver does not."
+    } else {
+        $result.Status = 'FAIL'; $result.Detail = "The Tailscale MagicDNS resolver did not return $ExpectedIpv4 for $DnsName."
+    }
+    Write-RemoteAccessLog ("DNS validation: {0}; {1}" -f $result.Status,$result.Detail)
+    return [pscustomobject]$result
 }
 
 function Install-WindowsTailscale {
@@ -5795,15 +5960,95 @@ print('CHANGED')
         Write-Warning 'Synapse public_baseurl was updated, but Synapse could not be restarted automatically.'
         return $false
     }
-    # A restart can briefly accept TCP before the Matrix client API is ready. Wait for
-    # the same application-level endpoint Element uses before allowing the installer
-    # to run the Tailscale end-to-end verification.
-    $ready = Invoke-WslDirectCapture $Name $User 'bash' @('-lc', 'cd ~/hermes-stack; p=$(sed -n "s/^MATRIX_HOST_PORT=//p" .env | head -n1); test -n "$p" || p=8008; for i in $(seq 1 120); do curl -fsS --connect-timeout 3 --max-time 5 "http://127.0.0.1:${p}/_matrix/client/versions" >/dev/null 2>&1 && exit 0; sleep 1; done; exit 1') 140
-    if (-not $ready.Success) {
-        Write-Warning 'Synapse restarted but its Matrix client endpoint did not become ready within the bounded startup window.'
+    # A restart can briefly accept TCP before the Matrix client API is ready. Avoid a
+    # nested `bash -lc` readiness command here: wsl.exe/Win32 argument reserialization can
+    # corrupt embedded shell quoting even while Synapse is healthy. Read the configured
+    # host port with direct argv, then probe curl with direct argv as well.
+    $matrixPort = 8008
+    $envPath = "$LinuxHome/hermes-stack/.env"
+    $portProbe = Invoke-WslDirectCapture $Name $User 'grep' @('-m','1','^MATRIX_HOST_PORT=',$envPath) 15
+    if ($portProbe.Success -and ([string]$portProbe.StdOut).Trim() -match '^MATRIX_HOST_PORT=([0-9]{1,5})$') {
+        $parsedPort = [int]$Matches[1]
+        if ($parsedPort -ge 1 -and $parsedPort -le 65535) { $matrixPort = $parsedPort }
+    }
+    $ready = $false
+    $lastReadyDetail = ''
+    $readyDeadline = [DateTime]::UtcNow.AddSeconds(120)
+    do {
+        $readyProbe = Invoke-WslDirectCapture $Name $User 'curl' @('-fsS','--connect-timeout','3','--max-time','5',"http://127.0.0.1:$matrixPort/_matrix/client/versions") 10
+        if ($readyProbe.Success) { $ready = $true; break }
+        $lastReadyDetail = Get-SafeDiagnosticExcerpt $readyProbe.Text 320
+        Start-Sleep -Seconds 1
+    } while ([DateTime]::UtcNow -lt $readyDeadline)
+    if (-not $ready) {
+        $suffix = if ($lastReadyDetail) { " Last probe: $lastReadyDetail" } else { '' }
+        Write-Warning "Synapse restarted but its Matrix client endpoint on localhost:$matrixPort did not become ready within the bounded startup window.$suffix"
         return $false
     }
     return $true
+}
+
+function Test-MatrixClientDiscovery([string]$BaseUrl, [int]$Attempts = 8) {
+    if ([string]::IsNullOrWhiteSpace($BaseUrl)) { return $false }
+    $expected = $BaseUrl.TrimEnd('/') + '/'
+    $url = $BaseUrl.TrimEnd('/') + '/.well-known/matrix/client'
+    for ($i = 0; $i -lt $Attempts; $i++) {
+        try {
+            $request = [System.Net.HttpWebRequest]::Create($url)
+            $request.Method = 'GET'; $request.Timeout = 5000; $request.AllowAutoRedirect = $false; $request.Proxy = $null
+            try {
+                $response = [System.Net.HttpWebResponse]$request.GetResponse()
+                try {
+                    if ([int]$response.StatusCode -eq 200) {
+                        $reader = [System.IO.StreamReader]::new($response.GetResponseStream())
+                        try { $body = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                        try {
+                            $json = $body | ConvertFrom-Json -ErrorAction Stop
+                            $homeserver = $json.'m.homeserver'
+                            if ($null -ne $homeserver) {
+                                $actual = [string]$homeserver.base_url
+                                if (-not [string]::IsNullOrWhiteSpace($actual) -and (($actual.TrimEnd('/') + '/') -eq $expected)) {
+                                    return $true
+                                }
+                            }
+                        } catch { }
+                    }
+                } finally { $response.Close() }
+            } catch [System.Net.WebException] {
+                if ($_.Exception.Response) { $_.Exception.Response.Close() }
+            }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+function Test-MatrixLoginEndpoint([string]$BaseUrl, [int]$Attempts = 8) {
+    if ([string]::IsNullOrWhiteSpace($BaseUrl)) { return $false }
+    $url = $BaseUrl.TrimEnd('/') + '/_matrix/client/v3/login'
+    for ($i = 0; $i -lt $Attempts; $i++) {
+        try {
+            $request = [System.Net.HttpWebRequest]::Create($url)
+            $request.Method = 'GET'; $request.Timeout = 5000; $request.AllowAutoRedirect = $false; $request.Proxy = $null
+            try {
+                $response = [System.Net.HttpWebResponse]$request.GetResponse()
+                try {
+                    if ([int]$response.StatusCode -eq 200) {
+                        $reader = [System.IO.StreamReader]::new($response.GetResponseStream())
+                        try { $body = $reader.ReadToEnd() } finally { $reader.Dispose() }
+                        try {
+                            $json = $body | ConvertFrom-Json -ErrorAction Stop
+                            if (@($json.flows).Count -gt 0) { return $true }
+                        } catch { }
+                    }
+                } finally { $response.Close() }
+            } catch [System.Net.WebException] {
+                if ($_.Exception.Response) { $_.Exception.Response.Close() }
+            }
+        } catch { }
+        Start-Sleep -Seconds 1
+    }
+    return $false
 }
 
 function Test-HttpsEndpoint([string]$Url, [int]$Attempts = 8) {
@@ -5880,7 +6125,10 @@ function Set-TailscaleInfoInWsl(
     [bool]$BridgeAutoStart = $false,
     [string]$BridgeTargetAddress = '',
     [string]$WslNetworkingMode = '',
-    [string]$WslNetworkingModeOwner = ''
+    [string]$WslNetworkingModeOwner = '',
+    [string]$TailscaleIpv4 = '',
+    [string]$WindowsDnsStatus = 'UNKNOWN',
+    [string]$RemoteValidationStatus = 'NOT_RUN'
 ) {
     $content = @(
         'MODE=windows-host',
@@ -5894,6 +6142,9 @@ function Set-TailscaleInfoInWsl(
         "BRIDGE_TARGET_ADDRESS=$BridgeTargetAddress",
         "WSL_NETWORKING_MODE=$WslNetworkingMode",
         "WSL_NETWORKING_MODE_OWNER=$WslNetworkingModeOwner",
+        "TAILSCALE_IPV4=$TailscaleIpv4",
+        "WINDOWS_DNS_STATUS=$WindowsDnsStatus",
+        "REMOTE_VALIDATION_STATUS=$RemoteValidationStatus",
         "BRIDGE_TASK_NAME=$BridgeTaskName",
         "BRIDGE_AUTOSTART=$($BridgeAutoStart.ToString().ToLowerInvariant())"
     ) -join "`n"
@@ -5977,7 +6228,7 @@ function Test-WindowsTailscaleBackendTarget([string]$Target, [int]$BackendPort) 
     if ([string]::IsNullOrWhiteSpace($Target) -or $BackendPort -le 0) { return $false }
     $text = $Target.Trim().TrimEnd('/')
     $portText = [regex]::Escape([string]$BackendPort)
-    return [bool]($text -match "^(?i:http://)?(?:127\\.0\\.0\\.1|localhost):$portText$")
+    return [bool]($text -match "^(?i:http://)?(?:127\.0\.0\.1|localhost):$portText$")
 }
 
 function Get-WindowsTailscaleServePortState(
@@ -6066,10 +6317,15 @@ function Resolve-UnownedTailscaleServeConflict(
     if (-not $PortState -or -not $PortState.Known -or -not $PortState.InUse) { return 'none' }
     $targets = if ($PortState.Targets.Count -gt 0) { $PortState.Targets -join ', ' } else { 'an unknown target' }
     if ($PortState.MatchesExpected) {
-        if (Read-Choice "Adopt the existing matching Tailscale $Label rule on HTTPS port $HttpsPort?" "The existing untracked rule already proxies to the exact LatticeVale Windows bridge http://127.0.0.1:$BackendPort. Yes records it as installer-owned for future repair/cleanup." 'No leaves the existing rule untouched and marks this remote exposure partial.' $true) {
-            return 'adopt'
+        if (-not (Read-Choice "Rebuild the existing matching Tailscale $Label rule on HTTPS port $HttpsPort?" "The existing untracked rule already targets http://127.0.0.1:$BackendPort. Yes removes only this listener and recreates it from current LatticeVale state so stale Serve state cannot be inherited." 'No preserves the existing untracked rule and marks this remote exposure partial.' $true)) {
+            return 'leave'
         }
-        return 'leave'
+        $serveOff = Invoke-NativeProcessPassthrough $TailscaleExe @('serve',"--https=$HttpsPort",'off') 30
+        if (-not $serveOff.Success) {
+            Write-Warning "Could not remove the matching untracked Tailscale rule on HTTPS port $HttpsPort."
+            return 'leave'
+        }
+        return 'replace'
     }
     if (-not (Read-Choice "Replace the existing untracked Tailscale rule on HTTPS port $HttpsPort for $Label?" "Current target(s): $targets. Yes removes ONLY this HTTPS Serve listener and replaces it with LatticeVale's http://127.0.0.1:$BackendPort bridge. Use this when migrating a manual/legacy rule." 'No leaves the existing rule untouched and skips this LatticeVale remote exposure.' $false)) {
         return 'leave'
@@ -6100,6 +6356,174 @@ function Enable-WindowsTailscaleServe(
     return $true
 }
 
+
+function Test-WindowsTailscaleServeListener(
+    [int]$Port,
+    [string]$Ipv4,
+    [string]$Ipv6 = ''
+) {
+    $result = [ordered]@{ Pass=$false; Ipv4=$false; Ipv6=$false; Detail='' }
+    try {
+        $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop)
+        if ($Ipv4) { $result.Ipv4 = @($listeners | Where-Object { [string]$_.LocalAddress -eq $Ipv4 }).Count -gt 0 }
+        if ($Ipv6) { $result.Ipv6 = @($listeners | Where-Object { [string]$_.LocalAddress -eq $Ipv6 }).Count -gt 0 } else { $result.Ipv6 = $true }
+        $result.Pass = (($Ipv4 -and $result.Ipv4) -and $result.Ipv6)
+        $result.Detail = "HTTPS $Port listener: IPv4=$($result.Ipv4); IPv6=$($result.Ipv6)."
+    } catch {
+        $result.Detail = "Could not inspect HTTPS $Port listener: $($_.Exception.Message)"
+    }
+    Write-RemoteAccessLog $result.Detail
+    return [pscustomobject]$result
+}
+
+function Invoke-TailscaleHttpsProbeViaIpv4(
+    [string]$DnsName,
+    [string]$Ipv4,
+    [int]$Port,
+    [string]$Path = '/'
+) {
+    $result = [ordered]@{ Success=$false; HttpStatus=0; Body=''; Detail='' }
+    if (-not $DnsName -or -not $Ipv4 -or $Port -le 0) { $result.Detail='Missing DNS name, IPv4, or port'; return [pscustomobject]$result }
+    $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if (-not $curl) { $result.Detail='curl.exe is unavailable'; return [pscustomobject]$result }
+    if (-not $Path.StartsWith('/')) { $Path = '/' + $Path }
+    $url = (Get-TailscaleHttpsUrl $DnsName $Port).TrimEnd('/') + $Path
+    $resolve = "$DnsName`:$Port`:$Ipv4"
+    $marker = '__LATTICEVALE_HTTP_STATUS__:'
+    $probe = Invoke-NativeProcessCapture $curl.Source @('--silent','--show-error','--connect-timeout','5','--max-time','15','--resolve',$resolve,'--write-out',("`n$marker%{http_code}"),$url) 20
+    $stdout = [string]$probe.StdOut
+    $statusMatch = [regex]::Match($stdout, [regex]::Escape($marker) + '(\d{3})\s*$')
+    if ($statusMatch.Success) {
+        $result.HttpStatus = [int]$statusMatch.Groups[1].Value
+        $result.Body = $stdout.Substring(0,$statusMatch.Index).TrimEnd("`r","`n")
+    } else {
+        $result.Body = $stdout.Trim()
+    }
+    $result.Success = ($probe.Success -and $result.HttpStatus -ge 200 -and $result.HttpStatus -lt 400)
+    $result.Detail = if ($result.Success) { "$url returned HTTP $($result.HttpStatus) through $Ipv4 with certificate validation enabled." } else { "$url failed through ${Ipv4}: " + (Get-SafeDiagnosticExcerpt $probe.Text 420) }
+    Write-RemoteAccessLog $result.Detail
+    return [pscustomobject]$result
+}
+
+function Test-MatrixTailscaleClientPathViaIpv4(
+    [string]$BaseUrl,
+    [string]$DnsName,
+    [string]$Ipv4,
+    [int]$HttpsPort
+) {
+    $result = [ordered]@{ Pass=$false; Versions=$false; Discovery=$false; Login=$false; Detail='' }
+    $versions = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/_matrix/client/versions'
+    if ($versions.Success) {
+        try {
+            $json = $versions.Body | ConvertFrom-Json -ErrorAction Stop
+            if (@($json.versions).Count -gt 0) { $result.Versions = $true }
+        } catch { }
+    }
+    $discovery = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/.well-known/matrix/client'
+    if ($discovery.Success) {
+        try {
+            $json = $discovery.Body | ConvertFrom-Json -ErrorAction Stop
+            $homeserver = $json.'m.homeserver'
+            if ($null -ne $homeserver) {
+                $actual = [string]$homeserver.base_url
+                $expected = $BaseUrl.TrimEnd('/') + '/'
+                if ($actual -and (($actual.TrimEnd('/') + '/') -eq $expected)) { $result.Discovery = $true }
+            }
+        } catch { }
+    }
+    $login = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/_matrix/client/v3/login'
+    if ($login.Success) {
+        try {
+            $json = $login.Body | ConvertFrom-Json -ErrorAction Stop
+            if (@($json.flows).Count -gt 0) { $result.Login = $true }
+        } catch { }
+    }
+    $result.Pass = ($result.Versions -and $result.Discovery -and $result.Login)
+    $result.Detail = "Matrix client path via Tailscale IPv4: versions=$($result.Versions); discovery=$($result.Discovery); login=$($result.Login)."
+    Write-RemoteAccessLog $result.Detail
+    return [pscustomobject]$result
+}
+
+function Get-AvailableTailscaleRemoteValidationPort([string]$TailscaleExe) {
+    foreach ($port in 45443..45543) {
+        $state = Get-WindowsTailscaleServePortState $TailscaleExe $port 0
+        if ($state.Known -and -not $state.InUse -and (Test-WindowsTcpPortAvailable $port)) { return $port }
+    }
+    return 0
+}
+
+function Invoke-TailscaleRemotePeerValidation(
+    [string]$TailscaleExe,
+    [string]$DnsName,
+    [string]$Ipv4
+) {
+    $result = [ordered]@{ Status='PARTIAL'; Category='SKIPPED'; Detail='Remote-device validation was not completed.'; Port=0 }
+    if (-not (Read-Choice 'Validate Tailscale from a second device now?' 'LatticeVale creates a temporary private HTTPS text endpoint. Open it on another Tailscale device, preferably your phone on cellular, and type the code it displays back into this installer. This is the only way the installer can prove real remote DNS + tunnel + TLS + Serve reachability.' 'Remote access remains installed but is reported PARTIAL because only this PC was tested.' $true)) {
+        Write-RemoteAccessLog 'Remote-device validation skipped by user; status=PARTIAL.'
+        return [pscustomobject]$result
+    }
+
+    $port = Get-AvailableTailscaleRemoteValidationPort $TailscaleExe
+    if ($port -le 0) {
+        $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='No safe temporary Tailscale Serve port was available for remote validation.'
+        Write-RemoteAccessLog $result.Detail
+        return [pscustomobject]$result
+    }
+    $result.Port = $port
+    $token = 'LV-' + ([Guid]::NewGuid().ToString('N').Substring(0,12).ToUpperInvariant())
+    $serveStarted = $false
+    try {
+        $serve = Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg',"--https=$port","text:$token") 30
+        if (-not $serve.Success) {
+            $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='Temporary Tailscale Serve validation endpoint could not be created: ' + (Get-SafeDiagnosticExcerpt $serve.Text 420)
+            Write-RemoteAccessLog $result.Detail
+            return [pscustomobject]$result
+        }
+        $serveStarted = $true
+        $local = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $port '/'
+        if (-not $local.Success -or $local.Body.Trim() -ne $token) {
+            $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='Temporary validation endpoint failed its local direct-IP HTTPS self-test.'
+            Write-RemoteAccessLog $result.Detail
+            return [pscustomobject]$result
+        }
+
+        $url = Get-TailscaleHttpsUrl $DnsName $port
+        Write-Host ''
+        Write-Host 'REAL REMOTE-DEVICE VALIDATION' -ForegroundColor Cyan
+        Write-Host 'On a SECOND Tailscale device, preferably your phone with Wi-Fi OFF, open:' -ForegroundColor White
+        Write-Host $url -ForegroundColor Green
+        Write-Host 'The page will display a short LV- code. Type that exact code below.' -ForegroundColor White
+        $entered = (Read-Host 'Code shown on the remote device (press Enter if the page would not open)').Trim()
+        if ($entered -ceq $token) {
+            $result.Status='PASS'; $result.Category='REMOTE'; $result.Detail='A second Tailscale device successfully resolved and opened the temporary HTTPS Serve endpoint.'
+            Write-RemoteAccessLog $result.Detail
+            return [pscustomobject]$result
+        }
+
+        Write-Host 'Classify what the remote device showed:' -ForegroundColor Yellow
+        $choice = Read-Menu 'Remote validation result' @(
+            'DNS unavailable / hostname not found',
+            'Connection timed out / unreachable / refused',
+            'TLS or certificate error',
+            'Page opened but the validation code did not match',
+            'I did not complete the remote-device test'
+        ) 1
+        switch ($choice) {
+            1 { $result.Status='FAIL'; $result.Category='DNS'; $result.Detail='Second device reported DNS/name-resolution failure for the Tailscale HTTPS name.' }
+            2 { $result.Status='FAIL'; $result.Category='TRANSPORT'; $result.Detail='Second device resolved the target but could not establish the remote connection.' }
+            3 { $result.Status='FAIL'; $result.Category='TLS'; $result.Detail='Second device reported a TLS/certificate failure.' }
+            4 { $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='Second device opened a page but did not receive the temporary LatticeVale validation token.' }
+            5 { $result.Status='PARTIAL'; $result.Category='SKIPPED'; $result.Detail='Remote-device validation was not completed.' }
+        }
+        Write-RemoteAccessLog ("Remote-device validation: {0}/{1}; {2}" -f $result.Status,$result.Category,$result.Detail)
+        return [pscustomobject]$result
+    } finally {
+        if ($serveStarted) {
+            [void](Invoke-NativeProcessCapture $TailscaleExe @('serve',"--https=$port",'off') 30)
+            Write-RemoteAccessLog "Temporary remote-validation Serve mapping on HTTPS $port removed."
+        }
+    }
+}
 
 function Test-WingetPackageInstalled([string]$Id) {
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
@@ -6158,6 +6582,19 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
         return
     }
     Write-Info "Windows Tailscale client: RUNNING$(if ($tsStatus.DNSName) { " ($($tsStatus.DNSName))" } else { '' })"
+    Write-Info "Windows Tailscale authentication: $(if ($tsStatus.Authenticated) { 'READY' } else { 'MISSING' })"
+    Write-Info "Windows Tailscale IPv4: $(if ($tsStatus.IPv4) { $tsStatus.IPv4 } else { 'MISSING' })"
+    Write-Info "Tailscale HTTPS capability: $(if ($tsStatus.HttpsEnabled) { 'READY' } else { 'MISSING' })"
+    $auditPrefs = Get-WindowsTailscalePreferences $tsExe
+    if ($auditPrefs.Known) {
+        Write-Info "Tailscale inbound preference: $(if ($auditPrefs.ShieldsUp) { 'FAIL (Shields Up enabled)' } else { 'READY (Shields Up disabled)' })"
+    } else {
+        Write-Info 'Tailscale inbound preference: UNKNOWN'
+    }
+    if ($tsInfo.ContainsKey('WINDOWS_DNS_STATUS')) { Write-Info "Windows Tailscale DNS validation: $($tsInfo['WINDOWS_DNS_STATUS'])" }
+    else { Write-Info 'Windows Tailscale DNS validation: UNKNOWN (not recorded by this installation)' }
+    if ($tsInfo.ContainsKey('REMOTE_VALIDATION_STATUS')) { Write-Info "Second-device remote validation: $($tsInfo['REMOTE_VALIDATION_STATUS'])" }
+    else { Write-Info 'Second-device remote validation: NOT_RUN (not recorded by this installation)' }
 
     foreach ($mapping in @(
         @{ Label='Dashboard'; Selected=[bool](Get-OptionValue $Options 'tailscaleDashboard' $false); OptionPort=(Get-OptionTcpPort $Options 'tailscaleDashboardPort' 9443); Meta='DASHBOARD_HTTPS_PORT'; BridgeMeta='DASHBOARD_BRIDGE_PORT'; Bridge=(Get-OptionTcpPort $Options 'dashboardBridgePort' 19119) },
@@ -6174,7 +6611,7 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
         if ($tsInfo.ContainsKey($mapping.BridgeMeta)) { [void][int]::TryParse($tsInfo[$mapping.BridgeMeta], [ref]$bridgePort) }
         $portState = Get-WindowsTailscaleServePortState $tsExe $tracked $bridgePort
         if ($portState.Known -and $portState.InUse -and $portState.MatchesExpected) {
-            Write-Info "Tailscale $($mapping.Label): CONFIGURED (HTTPS $tracked -> Windows bridge $bridgePort)"
+            Write-Info "Tailscale $($mapping.Label): LOCAL PASS (HTTPS $tracked -> Windows bridge $bridgePort); second-device status is reported separately"
         } elseif ($portState.Known) {
             Write-Info "Tailscale $($mapping.Label): BROKEN/PARTIAL (HTTPS $tracked does not match the expected backend)"
         } else {
@@ -8097,18 +8534,67 @@ if ($previousTailscaleInfo.ContainsKey('MODE') -and $previousTailscaleInfo['MODE
 $oldDashboardBackendPort = if ($oldDashboardBridgePort -gt 0) { $oldDashboardBridgePort } else { $priorDashboardLocalPort }
 $oldMatrixBackendPort = if ($oldMatrixBridgePort -gt 0) { $oldMatrixBridgePort } else { $priorMatrixLocalPort }
 $bridgePaths = $null; $bridgeReady = $false; $bridgeTaskReady = $false; $bridgeWslIp = ''; $bridgeTargetAddress = ''
+$tailscaleRemoteValidation = [pscustomobject]@{ Status='NOT_RUN'; Category='NOT_RUN'; Detail='Remote validation not run.'; Port=0 }
+$tailscaleDnsValidation = [pscustomobject]@{ Status='UNKNOWN'; SystemResolution=$false; MagicDnsResolution=$false; Detail='DNS validation not run.' }
+$tailscalePrerequisiteFailure = ''
+$tailscaleFailureCategory = 'NONE'
 
 if ($tailscale) {
     Write-Step 'Configuring Windows Tailscale access to selected WSL services'
+    $remoteLog = Start-LatticeValeRemoteAccessLog
+    if ($remoteLog) { Write-Info "Remote-access diagnostic log: $remoteLog" }
     if (-not $tailscaleExe -and $installWindowsTailscale) { $tailscaleExe = Install-WindowsTailscale }
 
     if (-not $tailscaleExe) {
+        $tailscalePrerequisiteFailure = 'Tailscale for Windows is unavailable.'
+        $tailscaleFailureCategory = 'CLIENT'
+        Write-RemoteAccessLog $tailscalePrerequisiteFailure
         Write-Warning 'Tailscale for Windows is unavailable. Tailscale exposure was skipped; the LatticeVale stack remains available locally.'
     } else {
         $tsStatus = Ensure-WindowsTailscaleConnected $tailscaleExe
         if ($tsStatus.BackendState -ne 'Running') {
-            Write-Warning "Windows Tailscale did not reach Running state. Remote exposure was skipped; the LatticeVale stack remains available locally."
+            $tailscalePrerequisiteFailure = "Windows Tailscale did not reach Running state ($($tsStatus.BackendState))."
+            $tailscaleFailureCategory = 'CLIENT'
+            Write-RemoteAccessLog $tailscalePrerequisiteFailure
+            Write-Warning "$tailscalePrerequisiteFailure Remote exposure was skipped; the LatticeVale stack remains available locally."
         } else {
+            $preferenceState = Ensure-WindowsTailscaleRemoteAccessPreferences $tailscaleExe
+            $tsStatus = Get-WindowsTailscaleStatus $tailscaleExe
+            if (-not $preferenceState.Ready) {
+                $tailscalePrerequisiteFailure = $preferenceState.Detail
+                $tailscaleFailureCategory = 'POLICY'
+                Write-Warning "Tailscale remote-access prerequisite failed: $tailscalePrerequisiteFailure"
+            } elseif (-not $tsStatus.Authenticated) {
+                $tailscalePrerequisiteFailure = 'Windows Tailscale is Running but did not report an authenticated node key.'
+                $tailscaleFailureCategory = 'CLIENT'
+                Write-RemoteAccessLog $tailscalePrerequisiteFailure
+                Write-Warning $tailscalePrerequisiteFailure
+            } elseif (-not $tsStatus.IPv4) {
+                $tailscalePrerequisiteFailure = 'Windows Tailscale is Running but did not report a valid 100.x tailnet IPv4 address.'
+                $tailscaleFailureCategory = 'CLIENT'
+                Write-RemoteAccessLog $tailscalePrerequisiteFailure
+                Write-Warning $tailscalePrerequisiteFailure
+            } elseif (-not $tsStatus.DNSName) {
+                $tailscalePrerequisiteFailure = 'Windows Tailscale did not report a MagicDNS FQDN. Enable MagicDNS for the tailnet before using HTTPS Serve.'
+                $tailscaleFailureCategory = 'DNS'
+                Write-RemoteAccessLog $tailscalePrerequisiteFailure
+                Write-Warning $tailscalePrerequisiteFailure
+            } elseif (-not $tsStatus.HttpsEnabled) {
+                $tailscalePrerequisiteFailure = 'Tailscale HTTPS certificates are not enabled for this tailnet/device. Enable MagicDNS and HTTPS Certificates on the Tailscale Admin Console DNS page.'
+                $tailscaleFailureCategory = 'TLS'
+                Write-RemoteAccessLog $tailscalePrerequisiteFailure
+                Write-Warning $tailscalePrerequisiteFailure
+            } else {
+                $tailscaleDnsValidation = Test-WindowsTailscaleDnsResolution $tsStatus.DNSName $tsStatus.IPv4
+                if ($tailscaleDnsValidation.Status -eq 'FAIL') {
+                    $tailscalePrerequisiteFailure = $tailscaleDnsValidation.Detail
+                    $tailscaleFailureCategory = 'DNS'
+                    Write-Warning "Tailscale DNS prerequisite failed: $tailscalePrerequisiteFailure"
+                } elseif ($tailscaleDnsValidation.Status -eq 'PARTIAL') {
+                    Write-Warning "Tailscale DNS is partial on Windows: $($tailscaleDnsValidation.Detail) Remote-device validation is still required."
+                }
+            }
+
             $trackedDashboardPort = $oldDashboardPort
             $trackedMatrixPort = $oldMatrixPort
             $dashboardCleanupBlocked = $false
@@ -8122,7 +8608,7 @@ if ($tailscale) {
                 if (Disable-WindowsTailscaleServe $tailscaleExe $oldMatrixPort $oldMatrixBackendPort 'Matrix') { $trackedMatrixPort = 0 } else { $matrixCleanupBlocked = $true }
             }
 
-            if (($tailscaleDashboard -and -not $dashboardCleanupBlocked) -or ($tailscaleMatrix -and -not $matrixCleanupBlocked)) {
+            if (-not $tailscalePrerequisiteFailure -and (($tailscaleDashboard -and -not $dashboardCleanupBlocked) -or ($tailscaleMatrix -and -not $matrixCleanupBlocked))) {
                 Write-Step 'Creating Windows-native WSL relay for Tailscale'
                 $bridgeBackendPorts = @()
                 if ($tailscaleDashboard -and -not $dashboardCleanupBlocked) { $bridgeBackendPorts += $dashboardLocalPort }
@@ -8153,6 +8639,7 @@ if ($tailscale) {
                         Write-Info "Windows-native WSL relay active through WSL IPv4 $bridgeTargetAddress."
                     }
                 } else {
+                    $tailscaleFailureCategory = 'RELAY'
                     Write-Warning 'Tailscale remote exposure was skipped because the Windows-native WSL relay could not be verified.'
                 }
             }
@@ -8161,14 +8648,17 @@ if ($tailscale) {
                 $portState = Get-WindowsTailscaleServePortState $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort
                 if (-not $portState.Known) {
                     Write-Warning "Could not safely inspect Tailscale Serve HTTPS port $tailscaleDashboardPort. Dashboard exposure was skipped."
-                } elseif ($portState.InUse -and $portState.MatchesExpected) {
-                    $trackedDashboardPort = $tailscaleDashboardPort
-                    Write-Info "Adopted existing compatible Tailscale Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort."
+                } elseif ($portState.InUse -and $portState.MatchesExpected -and $oldDashboardPort -eq $tailscaleDashboardPort -and $oldDashboardBackendPort -eq $dashboardBridgePort) {
+                    if ((Disable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard') -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')) {
+                        $trackedDashboardPort = $tailscaleDashboardPort
+                        Write-Info "Rebuilt installer-owned Tailscale Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort."
+                    } else {
+                        $trackedDashboardPort = 0
+                        Write-Warning "Could not deterministically rebuild the installer-owned Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort."
+                    }
                 } elseif ($portState.InUse) {
                     $resolution = Resolve-UnownedTailscaleServeConflict $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard' $portState
-                    if ($resolution -eq 'adopt') {
-                        $trackedDashboardPort = $tailscaleDashboardPort
-                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')) {
+                    if ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')) {
                         $trackedDashboardPort = $tailscaleDashboardPort
                     } else {
                         Write-Warning "Dashboard Tailscale exposure was left unchanged/skipped on HTTPS port $tailscaleDashboardPort."
@@ -8182,14 +8672,17 @@ if ($tailscale) {
                 $portState = Get-WindowsTailscaleServePortState $tailscaleExe $tailscaleMatrixPort $matrixBridgePort
                 if (-not $portState.Known) {
                     Write-Warning "Could not safely inspect Tailscale Serve HTTPS port $tailscaleMatrixPort. Matrix exposure was skipped."
-                } elseif ($portState.InUse -and $portState.MatchesExpected) {
-                    $trackedMatrixPort = $tailscaleMatrixPort
-                    Write-Info "Adopted existing compatible Tailscale Matrix Serve mapping on HTTPS port $tailscaleMatrixPort."
+                } elseif ($portState.InUse -and $portState.MatchesExpected -and $oldMatrixPort -eq $tailscaleMatrixPort -and $oldMatrixBackendPort -eq $matrixBridgePort) {
+                    if ((Disable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix') -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')) {
+                        $trackedMatrixPort = $tailscaleMatrixPort
+                        Write-Info "Rebuilt installer-owned Tailscale Matrix Serve mapping on HTTPS port $tailscaleMatrixPort."
+                    } else {
+                        $trackedMatrixPort = 0
+                        Write-Warning "Could not deterministically rebuild the installer-owned Matrix Serve mapping on HTTPS port $tailscaleMatrixPort."
+                    }
                 } elseif ($portState.InUse) {
                     $resolution = Resolve-UnownedTailscaleServeConflict $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix' $portState
-                    if ($resolution -eq 'adopt') {
-                        $trackedMatrixPort = $tailscaleMatrixPort
-                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')) {
+                    if ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')) {
                         $trackedMatrixPort = $tailscaleMatrixPort
                     } else {
                         Write-Warning "Matrix Tailscale exposure was left unchanged/skipped on HTTPS port $tailscaleMatrixPort."
@@ -8199,23 +8692,46 @@ if ($tailscale) {
                 }
             }
 
+            if (($dashboardCleanupBlocked -or $matrixCleanupBlocked) -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'CLEANUP' }
+            if ($bridgeReady -and $tailscaleDashboard -and $trackedDashboardPort -ne $tailscaleDashboardPort -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'SERVE' }
+            if ($bridgeReady -and $tailscaleMatrix -and $trackedMatrixPort -ne $tailscaleMatrixPort -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'SERVE' }
+
             $dnsName = $tsStatus.DNSName
             if (-not $dnsName -and $previousTailscaleInfo.ContainsKey('TAILSCALE_DNS')) { $dnsName = $previousTailscaleInfo['TAILSCALE_DNS'] }
 
-            if ($tailscaleDashboard -and $trackedDashboardPort -eq $tailscaleDashboardPort -and $dnsName) {
+            if (-not $tailscalePrerequisiteFailure -and $tailscaleDashboard -and $trackedDashboardPort -eq $tailscaleDashboardPort -and $dnsName) {
                 $dashboardPublicUrl = Get-TailscaleHttpsUrl $dnsName $tailscaleDashboardPort
-                if (-not (Test-HttpsEndpoint $dashboardPublicUrl 20)) {
-                    Write-Warning "Dashboard Tailscale URL did not pass its end-to-end HTTPS test: $dashboardPublicUrl"
+                $dashboardListener = Test-WindowsTailscaleServeListener $tailscaleDashboardPort $tsStatus.IPv4 $tsStatus.IPv6
+                $dashboardProbe = Invoke-TailscaleHttpsProbeViaIpv4 $dnsName $tsStatus.IPv4 $tailscaleDashboardPort '/'
+                if (-not ($dashboardListener.Pass -and $dashboardProbe.Success)) {
+                    $tailscaleFailureCategory = 'SERVE'
+                    Write-Warning "Dashboard Tailscale URL did not pass listener + direct-IP HTTPS validation: $dashboardPublicUrl"
                     [void](Disable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')
                     $trackedDashboardPort = 0
                 }
             }
 
-            if ($tailscaleMatrix -and $trackedMatrixPort -eq $tailscaleMatrixPort -and $dnsName) {
+            if (-not $tailscalePrerequisiteFailure -and $tailscaleMatrix -and $trackedMatrixPort -eq $tailscaleMatrixPort -and $dnsName) {
                 $matrixPublicUrl = Get-TailscaleHttpsUrl $dnsName $tailscaleMatrixPort
-                [void](Set-SynapsePublicBaseUrl $DistroName $linuxUser $linuxHome $matrixPublicUrl)
-                if (-not (Test-HttpsEndpoint "$matrixPublicUrl/_matrix/client/versions" 30)) {
-                    Write-Warning "Matrix Tailscale URL did not pass its end-to-end HTTPS test: $matrixPublicUrl"
+                # A transport-only /versions probe is not enough for Matrix clients. The
+                # public_baseurl write drives Synapse's /.well-known/matrix/client response,
+                # so a failed write/restart must fail the exposure instead of being ignored.
+                $matrixBaseUrlReady = Set-SynapsePublicBaseUrl $DistroName $linuxUser $linuxHome $matrixPublicUrl
+                $matrixListenerReady = $false
+                $matrixVersionsReady = $false
+                $matrixDiscoveryReady = $false
+                $matrixLoginReady = $false
+                if ($matrixBaseUrlReady) {
+                    $matrixListener = Test-WindowsTailscaleServeListener $tailscaleMatrixPort $tsStatus.IPv4 $tsStatus.IPv6
+                    $matrixListenerReady = $matrixListener.Pass
+                    $matrixPath = Test-MatrixTailscaleClientPathViaIpv4 $matrixPublicUrl $dnsName $tsStatus.IPv4 $tailscaleMatrixPort
+                    $matrixVersionsReady = $matrixPath.Versions
+                    $matrixDiscoveryReady = $matrixPath.Discovery
+                    $matrixLoginReady = $matrixPath.Login
+                }
+                if (-not ($matrixBaseUrlReady -and $matrixListenerReady -and $matrixVersionsReady -and $matrixDiscoveryReady -and $matrixLoginReady)) {
+                    $tailscaleFailureCategory = 'MATRIX'
+                    Write-Warning "Matrix Tailscale client validation failed (public_baseurl=$matrixBaseUrlReady, listener=$matrixListenerReady, versions=$matrixVersionsReady, discovery=$matrixDiscoveryReady, login=$matrixLoginReady): $matrixPublicUrl"
                     [void](Disable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')
                     $trackedMatrixPort = 0
                     # Roll back the advertised client URL as well. A failed remote exposure
@@ -8227,20 +8743,40 @@ if ($tailscale) {
                 [void](Set-SynapsePublicBaseUrl $DistroName $linuxUser $linuxHome "http://localhost:$matrixLocalPort")
             }
 
-            if ($trackedDashboardPort -gt 0 -or $trackedMatrixPort -gt 0) {
+            if (-not $tailscalePrerequisiteFailure -and ($trackedDashboardPort -gt 0 -or $trackedMatrixPort -gt 0)) {
+                $tailscaleRemoteValidation = Invoke-TailscaleRemotePeerValidation $tailscaleExe $dnsName $tsStatus.IPv4
+                if ($tailscaleRemoteValidation.Status -eq 'PASS') {
+                    Write-Host 'Tailscale remote-device validation: PASS' -ForegroundColor Green
+                } elseif ($tailscaleRemoteValidation.Status -eq 'FAIL') {
+                    Write-Warning "Tailscale remote-device validation: FAIL ($($tailscaleRemoteValidation.Category)) - $($tailscaleRemoteValidation.Detail)"
+                } else {
+                    Write-Warning "Tailscale remote-device validation: PARTIAL - $($tailscaleRemoteValidation.Detail)"
+                }
                 # Do not rewrite the relay config here. Write-LatticeValeBridgeConfig intentionally
                 # stops a prior long-running relay before replacing files; doing that after
-                # end-to-end verification would immediately tear down the working listener.
+                # host-local and remote validation would immediately tear down the working listener.
                 # Any requested-but-unpublished relay remains localhost-only and harmless.
                 $infoDashBridge = if ($trackedDashboardPort -gt 0) { $dashboardBridgePort } else { 0 }
                 $infoMatrixBridge = if ($trackedMatrixPort -gt 0) { $matrixBridgePort } else { 0 }
                 $taskNameForInfo = if ($bridgePaths) { $bridgePaths.TaskName } else { '' }
-                Set-TailscaleInfoInWsl $DistroName $linuxUser $dnsName $trackedDashboardPort $trackedMatrixPort $infoDashBridge $infoMatrixBridge $bridgeWslIp $taskNameForInfo $true $bridgeTargetAddress $wslNetworkingModePolicy $wslNetworkingModeOwner
+                Set-TailscaleInfoInWsl $DistroName $linuxUser $dnsName $trackedDashboardPort $trackedMatrixPort $infoDashBridge $infoMatrixBridge $bridgeWslIp $taskNameForInfo $true $bridgeTargetAddress $wslNetworkingModePolicy $wslNetworkingModeOwner $tsStatus.IPv4 $tailscaleDnsValidation.Status $tailscaleRemoteValidation.Status
                 if ($dnsName) {
                     if ($trackedDashboardPort -gt 0) { Write-Host "Tailscale Dashboard: $(Get-TailscaleHttpsUrl $dnsName $trackedDashboardPort)" -ForegroundColor Green }
                     if ($trackedMatrixPort -gt 0) { Write-Host "Tailscale Matrix: $(Get-TailscaleHttpsUrl $dnsName $trackedMatrixPort)" -ForegroundColor Green }
                 }
             } else {
+                if ($tailscalePrerequisiteFailure) {
+                    # A current-run prerequisite failure must not leave a previously installer-owned
+                    # Serve listener advertising a relay we are about to retire. Remove only the
+                    # exact tracked LatticeVale mappings; unrelated Serve listeners remain untouched.
+                    if ($trackedDashboardPort -gt 0) {
+                        if (Disable-WindowsTailscaleServe $tailscaleExe $trackedDashboardPort $oldDashboardBackendPort 'Dashboard') { $trackedDashboardPort = 0 }
+                    }
+                    if ($trackedMatrixPort -gt 0) {
+                        if (Disable-WindowsTailscaleServe $tailscaleExe $trackedMatrixPort $oldMatrixBackendPort 'Matrix') { $trackedMatrixPort = 0 }
+                    }
+                    if ($matrix) { [void](Set-SynapsePublicBaseUrl $DistroName $linuxUser $linuxHome "http://localhost:$matrixLocalPort") }
+                }
                 Remove-TailscaleInfoInWsl $DistroName $linuxUser
                 # If this run actually deployed a relay but verification failed, keep the
                 # exact script/config after unregistering the dead task. This makes a later
@@ -8273,7 +8809,10 @@ if ($tailscale) {
         $previousBridgeTarget = if ($previousTailscaleInfo.ContainsKey('BRIDGE_TARGET_ADDRESS')) { [string]$previousTailscaleInfo['BRIDGE_TARGET_ADDRESS'] } else { [string]$previousTailscaleInfo['WSL_BRIDGE_IP'] }
         $previousNetworkingMode = if ($previousTailscaleInfo.ContainsKey('WSL_NETWORKING_MODE')) { [string]$previousTailscaleInfo['WSL_NETWORKING_MODE'] } else { $wslNetworkingModePolicy }
         $previousNetworkingOwner = if ($previousTailscaleInfo.ContainsKey('WSL_NETWORKING_MODE_OWNER')) { [string]$previousTailscaleInfo['WSL_NETWORKING_MODE_OWNER'] } else { $wslNetworkingModeOwner }
-        Set-TailscaleInfoInWsl $DistroName $linuxUser $savedDns $trackedDashboardPort $trackedMatrixPort $oldDashboardBridgePort $oldMatrixBridgePort ([string]($previousTailscaleInfo['WSL_BRIDGE_IP'])) ([string]($previousTailscaleInfo['BRIDGE_TASK_NAME'])) $previousBridgeAutoStart $previousBridgeTarget $previousNetworkingMode $previousNetworkingOwner
+        $savedIpv4 = if ($previousTailscaleInfo.ContainsKey('TAILSCALE_IPV4')) { [string]$previousTailscaleInfo['TAILSCALE_IPV4'] } else { '' }
+        $savedDnsStatus = if ($previousTailscaleInfo.ContainsKey('WINDOWS_DNS_STATUS')) { [string]$previousTailscaleInfo['WINDOWS_DNS_STATUS'] } else { 'UNKNOWN' }
+        $savedRemoteStatus = if ($previousTailscaleInfo.ContainsKey('REMOTE_VALIDATION_STATUS')) { [string]$previousTailscaleInfo['REMOTE_VALIDATION_STATUS'] } else { 'NOT_RUN' }
+        Set-TailscaleInfoInWsl $DistroName $linuxUser $savedDns $trackedDashboardPort $trackedMatrixPort $oldDashboardBridgePort $oldMatrixBridgePort ([string]($previousTailscaleInfo['WSL_BRIDGE_IP'])) ([string]($previousTailscaleInfo['BRIDGE_TASK_NAME'])) $previousBridgeAutoStart $previousBridgeTarget $previousNetworkingMode $previousNetworkingOwner $savedIpv4 $savedDnsStatus $savedRemoteStatus
         Write-Warning 'One or more prior Tailscale mappings could not be safely removed; bridge metadata was retained for a later repair run.'
     }
 }
@@ -8298,16 +8837,32 @@ if ($tailscale) {
         $bridgeTask = Get-ScheduledTask -TaskName $expectedBridgeTaskName -ErrorAction SilentlyContinue
         $bridgeTaskTracked = ($null -ne $bridgeTask)
     }
-    if ($dashTracked -and $matrixTracked -and $bridgeTracked -and $bridgeTaskTracked) {
-        $tailscaleState = 'CONFIGURED'
-        $tailscaleDetail = 'Requested installer-owned Windows Tailscale Serve + native WSL relay mappings and persistent relay task are recorded.'
+    $localMappingReady = ($dashTracked -and $matrixTracked -and $bridgeTracked -and $bridgeTaskTracked -and -not $tailscalePrerequisiteFailure)
+    if ((-not $bridgeTracked -or -not $bridgeTaskTracked) -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'RELAY' }
+    elseif (-not $dashTracked -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'SERVE' }
+    elseif (-not $matrixTracked -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'MATRIX' }
+    $remoteStatus = [string]$tailscaleRemoteValidation.Status
+    if (-not $localMappingReady) {
+        $tailscaleState = 'FAIL'
+        $tailscaleDetail = if ($tailscalePrerequisiteFailure) { "[$tailscaleFailureCategory] Remote-access prerequisite failed: $tailscalePrerequisiteFailure" } elseif ($tailscaleFailureCategory -ne 'NONE') { "[$tailscaleFailureCategory] One or more requested Windows Tailscale Serve/relay mappings did not complete or validate." } else { 'One or more requested Windows Tailscale Serve/relay mappings did not complete or validate.' }
+    } elseif ($remoteStatus -eq 'PASS') {
+        $tailscaleState = 'PASS'
+        $tailscaleDetail = 'Windows Tailscale prerequisites, relay, Serve listeners, Matrix client path, and a second-device HTTPS challenge all passed.'
+    } elseif ($remoteStatus -eq 'FAIL') {
+        $tailscaleState = 'FAIL'
+        $tailscaleDetail = "[$($tailscaleRemoteValidation.Category)] Local Tailscale/Matrix validation passed, but the second-device remote validation failed: $($tailscaleRemoteValidation.Detail)"
     } else {
         $tailscaleState = 'PARTIAL'
-        $tailscaleDetail = 'One or more requested Windows Tailscale Serve mappings were not completed.'
+        $tailscaleDetail = 'Local Tailscale/Matrix validation passed, but a second Tailscale device did not complete the remote validation challenge.'
     }
 } elseif ($finalTailscaleInfo.Count -gt 0) {
     $tailscaleState = 'PARTIAL'
     $tailscaleDetail = 'Tailscale was disabled, but prior installer-owned mapping metadata remains for safe cleanup.'
+}
+Write-RemoteAccessLog ("Final Tailscale state: {0}; {1}" -f $tailscaleState,$tailscaleDetail)
+if ($tailscale) {
+    $tailscaleStateColor = if ($tailscaleState -eq 'PASS') { 'Green' } elseif ($tailscaleState -eq 'FAIL') { 'Red' } else { 'Yellow' }
+    Write-Host ("Tailscale remote access: {0} - {1}" -f $tailscaleState,$tailscaleDetail) -ForegroundColor $tailscaleStateColor
 }
 
 $taskName = Get-LatticeValeScheduledTaskName $DistroName
@@ -8423,6 +8978,7 @@ if ($windowsShortcuts -and $shortcutState -eq 'CONFIGURED') {
     Write-Host "Shutdown shortcut:      $($shortcutResult.Paths.ShutdownShortcut)"
 }
 Write-Info 'Immediately after WSL/Docker starts, selected services may briefly report STARTING. The verify command waits for that normal startup window before recommending repair.'
+if ($script:RemoteAccessLogPath) { Write-Host "Remote-access diagnostic log: $script:RemoteAccessLogPath" }
 if ($dashboard) {
     if ($windowsReachability.ContainsKey('Dashboard') -and $windowsReachability['Dashboard']) {
         Write-Host "Dashboard: http://localhost:$dashboardLocalPort (use the username/password entered during Linux configuration)"

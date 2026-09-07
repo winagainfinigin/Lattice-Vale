@@ -1,4 +1,20 @@
-# LatticeVale 14.6.0 Troubleshooting
+# LatticeVale 14.6.1 Troubleshooting
+
+## Tailscale remote access reports PARTIAL or FAIL
+
+`PASS` now means a second Tailscale device opened the installer-created HTTPS challenge in the current run. `PARTIAL` means the Windows relay/Serve/client-path checks passed but the second-device proof was not completed. `FAIL` means a prerequisite or classified remote test failed.
+
+For `DNS` failure or an Android client that says **DNS unavailable**, verify the Tailscale Admin Console DNS configuration, MagicDNS/HTTPS availability, and the phone's **Use Tailscale DNS settings** state. LatticeVale can validate and normalize the Windows client, but it cannot silently rewrite tailnet-wide DNS policy. For `TRANSPORT`, `TLS`, or `SERVE`, keep the generated remote-access log and rerun Resume / repair after correcting the reported layer.
+
+The focused Windows log is written under `%LOCALAPPDATA%\LatticeVale\logs\remote-access-*.log` (with a temporary-directory fallback if needed).
+
+
+## Matrix works in a browser over Tailscale but a client cannot sign in
+
+For a Tailscale-exposed Matrix install, test the public `/_matrix/client/versions` endpoint and `/.well-known/matrix/client`. v14.6.1 requires the well-known response to advertise the exact Tailscale HTTPS base URL and requires the login endpoint to expose a flow before the installer keeps its Matrix Serve mapping. Resume / repair with the full v14.6.1 release to reconcile an older false-positive mapping.
+
+If those checks pass but a client still rejects the homeserver, capture the client-visible error plus the public `/_matrix/client/v3/login` response. v14.6.1 deliberately does not change the authentication backend, `server_name`, or existing Matrix IDs; troubleshoot authentication separately from the Tailscale transport/discovery path.
+
 
 ## DirectML fail-closed and high-CPU checks
 

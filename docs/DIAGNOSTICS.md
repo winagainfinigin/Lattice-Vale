@@ -1,4 +1,11 @@
-# LatticeVale 14.6.0 Diagnostics
+# LatticeVale 14.6.1 Diagnostics
+
+## Windows Tailscale remote-access diagnostics
+
+A Tailscale-enabled install/repair writes a focused log at `%LOCALAPPDATA%\LatticeVale\logs\remote-access-YYYYMMDD-HHMMSS.log` when possible. It records prerequisite, preference, DNS, Serve/listener, Matrix client-path, remote-device challenge, cleanup, and final-state diagnostics without treating a host-local request as remote proof.
+
+Installer-owned `.tailscale-info` also records `TAILSCALE_IPV4`, `WINDOWS_DNS_STATUS`, and `REMOTE_VALIDATION_STATUS`. These are diagnostic history only; a saved `REMOTE_VALIDATION_STATUS=PASS` is never reused to claim a new run passed.
+
 
 ## Policy-13 diagnostics
 

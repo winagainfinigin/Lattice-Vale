@@ -1,5 +1,30 @@
 # Changelog
 
+## 14.6.1 - 2026-09-06
+
+### Live Matrix/Tailscale repair convergence hotfix
+- Replaces the post-restart Synapse readiness `bash -lc` probe with direct WSL argv probes so healthy Matrix instances are not rejected by Windows/WSL quoting corruption.
+- Corrects the loopback Serve target regex so `http://127.0.0.1:<port>` is recognized as the expected backend.
+- Keeps an existing `MATRIX` failure category from being overwritten as `RELAY` during final metadata reconciliation.
+- Same release identity: 14.6.1; rerun Option 1 (Resume / repair) to converge an existing managed install.
+
+
+### Windows Tailscale remote-access verification hardening
+- Keeps the release identity at **14.6.1** while repairing the Windows-host Tailscale remote-access contract discovered after the 14.6.0 release.
+- Adds explicit Windows Tailscale preflight for running/authenticated state, a valid 100.x address, MagicDNS hostname, HTTPS capability, Shields Up/system-policy conflicts, and Windows/MagicDNS resolution while preserving the user's existing Windows DNS preference.
+- Rebuilds installer-owned Serve listeners deterministically, verifies the Windows-to-WSL relay first, then checks the actual Tailscale IPv4/IPv6 listeners and validates HTTPS with the final hostname while connecting directly to the 100.x address.
+- Matrix publication now requires `/versions`, exact `/.well-known/matrix/client`, and `/login` flow validation through that direct-IP/TLS-SNI path before the mapping is retained.
+- Adds a temporary one-time HTTPS challenge that must be opened from a **second Tailscale device** before the installer reports remote access `PASS`; skipped validation is `PARTIAL`, and classified DNS/transport/TLS/Serve failures are `FAIL`.
+- Saves focused remote-access diagnostics under the Windows LatticeVale log directory and records Windows DNS plus second-device validation status in installer-owned Tailscale metadata.
+- A previous saved remote `PASS` never satisfies a later run: current-run second-device proof is required whenever remote access is validated.
+
+### Matrix/Tailscale client-discovery validation hotfix
+- Fixes Windows Tailscale Matrix exposure accepting a remote mapping after `Set-SynapsePublicBaseUrl` failed; the installer now treats the `public_baseurl` write/restart result as part of the health contract.
+- Adds strict public `/.well-known/matrix/client` validation and requires `m.homeserver.base_url` to match the selected Tailscale HTTPS URL exactly (normalizing the trailing slash).
+- Verifies the Matrix login endpoint exposes at least one login flow before retaining the installer-owned Serve mapping. A failed client-path check disables that mapping and rolls Synapse `public_baseurl` back to localhost.
+- Leaves authentication ownership unchanged: this hotfix does not add or migrate Matrix Authentication Service (MAS), change `server_name`, or rewrite existing Matrix user IDs.
+- Retains installer-options schema 23, runtime-policy schema 13, managed-refresh revision 4, and the 142-fixture deterministic release contract.
+
 ### v14.6.0 same-version schema-23 / policy-13 completion
 
 - Advances installer options to schema 23 and runtime resource policy to schema 13 without changing the public release version.
