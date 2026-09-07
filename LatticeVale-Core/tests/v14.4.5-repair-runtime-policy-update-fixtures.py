@@ -68,6 +68,7 @@ with tempfile.TemporaryDirectory(prefix='lv145-runtime-policy-') as td:
 set -euo pipefail
 verify_count=0
 opt_bool() { [[ "$1" == containerResourceLimits ]] && printf true || printf false; }
+refresh_canonical_architecture_state() { :; }
 verify_adaptive_runtime_policy() {
   verify_count=$((verify_count+1))
   (( verify_count >= 2 ))

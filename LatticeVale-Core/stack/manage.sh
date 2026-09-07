@@ -709,6 +709,45 @@ wait_profile_gateway_up_exact() {
   return 1
 }
 
+wait_profile_gateway_registered_exact_manage() {
+  local name="$1" wait_seconds="${2:-15}" i state
+  [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]] || wait_seconds=15
+  for i in $(seq 1 "$wait_seconds"); do
+    state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
+    [[ "$state" == up || "$state" == down ]] && return 0
+    sleep 1
+  done
+  return 1
+}
+
+register_missing_gateway_slot_exact_manage() {
+  local name="$1" home
+  if [[ "$name" == default ]]; then home="data/hermes"; else home="data/hermes/profiles/$name"; fi
+  [[ -d "$home" ]] || { echo "Cannot repair missing gateway slot '$name': persistent Hermes home '$home' is absent." >&2; return 1; }
+  wait_profile_gateway_registered_exact_manage "$name" 12 && return 0
+  echo "Repairing missing exact Hermes s6 gateway slot 'gateway-$name' from preserved profile state." >&2
+  if ! timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent python -c '
+import sys
+from hermes_cli.service_manager import detect_service_manager, get_service_manager
+name=sys.argv[1]
+if detect_service_manager() != "s6":
+    raise SystemExit("Hermes container is not using the expected s6 service manager")
+mgr=get_service_manager()
+supports=getattr(mgr, "supports_runtime_registration", None)
+if not callable(supports) or not supports():
+    raise SystemExit("Hermes s6 manager does not support runtime gateway registration")
+mgr.register_profile_gateway(name)
+' "$name" >/dev/null 2>&1; then
+    wait_profile_gateway_registered_exact_manage "$name" 5 && return 0
+    echo "Hermes runtime registration failed for exact gateway slot 'gateway-$name'." >&2
+    return 1
+  fi
+  wait_profile_gateway_registered_exact_manage "$name" 15 || {
+    echo "Hermes registered 'gateway-$name' but the exact s6 slot did not become observable within the bounded repair window." >&2
+    return 1
+  }
+}
+
 profile_gateway_log_tail_exact_manage() {
   local name="$1"
   timeout --foreground --kill-after=5s 15s docker exec hermes-agent sh -c '
@@ -731,9 +770,10 @@ start_profile_gateway_exact_manage() {
     up) return 0 ;;
     down) ;;
     absent)
-      echo "Profile '$name' has no exact s6 gateway service slot; preserving its Matrix state and refusing a profile-blind start." >&2
-      profile_gateway_log_tail_exact_manage "$name"
-      return 1
+      register_missing_gateway_slot_exact_manage "$name" || { profile_gateway_log_tail_exact_manage "$name"; return 1; }
+      state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
+      [[ "$state" == up ]] && return 0
+      [[ "$state" == down ]] || { profile_gateway_log_tail_exact_manage "$name"; return 1; }
       ;;
     *)
       echo "Could not determine the exact s6 gateway state for profile '$name'." >&2
@@ -772,9 +812,9 @@ reconcile_default_gateway_manage() {
     up) action=restart ;;
     down) action=start ;;
     absent)
-      echo 'Default gateway has no exact s6 service slot; Matrix runtime cannot be reconciled safely.' >&2
-      profile_gateway_log_tail_exact_manage default
-      return 1
+      register_missing_gateway_slot_exact_manage default || { profile_gateway_log_tail_exact_manage default; return 1; }
+      state="$(profile_gateway_s6_state_exact default 2>/dev/null || true)"
+      case "$state" in up) action=restart ;; down) action=start ;; *) profile_gateway_log_tail_exact_manage default; return 1 ;; esac
       ;;
     *)
       echo 'Could not determine the exact default gateway s6 state.' >&2
@@ -810,9 +850,9 @@ reconcile_profile_gateway_exact_manage() {
     up) action=restart ;;
     down) action=start ;;
     absent)
-      echo "Profile '$name' has no exact s6 gateway service slot; preserving its Matrix state." >&2
-      profile_gateway_log_tail_exact_manage "$name"
-      return 1
+      register_missing_gateway_slot_exact_manage "$name" || { profile_gateway_log_tail_exact_manage "$name"; return 1; }
+      state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
+      case "$state" in up) action=restart ;; down) action=start ;; *) profile_gateway_log_tail_exact_manage "$name"; return 1 ;; esac
       ;;
     *)
       echo "Could not determine the exact s6 gateway state for profile '$name'." >&2

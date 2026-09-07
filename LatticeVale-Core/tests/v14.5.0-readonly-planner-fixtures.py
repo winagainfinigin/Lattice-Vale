@@ -19,8 +19,8 @@ assert version in {"14.5.0", "14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5
 
 metadata = json.loads((STACK_SRC / "checkpoint-metadata.json").read_text())
 assert metadata["schema"] == 1
-assert metadata["stages"]["reconcile"]["revision"] == 4
-assert metadata["stages"]["kanban_gateway"]["revision"] == 4
+assert metadata["stages"]["reconcile"]["revision"] == 5
+assert metadata["stages"]["kanban_gateway"]["revision"] == 5
 configure = (STACK_SRC / "configure-stack.sh").read_text()
 assert "checkpoint-metadata.json" not in configure
 expected_revisions = {
@@ -33,8 +33,8 @@ expected_revisions = {
     "matrix_cross_signing": 1,
     "matrix_profile_cross_signing": 3,
     "integrations": 4,
-    "reconcile": 4,
-    "kanban_gateway": 4,
+    "reconcile": 5,
+    "kanban_gateway": 5,
     "finalize": 2,
 }
 assert {name: item["revision"] for name, item in metadata["stages"].items()} == expected_revisions

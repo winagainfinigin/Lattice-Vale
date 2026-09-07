@@ -17,70 +17,49 @@ generator=(root/'tools/New-SourceManifest.ps1').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text().strip()
 
 
-def _process_group_exists(pgid):
-    try:
-        os.killpg(pgid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-def _reap_process_group(pgid, grace=1.5):
-    """Bounded cleanup for descendants created by one isolated legacy harness."""
-    if not _process_group_exists(pgid):
-        return
-    try:
-        os.killpg(pgid, signal.SIGTERM)
-    except ProcessLookupError:
-        return
-    deadline=time.monotonic()+grace
-    while time.monotonic() < deadline:
-        if not _process_group_exists(pgid):
-            return
-        time.sleep(0.05)
-    try:
-        os.killpg(pgid, signal.SIGKILL)
-    except ProcessLookupError:
-        return
-    deadline=time.monotonic()+1.0
-    while time.monotonic() < deadline:
-        if not _process_group_exists(pgid):
-            return
-        time.sleep(0.05)
-    if _process_group_exists(pgid):
-        raise AssertionError(f"legacy bash fixture process group {pgid} did not terminate")
-
-
 def run_bash_fixture(harness, cwd, timeout=20):
-    """Run a legacy shell harness in an isolated process group and reap descendants.
+    """Run a legacy shell harness in its own bounded process group.
 
-    The assertions stay unchanged. File-backed capture plus a private session prevents a
-    descendant from inheriting the CI pipe, and bounded process-group cleanup guarantees
-    that the fixture itself terminates even when a historical shell helper leaves work
-    behind after its parent shell exits.
+    The regression runner already starts each fixture in a new session.  Creating a
+    second GNU ``timeout --foreground`` layer here made this historical fixture
+    sensitive to nested session/process-group behavior.  Give the synthetic shell its
+    own session instead, keep output file-backed, and kill only that session on timeout.
+    Production validation and all fixture assertions remain unchanged.
     """
     with tempfile.TemporaryFile(mode="w+") as out, tempfile.TemporaryFile(mode="w+") as err:
-        proc=subprocess.Popen(
-            ['bash','-c',harness], cwd=cwd, text=True, stdout=out, stderr=err,
+        proc = subprocess.Popen(
+            ["bash", "-c", harness],
+            cwd=cwd,
+            text=True,
+            stdout=out,
+            stderr=err,
             start_new_session=True,
         )
-        pgid=proc.pid
         try:
-            rc=proc.wait(timeout=timeout)
+            returncode = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired as exc:
-            _reap_process_group(pgid)
             try:
-                proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            raise AssertionError(f"legacy bash fixture exceeded {timeout}s") from exc
+                os.killpg(proc.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            returncode = proc.wait()
+            out.seek(0); err.seek(0)
+            stdout = out.read(); stderr = err.read()
+            raise AssertionError(
+                f"legacy bash fixture exceeded {timeout}s; stdout={stdout[-2000:]!r}; stderr={stderr[-2000:]!r}"
+            ) from exc
         finally:
-            _reap_process_group(pgid)
+            # A well-behaved harness exits with all children reaped.  If an old shell
+            # snippet detached a descendant, terminate only this synthetic session so
+            # it cannot leak into later regression fixtures.
+            try:
+                os.killpg(proc.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
         out.seek(0); err.seek(0)
-        return SimpleNamespace(returncode=rc, stdout=out.read(), stderr=err.read())
+        stdout=out.read(); stderr=err.read()
+    return SimpleNamespace(returncode=returncode, stdout=stdout, stderr=stderr)
+
 
 assert version in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}
 assert 'schema = $compat.InstallOptionsSchema' in ps
@@ -163,6 +142,13 @@ cat > install-options.json <<'JSON_OPTIONS'
 {"matrix":true,"searxng":true,"qmd":true,"honcho":true,"hermesLocalAI":true,"ollamaBackend":"managed"}
 JSON_OPTIONS
 printf 'MemTotal: 16777216 kB\n' > fake-meminfo
+mkdir -p data/latticevale
+cat > data/latticevale/hardware-capabilities.json <<'JSON_HARDWARE'
+{"hardwareFingerprint":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","wsl":{"cpuCount":4,"memoryMiB":16384}}
+JSON_HARDWARE
+cat > data/latticevale/backend-capabilities.json <<'JSON_BACKENDS'
+{"backendFingerprint":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","selection":{}}
+JSON_BACKENDS
 write_latticevale_compose_overlay cpu true
 '''
     r=run_bash_fixture(harness, td, 45)
@@ -214,7 +200,7 @@ ollama_gpu_metrics() { printf '1:8192:8192:8192\n'; }
 cat > install-options.json <<'JSON_OPTIONS'
 {"hermesLocalAI":true,"ollamaBackend":"managed"}
 JSON_OPTIONS
-''' + f"printf 'MemTotal: 16777216 kB\\n' > fake-meminfo\nwrite_latticevale_compose_overlay {accel} false\n"
+''' + f"printf 'MemTotal: 16777216 kB\\n' > fake-meminfo\nmkdir -p data/latticevale\ncat > data/latticevale/hardware-capabilities.json <<'JSON_HARDWARE'\n{{\"hardwareFingerprint\":\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"wsl\":{{\"cpuCount\":4,\"memoryMiB\":16384}}}}\nJSON_HARDWARE\ncat > data/latticevale/backend-capabilities.json <<'JSON_BACKENDS'\n{{\"backendFingerprint\":\"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"selection\":{{}}}}\nJSON_BACKENDS\nwrite_latticevale_compose_overlay {accel} false\n"
         r=run_bash_fixture(harness, td, 45)
         assert r.returncode==0, (accel,r.stderr)
         parsed=yaml.safe_load((td/'compose.latticevale.yaml').read_text())

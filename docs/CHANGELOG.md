@@ -1,4 +1,9 @@
 # Changelog
+
+### v14.6.1 documentation/release-contract synchronization
+- Synchronizes current-facing documentation with the qualified v14.6.1 state: 144 deterministic fixtures, v14.6.0 as the declared parent baseline, v14.6.1 as the current release, and the preservation-first eight-option migration/repair contract.
+- Retains historical v14.6.0/v14.5.x release notes as historical lineage rather than rewriting their original fixture counts or architecture-attribution text.
+- Regenerates `installer/SOURCE-SHA256SUMS.txt` after the final documentation changes so GitHub/PowerShell manifest verification matches the published source bytes.
 - Same-version Resume / repair reconstructs a missing exact Hermes s6 gateway slot from preserved profile state through the upstream runtime registration API, then verifies and starts only that slot; no profile recreation or credential rewrite is used. Reconcile/final gateway checkpoint revisions advance to 5.
 
 ### v14.6.1 hotfix — canonical runtime-policy and DirectML repair convergence

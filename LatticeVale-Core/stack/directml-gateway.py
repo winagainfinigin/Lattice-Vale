@@ -782,7 +782,7 @@ def stream_chunks(handler: BaseHTTPRequestHandler, result: dict[str, Any], model
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
-    server_version = "LatticeValeDirectML/14.5.47"
+    server_version = f"LatticeValeDirectML/{VERSION}"
 
     def log_message(self, fmt: str, *args: Any) -> None:
         sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
@@ -811,7 +811,12 @@ class GatewayHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         if self.path.rstrip("/") in ("", "/health"):
             fb_ok, fb_detail = fallback_ready()
-            with STATE_LOCK, MODEL_LOCK:
+            # Health must remain responsive while the DirectML model is loading or
+            # generating. MODEL_LOCK can be held for tens of seconds during first-load
+            # inference; taking it here made the supervisor misclassify a healthy worker
+            # as dead and kill it mid-self-test. These fields are telemetry snapshots;
+            # atomic object/reference reads are sufficient and transient skew is harmless.
+            with STATE_LOCK:
                 payload = {
                     "status": "ok" if DEPENDENCY_PROBE.get("ready") or fb_ok else "degraded",
                     "selected_backend": "directml",

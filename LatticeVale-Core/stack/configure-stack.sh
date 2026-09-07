@@ -833,10 +833,19 @@ resource_cpu_limit_string() {
 write_latticevale_compose_overlay() {
   local accel="$1" limits="$2" cpus mem_mib compose_files matrix_profile_gateways kanban_concurrency hermes_floor_mib ollama_metrics ollama_text_mib ollama_embed_mib ollama_context ollama_floor_mib
   local ram_profile cpu_profile gpu_metrics gpu_count=0 gpu_min_mib=0 gpu_max_mib=0 gpu_total_mib=0 gpu_coordination ollama_gpu_overhead_mib=0 directml_vram_limit_pct=75 gpu_shared_directml=false
-  cpus="$(nproc 2>/dev/null || true)"
-  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 ]] || { echo 'Could not determine the CPU allocation currently visible to WSL; refusing to invent adaptive resource defaults.' >&2; return 1; }
-  mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-  [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || { echo 'Could not determine the RAM allocation currently visible to WSL; refusing to invent adaptive resource defaults.' >&2; return 1; }
+
+  # The canonical hardware document is the only resource-policy input for WSL CPU/RAM.
+  # Live probes belong to hardware-capabilities.py.  Reading /proc/meminfo or nproc again
+  # here would create a second source of truth and can make one repair generate policy
+  # from a different machine snapshot than the hardware/backend fingerprints it embeds.
+  [[ -s data/latticevale/hardware-capabilities.json && ! -L data/latticevale/hardware-capabilities.json ]] || {
+    echo 'Canonical hardware-capabilities.json is unavailable; refresh architecture state before generating runtime policy.' >&2
+    return 1
+  }
+  cpus="$(jq -r '.wsl.cpuCount // 0' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
+  mem_mib="$(jq -r '.wsl.memoryMiB // 0' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
+  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 ]] || { echo 'Canonical hardware state does not contain a valid WSL CPU count; refusing to invent adaptive resource defaults.' >&2; return 1; }
+  [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || { echo 'Canonical hardware state does not contain a valid WSL RAM allocation; refusing to invent adaptive resource defaults.' >&2; return 1; }
   matrix_profile_gateways="$(resource_matrix_profile_gateways)" || return 1
   kanban_concurrency="$(resource_kanban_concurrency)" || return 1
   hermes_floor_mib="$(resource_hermes_floor_mib "$matrix_profile_gateways" "$kanban_concurrency")" || return 1
@@ -1107,55 +1116,64 @@ write_latticevale_compose_overlay() {
   echo "Ollama acceleration resolved: $accel"
 }
 
+runtime_policy_verify_error() {
+  local code="$1" expected="${2:-}" actual="${3:-}"
+  if [[ -n "$expected" || -n "$actual" ]]; then
+    printf 'Adaptive runtime/RAM policy verification failed: %s expected=%q actual=%q\n' "$code" "$expected" "$actual" >&2
+  else
+    printf 'Adaptive runtime/RAM policy verification failed: %s\n' "$code" >&2
+  fi
+}
+
 verify_adaptive_runtime_policy() {
   [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
-  [[ -s .latticevale-resource-state && ! -L .latticevale-resource-state ]] || return 1
-  [[ -s data/latticevale/hardware-capabilities.json && ! -L data/latticevale/hardware-capabilities.json ]] || return 1
-  [[ -s data/latticevale/backend-capabilities.json && ! -L data/latticevale/backend-capabilities.json ]] || return 1
-  [[ -s data/latticevale/runtime-policy.json && ! -L data/latticevale/runtime-policy.json ]] || return 1
+  [[ -s .latticevale-resource-state && ! -L .latticevale-resource-state ]] || { runtime_policy_verify_error RESOURCE_STATE_MISSING; return 1; }
+  [[ -s data/latticevale/hardware-capabilities.json && ! -L data/latticevale/hardware-capabilities.json ]] || { runtime_policy_verify_error HARDWARE_STATE_MISSING; return 1; }
+  [[ -s data/latticevale/backend-capabilities.json && ! -L data/latticevale/backend-capabilities.json ]] || { runtime_policy_verify_error BACKEND_STATE_MISSING; return 1; }
+  [[ -s data/latticevale/runtime-policy.json && ! -L data/latticevale/runtime-policy.json ]] || { runtime_policy_verify_error RUNTIME_POLICY_MISSING; return 1; }
 
-  # Hardware provenance is live input, not durable configuration.  Refuse to call a
-  # policy current when the WSL CPU/RAM visible now differs from the capability
-  # document that the canonical policy was derived from.  The repair path refreshes
-  # hardware-capabilities.json before regenerating the policy.
-  local cpus mem_mib hardware_cpus hardware_mem policy_fingerprint hardware_fingerprint compose_selector overlay
+  # This is the one intentional live-state comparison. hardware-capabilities.py owns
+  # detection; this check proves the canonical snapshot did not become stale between
+  # refresh and verification. Policy generation itself consumes only that snapshot.
+  local cpus mem_mib hardware_cpus hardware_mem policy_fingerprint hardware_fingerprint compose_selector overlay canonical_result
   cpus="$(nproc 2>/dev/null || true)"
   mem_mib="$(awk '/^MemTotal:/ {print int($2/1024); exit}' /proc/meminfo 2>/dev/null || true)"
-  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 && "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || return 1
+  [[ "$cpus" =~ ^[0-9]+$ && "$cpus" -ge 1 ]] || { runtime_policy_verify_error LIVE_WSL_CPU_UNAVAILABLE 'integer >= 1' "$cpus"; return 1; }
+  [[ "$mem_mib" =~ ^[0-9]+$ && "$mem_mib" -ge 512 ]] || { runtime_policy_verify_error LIVE_WSL_MEMORY_UNAVAILABLE 'integer >= 512 MiB' "$mem_mib"; return 1; }
   hardware_cpus="$(jq -r '.wsl.cpuCount // 0' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
   hardware_mem="$(jq -r '.wsl.memoryMiB // 0' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
-  [[ "$hardware_cpus" == "$cpus" && "$hardware_mem" == "$mem_mib" ]] || return 1
+  [[ "$hardware_cpus" == "$cpus" ]] || { runtime_policy_verify_error WSL_CPU_MISMATCH "$hardware_cpus" "$cpus"; return 1; }
+  [[ "$hardware_mem" == "$mem_mib" ]] || { runtime_policy_verify_error WSL_MEMORY_MISMATCH "$hardware_mem" "$mem_mib"; return 1; }
 
-  # All formula-level validation is canonical.  This validates schema, options,
-  # host/DirectML reserve, container budget, CPU quotas, service memory plan,
-  # allocator/database tuning, GPU coordination, and every provenance fingerprint.
-  python3 runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json >/dev/null || return 1
+  # Formula-level verification is canonical and emits its own classified invariant.
+  if ! canonical_result="$(python3 runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json 2>&1)"; then
+    runtime_policy_verify_error CANONICAL_POLICY_INVALID 'runtime-policy.py verify = success' "$canonical_result"
+    return 1
+  fi
 
   policy_fingerprint="$(jq -r '.policyFingerprint // empty' data/latticevale/runtime-policy.json 2>/dev/null || true)"
   hardware_fingerprint="$(jq -r '.hardwareFingerprint // empty' data/latticevale/runtime-policy.json 2>/dev/null || true)"
-  [[ "$policy_fingerprint" =~ ^[0-9a-f]{64}$ && "$hardware_fingerprint" =~ ^[0-9a-f]{64}$ ]] || return 1
+  [[ "$policy_fingerprint" =~ ^[0-9a-f]{64}$ ]] || { runtime_policy_verify_error POLICY_FINGERPRINT_INVALID '64 lowercase hex characters' "$policy_fingerprint"; return 1; }
+  [[ "$hardware_fingerprint" =~ ^[0-9a-f]{64}$ ]] || { runtime_policy_verify_error HARDWARE_FINGERPRINT_INVALID '64 lowercase hex characters' "$hardware_fingerprint"; return 1; }
 
-  [[ -s compose.latticevale.yaml && ! -L compose.latticevale.yaml ]] || return 1
-  [[ -s resource-policy-report.txt && ! -L resource-policy-report.txt ]] || return 1
-  grep -Fq "Policy fingerprint: $policy_fingerprint" resource-policy-report.txt || return 1
-  grep -Fq "Hardware fingerprint: $hardware_fingerprint" resource-policy-report.txt || return 1
+  [[ -s compose.latticevale.yaml && ! -L compose.latticevale.yaml ]] || { runtime_policy_verify_error COMPOSE_OVERLAY_MISSING; return 1; }
+  [[ -s resource-policy-report.txt && ! -L resource-policy-report.txt ]] || { runtime_policy_verify_error RESOURCE_REPORT_MISSING; return 1; }
+  grep -Fq "Policy fingerprint: $policy_fingerprint" resource-policy-report.txt || { runtime_policy_verify_error RESOURCE_REPORT_POLICY_FINGERPRINT_MISMATCH "$policy_fingerprint" "$(sed -n 's/^Policy fingerprint: //p' resource-policy-report.txt | head -n1)"; return 1; }
+  grep -Fq "Hardware fingerprint: $hardware_fingerprint" resource-policy-report.txt || { runtime_policy_verify_error RESOURCE_REPORT_HARDWARE_FINGERPRINT_MISMATCH "$hardware_fingerprint" "$(sed -n 's/^Hardware fingerprint: //p' resource-policy-report.txt | head -n1)"; return 1; }
 
-  # Compose verification here is structural consumption only.  Formula correctness
-  # belongs to the canonical validator above; verify_live_resource_policy_limits()
-  # separately proves Docker consumed the effective Compose limits after user
-  # compose.override.yaml is applied last.
-  overlay="$(cat compose.latticevale.yaml 2>/dev/null)" || return 1
-  grep -q 'MALLOC_ARENA_MAX:' <<<"$overlay" || return 1
+  # Structural consumption only; formulas are owned by the canonical validator.
+  overlay="$(cat compose.latticevale.yaml 2>/dev/null)" || { runtime_policy_verify_error COMPOSE_OVERLAY_UNREADABLE; return 1; }
+  grep -q 'MALLOC_ARENA_MAX:' <<<"$overlay" || { runtime_policy_verify_error COMPOSE_OVERLAY_MALLOC_TUNING_MISSING; return 1; }
   if [[ "$(opt_bool matrix)" == true ]]; then
-    grep -q 'SYNAPSE_CACHE_FACTOR:' <<<"$overlay" || return 1
-    grep -q 'shared_buffers=' <<<"$overlay" || return 1
+    grep -q 'SYNAPSE_CACHE_FACTOR:' <<<"$overlay" || { runtime_policy_verify_error COMPOSE_OVERLAY_SYNAPSE_TUNING_MISSING; return 1; }
+    grep -q 'shared_buffers=' <<<"$overlay" || { runtime_policy_verify_error COMPOSE_OVERLAY_DATABASE_TUNING_MISSING; return 1; }
   fi
   if [[ "$(opt_bool honcho)" == true ]]; then
-    grep -q 'max_connections=200' <<<"$overlay" || return 1
-    grep -q 'shared_buffers=' <<<"$overlay" || return 1
+    grep -q 'max_connections=200' <<<"$overlay" || { runtime_policy_verify_error COMPOSE_OVERLAY_HONCHO_CONNECTION_TUNING_MISSING; return 1; }
+    grep -q 'shared_buffers=' <<<"$overlay" || { runtime_policy_verify_error COMPOSE_OVERLAY_DATABASE_TUNING_MISSING; return 1; }
   fi
   compose_selector="$(sed -n 's/^COMPOSE_FILE=//p' .env 2>/dev/null | head -n1)"
-  [[ ":$compose_selector:" == *':compose.latticevale.yaml:'* ]] || return 1
+  [[ ":$compose_selector:" == *':compose.latticevale.yaml:'* ]] || { runtime_policy_verify_error COMPOSE_SELECTOR_MISSING_OVERLAY 'contains compose.latticevale.yaml' "$compose_selector"; return 1; }
   return 0
 }
 
@@ -1229,7 +1247,21 @@ for name,cfg in (data.get("services") or {}).items():
   return 0
 }
 
+refresh_canonical_architecture_state() {
+  mkdir -p data/latticevale
+  python3 hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json || return 1
+  python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json || return 1
+}
+
 repair_runtime_policy_reconcile() {
+  # Resume/repair must refresh machine-derived state even when prepare_config has a
+  # valid checkpoint.  The README's canonical dependency chain is options -> hardware
+  # -> backend capability/health -> resource policy -> generated runtime configuration.
+  # Skipping this refresh is what allowed a stale hardware fingerprint to poison an
+  # otherwise valid same-version policy repair.
+  echo 'Refreshing canonical hardware/backend state before runtime-policy reconciliation.'
+  refresh_canonical_architecture_state || { echo 'Canonical hardware/backend refresh failed before runtime-policy reconciliation.' >&2; return 1; }
+
   [[ "$(opt_bool containerResourceLimits)" == true ]] || return 0
   if verify_adaptive_runtime_policy; then
     echo 'Adaptive runtime/RAM policy is already current.'
@@ -1237,9 +1269,9 @@ repair_runtime_policy_reconcile() {
   fi
   local accel=cpu
   if managed_ollama_enabled; then accel="$(resolve_ollama_acceleration)" || return 1; fi
-  echo 'Adaptive runtime/RAM policy is stale or incomplete; regenerating the installer-owned overlay from the CPU/RAM currently visible to WSL.'
-  write_latticevale_compose_overlay "$accel" true
-  verify_adaptive_runtime_policy || { echo 'Adaptive runtime/RAM policy regeneration completed but failed live verification.' >&2; return 1; }
+  echo 'Adaptive runtime/RAM policy is stale or incomplete; regenerating the installer-owned overlay from refreshed canonical WSL hardware state.'
+  write_latticevale_compose_overlay "$accel" true || return 1
+  verify_adaptive_runtime_policy || { echo 'Adaptive runtime/RAM policy regeneration completed but failed classified live verification; see the invariant above.' >&2; return 1; }
   # The overlay is persistent configuration, but existing containers do not consume
   # changed mem_limit/environment/command values until Compose reconciles them. Mark
   # the owning runtime stages pending so Resume / repair cannot report success with a
@@ -2003,9 +2035,9 @@ CURRENT_STAGE="startup"
 checkpoint_revision() {
   case "$1" in
     matrix_profiles|matrix_profile_cross_signing) printf '3' ;;
-    kanban_gateway) printf '4' ;;
+    kanban_gateway) printf '5' ;;
     finalize) printf '2' ;;
-    reconcile) printf '4' ;;
+    reconcile) printf '5' ;;
     integrations) printf '4' ;;
     prepare_config|infrastructure|matrix_bootstrap|provider_setup|profiles|matrix_cross_signing) printf '1' ;;
     *) printf '1' ;;
@@ -2325,6 +2357,7 @@ PY_HONCHO_ROUTE_CHECK
 }
 
 verify_infrastructure() {
+  local include_directml_host_gateway="${1:-true}"
   docker compose config --quiet >/dev/null 2>&1 || return 1
   if managed_ollama_enabled; then
     docker inspect -f '{{.State.Health.Status}}' hermes-ollama 2>/dev/null | grep -qx healthy || return 1
@@ -2339,7 +2372,7 @@ PY_NATIVE_INFRA_VERIFY
   if local_ai_enabled; then
     if ollama_text_role_enabled; then ollama_model_present "$(opt_text localTextModel)" || return 1; fi
     if [[ "$(opt_bool honcho)" == true ]]; then ollama_model_present "$(opt_text localEmbeddingModel)" || return 1; fi
-    if directml_text_enabled; then
+    if directml_text_enabled && [[ "$include_directml_host_gateway" == true ]]; then
       [[ -x ./directml-gateway.sh ]] || return 1
       timeout --foreground --kill-after=5s 40s ./directml-gateway.sh start >/dev/null || return 1
       timeout --foreground --kill-after=3s 15s ./directml-gateway.sh health >/dev/null || return 1
@@ -2558,6 +2591,64 @@ profile_gateway_is_running_exact() {
   [[ "$state" == up ]]
 }
 
+wait_profile_gateway_registered_exact() {
+  local name="$1" wait_seconds="${2:-15}" i state
+  [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]] || wait_seconds=15
+  for i in $(seq 1 "$wait_seconds"); do
+    if state="$(profile_gateway_s6_state "$name" 2>/dev/null)"; then
+      [[ "$state" == up || "$state" == down ]] && return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+register_missing_gateway_slot_exact() {
+  local name="$1" state home
+  if [[ "$name" == default ]]; then
+    home="data/hermes"
+  else
+    home="data/hermes/profiles/$name"
+  fi
+  [[ -d "$home" ]] || { echo "Cannot repair missing gateway slot '$name': persistent Hermes home '$home' is absent." >&2; return 1; }
+
+  # The Hermes s6 boot reconciler normally recreates runtime service slots from
+  # persistent profile state. Give that bounded boot-time path a chance to finish
+  # before invoking the same upstream runtime-registration API ourselves.
+  if wait_profile_gateway_registered_exact "$name" 12; then
+    return 0
+  fi
+
+  echo "Repairing missing exact Hermes s6 gateway slot 'gateway-$name' from preserved profile state." >&2
+  if ! timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent python -c '
+import sys
+from hermes_cli.service_manager import detect_service_manager, get_service_manager
+name=sys.argv[1]
+if detect_service_manager() != "s6":
+    raise SystemExit("Hermes container is not using the expected s6 service manager")
+mgr=get_service_manager()
+supports=getattr(mgr, "supports_runtime_registration", None)
+if not callable(supports) or not supports():
+    raise SystemExit("Hermes s6 manager does not support runtime gateway registration")
+mgr.register_profile_gateway(name)
+' "$name" >/dev/null 2>&1; then
+    # A boot reconciler can win the race between our absent probe and registration.
+    # Accept that only when the exact slot is now verifiably present.
+    if wait_profile_gateway_registered_exact "$name" 5; then
+      return 0
+    fi
+    echo "Hermes runtime registration failed for exact gateway slot 'gateway-$name'." >&2
+    profile_gateway_log_tail_exact "$name"
+    return 1
+  fi
+  if ! wait_profile_gateway_registered_exact "$name" 15; then
+    echo "Hermes registered 'gateway-$name' but the exact s6 slot did not become observable within the bounded repair window." >&2
+    profile_gateway_log_tail_exact "$name"
+    return 1
+  fi
+  return 0
+}
+
 wait_profile_gateway_up_exact() {
   local name="$1" wait_seconds="${2:-60}" i state consecutive_up=0 observed_state=false
   [[ "$wait_seconds" =~ ^[0-9]+$ && "$wait_seconds" -ge 1 ]] || wait_seconds=60
@@ -2605,11 +2696,15 @@ start_or_restart_profile_gateway_exact() {
     echo "Unable to determine exact s6 state for profile '$name' before gateway activation." >&2
     return 1
   fi
+  if [[ "$state" == absent ]]; then
+    register_missing_gateway_slot_exact "$name" || return 1
+    state="$(profile_gateway_s6_state "$name")" || return 1
+  fi
   case "$state" in
     up) action=restart ;;
     down) action=start ;;
     absent)
-      echo "Profile '$name' has no registered s6 gateway service. LatticeVale will not recreate or replace the profile automatically because that would risk its persisted state." >&2
+      echo "Profile '$name' exact s6 gateway slot is still absent after bounded runtime registration repair." >&2
       profile_gateway_log_tail_exact "$name"
       return 1
       ;;
@@ -2662,11 +2757,15 @@ start_or_restart_default_gateway_exact() {
     echo 'Unable to determine exact s6 state for the default gateway before activation.' >&2
     return 1
   fi
+  if [[ "$state" == absent ]]; then
+    register_missing_gateway_slot_exact default || return 1
+    state="$(profile_gateway_s6_state default)" || return 1
+  fi
   case "$state" in
     up) action=restart ;;
     down) action=start ;;
     absent)
-      echo 'Default gateway has no registered s6 service slot; refusing to guess or recreate it automatically.' >&2
+      echo 'Default gateway exact s6 slot is still absent after bounded runtime registration repair.' >&2
       profile_gateway_log_tail_exact default
       return 1
       ;;
@@ -3965,15 +4064,10 @@ while (( $(date +%s) < deadline )); do
     service_ready_for_local_repair "$service" || { all_ready=false; break; }
   done
   if [[ "$all_ready" == true ]]; then
-    # One authoritative full verification is enough. If model/endpoint state is still
-    # wrong, return immediately so the targeted repair path can act on it.
-    if verify_infrastructure; then
-      # DirectML lives on the WSL host, not in Compose. A repair that recovered all
-      # containers from local images must still recover/verify that host gateway.
-      if directml_text_enabled; then
-        timeout --foreground --kill-after=10s 120s ./directml-gateway.sh start >/dev/null || return 1
-        timeout --foreground --kill-after=3s 15s ./directml-gateway.sh health >/dev/null || return 1
-      fi
+    # Verify Docker/service infrastructure independently from the WSL-host DirectML
+    # gateway. A dead host gateway must not make healthy local containers look broken
+    # and trigger broad image pulls/builds; DirectML has its own targeted repair below.
+    if verify_infrastructure false; then
       return 0
     fi
     return 1
@@ -4000,6 +4094,35 @@ reconcile_model_aware_ollama_resources() {
   return 0
 }
 
+repair_directml_gateway() {
+  directml_text_enabled || return 0
+  if text_fallback_enabled; then
+    echo "Repairing the isolated PyTorch DirectML text gateway. Ollama text fallback policy: $(directml_fallback_policy)."
+  else
+    echo 'Repairing the isolated PyTorch DirectML text gateway with Ollama text fallback disabled (fail closed).'
+  fi
+  timeout --foreground --kill-after=20s 3900s ./directml-gateway.sh install || return 1
+  timeout --foreground --kill-after=10s 120s ./directml-gateway.sh restart || return 1
+  # A successful self-test uses DirectML or, only when explicitly configured, the
+  # durable Ollama text fallback. directmlFallbackPolicy=none remains fail closed.
+  if ! timeout --foreground --kill-after=20s 3600s ./directml-gateway.sh self-test; then
+    if text_fallback_enabled; then
+      echo 'DirectML gateway self-test failed and the configured Ollama text fallback was unavailable.' >&2
+    else
+      echo 'DirectML gateway self-test failed; Ollama text fallback is disabled, so local text inference remains fail closed.' >&2
+    fi
+    return 1
+  fi
+  # The supervisor may legitimately be completing a worker handoff after model
+  # verification. Wait for bounded readiness instead of treating one connection
+  # refusal as a terminal DirectML failure.
+  timeout --foreground --kill-after=3s 30s ./directml-gateway.sh wait-ready >/dev/null || {
+    echo 'DirectML gateway self-test returned but its health endpoint did not become ready within the bounded wait.' >&2
+    return 1
+  }
+  return 0
+}
+
 stage_infrastructure() {
 # Validate the Compose model before starting, downloading, or building anything.
 docker compose config --quiet
@@ -4010,9 +4133,14 @@ if repair_maintenance_enabled && ! repair_package_refresh_pending && [[ "${RUN_S
   echo 'Repair infrastructure: trying existing local images/builds before any network refresh.'
   if start_existing_infrastructure_for_repair; then
     echo 'Repair infrastructure recovered from existing local images; no broad image pull/build was needed.'
+    if directml_text_enabled; then
+      echo 'Docker infrastructure is healthy; repairing the WSL-host DirectML gateway independently.'
+      repair_directml_gateway || return 1
+    fi
+    verify_infrastructure || { echo 'Infrastructure changed state after local recovery; refusing to report the stage healthy.' >&2; return 1; }
     return 0
   fi
-  echo 'Existing local infrastructure did not become healthy; continuing with bounded pull/build repair for the selected components.'
+  echo 'Existing Docker/service infrastructure did not become healthy; continuing with bounded pull/build repair for the selected components.'
 fi
 
 # INSTALL ORDER: supporting infrastructure comes first. This makes selected services real and
@@ -4083,24 +4211,7 @@ if local_ai_enabled; then
     fi
   fi
 
-  if directml_text_enabled; then
-    if text_fallback_enabled; then
-      echo "Preparing the isolated PyTorch DirectML text gateway. Ollama text fallback policy: $(directml_fallback_policy)."
-    else
-      echo 'Preparing the isolated PyTorch DirectML text gateway with Ollama text fallback disabled (fail closed).'
-    fi
-    timeout --foreground --kill-after=20s 3900s ./directml-gateway.sh install || return 1
-    timeout --foreground --kill-after=10s 120s ./directml-gateway.sh restart || return 1
-    # A successful self-test uses DirectML or, only when explicitly configured, the durable Ollama text fallback.
-    if ! timeout --foreground --kill-after=20s 3600s ./directml-gateway.sh self-test; then
-      if text_fallback_enabled; then
-        echo 'DirectML gateway self-test failed and the configured Ollama text fallback was unavailable.' >&2
-      else
-        echo 'DirectML gateway self-test failed; Ollama text fallback is disabled, so local text inference remains fail closed.' >&2
-      fi
-      return 1
-    fi
-  fi
+  repair_directml_gateway || return 1
 fi
 
 infra_services=()
@@ -5696,10 +5807,11 @@ timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --n
 wait_managed_ollama_healthy 60
 for _ in $(seq 1 60); do timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 && break; sleep 2; done
 timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null
-wait_http Hermes-API http://127.0.0.1:${HERMES_API_HOST_PORT}/health 60
-if [[ "$(opt_bool dashboard)" == true ]]; then
-  wait_http Dashboard http://127.0.0.1:${DASHBOARD_HOST_PORT}/ 60
-fi
+# v14.6.1 hotfix: do not require the gateway-owned API/Dashboard surfaces here.
+# A stopped-stack repair can bring the container/CLI up before the default gateway has
+# completed its lifecycle reconciliation; gating HTTP here aborts before the exact
+# start/restart below gets a chance to restore those surfaces. The existing bounded
+# wait_hermes_gateway_surfaces barrier after the final gateway mutation is authoritative.
 
 # Recheck selected service health after final reconciliation.
 if [[ "$(opt_bool matrix)" == true ]]; then
@@ -5942,9 +6054,7 @@ return 0
 # effective only after the WSL VM restarts; recalculating here means the next normal
 # LatticeVale start automatically follows the resources WSL now exposes.
 if [[ "${1:-}" == --refresh-resource-policy ]]; then
-  mkdir -p data/latticevale
-  python3 hardware-capabilities.py --stack . --compat compatibility.conf --windows-snapshot data/latticevale/windows-hardware.json --output data/latticevale/hardware-capabilities.json || exit 1
-  python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json || exit 1
+  refresh_canonical_architecture_state || exit 1
   if [[ "$(opt_bool containerResourceLimits)" == true ]] && verify_adaptive_runtime_policy; then
     exit 0
   fi

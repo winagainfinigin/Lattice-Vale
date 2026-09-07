@@ -50,6 +50,10 @@ REASON = {
     "BACKEND_EXPLICIT_UNAVAILABLE": "BACKEND_EXPLICIT_UNAVAILABLE",
     "POLICY_BUDGET_MISMATCH": "POLICY_BUDGET_MISMATCH",
     "POLICY_FINGERPRINT_MISMATCH": "POLICY_FINGERPRINT_MISMATCH",
+    "WSL_CPU_MISMATCH": "WSL_CPU_MISMATCH",
+    "WSL_MEMORY_MISMATCH": "WSL_MEMORY_MISMATCH",
+    "HARDWARE_FINGERPRINT_MISMATCH": "HARDWARE_FINGERPRINT_MISMATCH",
+    "HARDWARE_STATE_INVALID": "HARDWARE_STATE_INVALID",
     "SCHEMA_FUTURE_VERSION": "SCHEMA_FUTURE_VERSION",
     "GENERATED_STATE_INVALID": "GENERATED_STATE_INVALID",
 }
@@ -1549,6 +1553,29 @@ def validate_runtime_policy_state(
         raise ValueError(f"runtime policy schema {version} != required {current}")
     mem = _int_state(state, "MEM_MIB", 512)
     cpus = _int_state(state, "CPUS", 1) if "CPUS" in state else 1
+
+    # Canonical resource state must be derived from the same hardware snapshot whose
+    # fingerprint it carries. This closes the former gap where Bash generated CPUS/
+    # MEM_MIB from live probes while runtime-policy.py accepted a stale hardware file.
+    if hardware is not None:
+        if not isinstance(hardware, dict):
+            raise ValueError(f"{REASON['HARDWARE_STATE_INVALID']}: hardware-capabilities.json is missing or unreadable")
+        hwfp = str(hardware.get("hardwareFingerprint") or "")
+        if not re.fullmatch(r"[0-9a-f]{64}", hwfp):
+            raise ValueError(f"{REASON['HARDWARE_STATE_INVALID']}: canonical hardware fingerprint is missing or invalid")
+        hw_wsl = hardware.get("wsl") if isinstance(hardware.get("wsl"), dict) else {}
+        hw_cpus = _nonnegative_int(hw_wsl.get("cpuCount", 0))
+        hw_mem = _nonnegative_int(hw_wsl.get("memoryMiB", 0))
+        if hw_cpus < 1 or hw_mem < 512:
+            raise ValueError(f"{REASON['HARDWARE_STATE_INVALID']}: canonical WSL CPU/RAM envelope is invalid")
+        if cpus != hw_cpus:
+            raise ValueError(f"{REASON['WSL_CPU_MISMATCH']}: expected {hw_cpus}, found {cpus}")
+        if mem != hw_mem:
+            raise ValueError(f"{REASON['WSL_MEMORY_MISMATCH']}: expected {hw_mem}, found {mem}")
+        state_hwfp = str(state.get("HARDWARE_FINGERPRINT") or "")
+        if state_hwfp != hwfp:
+            raise ValueError(f"{REASON['HARDWARE_FINGERPRINT_MISMATCH']}: expected {hwfp}, found {state_hwfp or '<missing>'}")
+
     accel = state.get("OLLAMA_ACCELERATION", "cpu")
     managed = state.get("MANAGED_OLLAMA_SELECTED", "false") == "true" if "MANAGED_OLLAMA_SELECTED" in state else True
     directml = state.get("DIRECTML_SELECTED", "false") == "true"

@@ -9,7 +9,13 @@ For a `PASS`, complete the temporary second-device challenge when prompted. Open
 The installer does not rewrite tailnet-wide Admin Console DNS policy. If another device reports DNS unavailable, repair the tailnet/client DNS configuration and rerun Resume / repair.
 
 
-## v14.6.0 schema-23 local-AI choices
+## v14.6.1 existing-install convergence
+
+For a recognized older installer-managed stack, cumulative migration is not tied only to Option 1. Mutating Options **1, 2, 4, 5, and 6** first perform the required preservation-first migration, then continue with their own purpose. Option **3 (Verify)** and Option **8 (Diagnostics / compatibility)** remain read-only, while Option **7 (Cleanup / reclaim)** remains an isolated bounded maintenance path. **Resume / repair** is still the recommended general recovery choice.
+
+Same-version Resume / repair also treats stale canonical runtime-policy state, transient DirectML gateway readiness, and missing ephemeral Hermes s6 gateway slots as recoverable installer-owned drift when the underlying preserved configuration is intact.
+
+## v14.6.1 current schema-23 local-AI choices (inherited from v14.6.0)
 
 Local-AI setup now records whether GPU acceleration is wanted before backend selection. CPU-only is fully supported. DirectML users explicitly choose native-Windows Ollama fallback, managed WSL/Docker Ollama fallback, or no text fallback. These choices are durable and are preserved during Resume / repair. Honcho embeddings can use Ollama independently of the DirectML text-fallback choice.
 
@@ -25,7 +31,7 @@ The installer preserves these boundaries:
 - explicit confirmation before installation-changing actions;
 - user-owned `compose.override.yaml` is applied last and remains opaque to the installer planner.
 
-## 14.6.0 generated-state architecture
+## v14.6.1 generated-state architecture (inherited from v14.6.0)
 
 Durable user intent remains in `install-options.json`. Machine-derived state is generated separately under `data/latticevale/`:
 

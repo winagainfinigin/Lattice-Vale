@@ -387,10 +387,25 @@ supervise_gateway() {
   cleanup() { stop_worker; rm -f "$supervisor_pid_file"; log_msg 'DirectML gateway supervisor stopped'; exit 0; }
   trap cleanup TERM INT HUP
   log_msg "DirectML gateway supervisor started pid=$$"
-  local failures=0 delay=5
+  local failures=0 delay=5 health_misses=0
   while [[ ! -e "$disabled_file" ]]; do
-    if ! owned_worker_pid >/dev/null 2>&1 || ! probe_health >/dev/null 2>&1; then
-      if start_worker; then
+    if ! owned_worker_pid >/dev/null 2>&1; then
+      health_misses=0
+    elif probe_health >/dev/null 2>&1; then
+      health_misses=0
+      sleep 15
+      continue
+    else
+      health_misses=$((health_misses+1))
+      if (( health_misses < 2 )); then
+        log_msg 'DirectML health probe missed once while worker is still alive; rechecking before replacement'
+        sleep 2
+        continue
+      fi
+      log_msg 'DirectML health probe missed twice while worker remained alive; replacing worker'
+      health_misses=0
+    fi
+    if start_worker; then
         failures=0; delay=5
       else
         failures=$((failures+1))
@@ -407,7 +422,6 @@ supervise_gateway() {
         fi
         continue
       fi
-    fi
     sleep 15
   done
   cleanup
@@ -518,6 +532,7 @@ case "${1:-status}" in
   supervise) supervise_gateway ;;
   self-test) self_test ;;
   health) probe_health ;;
+  wait-ready) wait_ready ;;
   host) docker_host_gateway_ip ;;
   base-url)
     host="$(docker_host_gateway_ip)" || exit 1
@@ -566,5 +581,5 @@ PY_DIAG_DML
       exit 1
     fi
     ;;
-  *) echo 'Usage: ./directml-gateway.sh {install|start|stop|restart|supervise|self-test|health|host|base-url|diagnose|status}' >&2; exit 2 ;;
+  *) echo 'Usage: ./directml-gateway.sh {install|start|stop|restart|supervise|self-test|health|wait-ready|host|base-url|diagnose|status}' >&2; exit 2 ;;
 esac

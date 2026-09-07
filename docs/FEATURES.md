@@ -1,5 +1,13 @@
 # LatticeVale v14.6.1 — Complete Features and Install Options Reference
 
+## v14.6.1 repair-convergence and eight-option continuity
+
+- Same-version repair refreshes canonical hardware/backend-derived state before runtime-policy reconciliation, so stale fingerprints/CPU/RAM policy cannot survive behind an older completed checkpoint.
+- DirectML host-gateway recovery is isolated from healthy Docker infrastructure; `/health` remains responsive during model-load locking, the supervisor confirms misses before replacement, and installer self-test uses bounded readiness convergence.
+- Missing ephemeral Hermes `gateway-default` / profile s6 slots can be re-registered from preserved profile state through Hermes' runtime service-manager API instead of forcing profile recreation.
+- For recognized older stacks, mutating Options **1, 2, 4, 5, and 6** perform cumulative preservation-first migration before their mode-specific action. Options **3** and **8** remain read-only; Option **7** remains isolated cleanup.
+- The deterministic contract is **144 fixtures** across six shards, including the same-version runtime-policy/DirectML repair regression and the v14.5.2/v14.6.0 eight-option continuity baseline.
+
 ## v14.6.0 schema-23 / policy-13 additions
 
 - Durable GPU acceleration opt-in/opt-out, including supported CPU-only local inference.

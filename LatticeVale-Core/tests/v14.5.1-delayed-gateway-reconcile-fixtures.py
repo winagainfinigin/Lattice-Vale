@@ -84,6 +84,92 @@ rm -f "$calls"
 r = subprocess.run(['bash', '-c', mock], capture_output=True, text=True)
 assert r.returncode == 0, (r.stdout, r.stderr)
 
+# Same-version Resume/repair must recover an ephemeral missing s6 slot from the
+# preserved Hermes profile instead of treating runtime supervisor registration as
+# irreplaceable user data. Upstream Hermes exposes register_profile_gateway() for
+# this exact purpose.
+for text in (cfg, manage):
+    assert 'register_missing_gateway_slot_exact' in text
+    assert 'register_profile_gateway(name)' in text
+assert 'Default gateway has no registered s6 service slot; refusing to guess or recreate it automatically.' not in cfg
+assert 'Default gateway has no exact s6 service slot; Matrix runtime cannot be reconciled safely.' not in manage
+assert "reconcile) printf '5'" in cfg
+assert "kanban_gateway) printf '5'" in cfg
+
+# Execute the production registration helper against a fake Docker CLI. The slot is
+# initially absent; the exact upstream registration call makes it present without
+# touching profile files, and the helper verifies the exact slot afterward.
+reg_start = cfg.index('wait_profile_gateway_registered_exact() {')
+reg_end = cfg.index('\nwait_profile_gateway_up_exact() {', reg_start)
+reg_helpers = cfg[reg_start:reg_end]
+mock = r'''set -e
+slot=$(mktemp); calls=$(mktemp)
+printf 'absent\n' > "$slot"
+profile_gateway_s6_state() { cat "$slot"; }
+profile_gateway_log_tail_exact() { :; }
+sleep() { :; }
+docker() {
+  printf '%s\n' "$*" >> "$calls"
+  case "$*" in
+    *"python -c"*" default") printf 'down\n' > "$slot"; return 0 ;;
+  esac
+  return 0
+}
+timeout() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --foreground) shift ;;
+      --kill-after=*) shift ;;
+      [0-9]*s) shift; break ;;
+      *) break ;;
+    esac
+  done
+  "$@"
+}
+''' + reg_helpers + r'''
+mkdir -p data/hermes
+register_missing_gateway_slot_exact default
+grep -q 'python -c' "$calls"
+grep -q ' default$' "$calls"
+[ "$(cat "$slot")" = down ]
+rm -rf data/hermes "$slot" "$calls"
+'''
+r = subprocess.run(['bash', '-c', mock], capture_output=True, text=True)
+assert r.returncode == 0, (r.stdout, r.stderr)
+
+# Exercise the installer default-gateway repair branch: exact state begins absent,
+# registration recreates only the s6 slot, then normal Hermes lifecycle starts it.
+start = cfg.index('start_or_restart_default_gateway_exact() {')
+end = cfg.index('\nwait_profile_gateway_down_exact() {', start)
+default_func = cfg[start:end]
+mock = r'''set -e
+gateway_state=absent
+calls=$(mktemp)
+profile_gateway_s6_state() { printf '%s\n' "$gateway_state"; }
+register_missing_gateway_slot_exact() { gateway_state=down; printf '%s\n' "register:$1" >> "$calls"; }
+wait_profile_gateway_up_exact() { return 0; }
+profile_gateway_log_tail_exact() { :; }
+docker() { printf '%s\n' "$*" >> "$calls"; return 0; }
+timeout() {
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --foreground) shift ;;
+      --kill-after=*) shift ;;
+      [0-9]*s) shift; break ;;
+      *) break ;;
+    esac
+  done
+  "$@"
+}
+''' + default_func + r'''
+start_or_restart_default_gateway_exact
+grep -q '^register:default$' "$calls"
+grep -q 'hermes gateway start' "$calls"
+rm -f "$calls"
+'''
+r = subprocess.run(['bash', '-c', mock], capture_output=True, text=True)
+assert r.returncode == 0, (r.stdout, r.stderr)
+
 for f in ('configure-stack.sh', 'manage.sh'):
     r = subprocess.run(['bash', '-n', str(ROOT / 'stack' / f)], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr

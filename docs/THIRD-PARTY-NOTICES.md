@@ -1,8 +1,8 @@
 # Third-party notices
 
-> **Current release: v14.6.0.** This file distinguishes first-party LatticeVale source from separately obtained upstream runtimes, images, models, drivers, and services. The 14.6.0 architecture/documentation consolidation adds no bundled opaque third-party artifact.
+> **Current release: v14.6.1.** This file distinguishes first-party LatticeVale source from separately obtained upstream runtimes, images, models, drivers, and services. v14.6.1 retains the v14.6.0 canonical architecture and adds only first-party installer/repair, validation, regression, and documentation hardening; it adds no bundled opaque third-party artifact.
 
-v14.6.0 adds no redistributed third-party binary, model, GPU driver, container image archive, or hosted service. Its canonical hardware/backend/resource architecture is first-party source and consumes the same separately obtained WSL, DirectML, CUDA, ROCm, Vulkan, Docker/Ollama, and native-Windows interfaces already documented below. Historical v13 documentation remains repository-only under the release-content policy and does not alter third-party licensing.
+v14.6.1 adds no redistributed third-party binary, model, GPU driver, container image archive, or hosted service. It inherits the v14.6.0 canonical hardware/backend/resource architecture and consumes the same separately obtained WSL, DirectML, CUDA, ROCm, Vulkan, Docker/Ollama, and native-Windows interfaces already documented below. Historical v13 documentation remains repository-only under the release-content policy and does not alter third-party licensing.
 
 v14.5.47 adds no redistributed third-party binary, model, GPU driver, or Vulkan runtime. It reuses the existing WSL DirectX bridge/torch-directml path and may pass an already-present WSL `/dev/dri` device to the standard pinned Ollama image with Vulkan enabled. NVIDIA Container Toolkit and AMD ROCm behavior remain as previously documented. Windows/vendor display drivers remain separately obtained and licensed.
 

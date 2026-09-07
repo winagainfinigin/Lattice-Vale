@@ -19,8 +19,12 @@ assert 'normal starting state' in helper
 stage=cfg[cfg.index('stage_reconcile()'):cfg.index('stage_kanban_gateway()')]
 compose='docker compose up -d --pull never --no-build --remove-orphans'
 assert stage.index(compose) < stage.index('wait_managed_ollama_healthy 60') < stage.index('hermes --version')
-assert 'wait_http Dashboard http://127.0.0.1:${DASHBOARD_HOST_PORT}/ 60' in stage
 assert 'wait_matrix_backend_from_hermes 60' in stage
+restart=stage.index('start_or_restart_default_gateway_exact')
+post=stage.rindex("wait_hermes_gateway_surfaces 'reconcile gateway restart' 60")
+assert 'wait_http Hermes-API' not in stage[:restart]
+assert 'wait_http Dashboard' not in stage[:restart]
+assert restart < post
 
 verify=cfg[cfg.index('verify_reconcile()'):cfg.index('verify_kanban_gateway()')]
 assert "managed Ollama is not healthy" in verify
@@ -29,8 +33,8 @@ for component in ('Hermes CLI','Hermes API','Dashboard','SearXNG','QMD','Honcho 
     assert component in verify, component
 
 checkpoint=cfg[cfg.index('checkpoint_revision()'):cfg.index('matrix_profile_activation_pending()')]
-assert "reconcile) printf '4'" in checkpoint
-assert "kanban_gateway) printf '4'" in checkpoint  # v14.4.85 final candidate advances the final gateway lifecycle stage too.
+assert "reconcile) printf '5'" in checkpoint
+assert "kanban_gateway) printf '5'" in checkpoint  # v14.4.85 final candidate advances the final gateway lifecycle stage too.
 
 # Execute the bounded Ollama waiter with a mocked Docker health sequence. This proves
 # normal 'starting' is tolerated and eventually succeeds, while terminal 'unhealthy'

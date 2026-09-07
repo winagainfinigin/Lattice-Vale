@@ -56,4 +56,4 @@ Generated architecture documents include schema, architecture version, generatio
 
 ## Compatibility
 
-14.6.0 migrates recognized managed 14.x installations through Resume / repair. Durable historical option names remain understood for migration. Future schemas fail closed. User/application data, persistent identities, and explicit overrides remain preservation-first.
+v14.6.1 inherits the v14.6.0 canonical architecture and migrates recognized managed 14.x installations preservation-first. For older recognized stacks, cumulative migration precedes mutating Options 1, 2, 4, 5, and 6; Options 3 and 8 remain read-only, while Option 7 remains isolated cleanup. Durable historical option names remain understood for migration. Future schemas fail closed. User/application data, persistent identities, and explicit overrides remain preservation-first.

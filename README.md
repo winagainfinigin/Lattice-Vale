@@ -585,7 +585,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.5.45** | Prior install release | PowerShell 7.6 generic-collection compatibility hotfix; v14.5.44 DirectML preflight retained |
 | **v14.5.46** | Prior install release | GPU-aware backend recommendation plus selected-path prerequisite reuse/provisioning; all v14.5.42-v14.5.45 safety and repair behavior retained |
 | **v14.5.47** | Prior install release | DirectML adapter/VRAM recovery, fingerprinted fallback retry, read-only GPU diagnostics, and verified managed-Ollama Vulkan fallback |
-| **v14.6.0** | **Current install release** | Canonical hardware/backend/resource architecture, adaptive cross-vendor qualification, structured diagnostics, schema-21/schema-22 migration to schema 23, durable GPU opt-out, and conserved CPU allocation |
+| **v14.6.0** | Prior install release | Canonical hardware/backend/resource architecture, adaptive cross-vendor qualification, structured diagnostics, schema-21/schema-22 migration to schema 23, durable GPU opt-out, and conserved CPU allocation |
+| **v14.6.1** | **Current install release** | Preservation-first eight-option migration continuity, same-version canonical runtime-policy repair, bounded/nonblocking DirectML readiness, exact Hermes s6 gateway-slot recovery, and hardened Matrix/Tailscale remote validation |
 
 ### v14.4.1
 

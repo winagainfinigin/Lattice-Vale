@@ -1,6 +1,6 @@
 # GitHub repository and release packaging
 
-This document describes the LatticeVale **v14.6.0** repository/release contract for GitHub.
+This document describes the LatticeVale **v14.6.1** repository/release contract for GitHub.
 
 ## Repository structure
 
@@ -29,16 +29,16 @@ The publishable full release must:
 
 ## Repository patched-files ZIP
 
-The patched-files archive is for updating a **source checkout**, not a live `~/hermes-stack`. It must also use the single `Lattice-Vale/` root and contain only changed/new repository files relative to the corrected v14.5.47 baseline, plus any files needed to make the patch self-describing. Deletions, if ever required, must be represented by the repository's explicit delete-list mechanism rather than path tricks.
+The patched-files archive is for updating a **source checkout**, not a live `~/hermes-stack`. It must also use the single `Lattice-Vale/` root and contain only changed/new repository files relative to the declared parent release (v14.6.0 for v14.6.1), plus any files needed to make the patch self-describing. Deletions, if ever required, must be represented by the repository's explicit delete-list mechanism rather than path tricks.
 
 Installed LatticeVale systems must use the full release and **Resume / repair installation** so backups, ownership checks, schema migration, derived-state regeneration, and checkpoint reconciliation run normally.
 
 ## Pre-publication checks
 
-Before publishing v14.6.0:
+Before publishing v14.6.1:
 
 - version/schema/policy/fixture-count documentation must agree with source;
-- all 142 deterministic fixtures and both resume simulations must pass in their supported environments;
+- all 144 deterministic fixtures and both resume simulations must pass in their supported environments;
 - Bash/Python/static checks and Windows PowerShell parse/manifest checks must pass in CI;
 - `installer/SOURCE-SHA256SUMS.txt` must be regenerated after the final source/documentation change;
 - both ZIPs must have the required `Lattice-Vale/` root, valid CRCs, portable paths, no duplicate/case-colliding members, and byte-for-byte source equivalence; and

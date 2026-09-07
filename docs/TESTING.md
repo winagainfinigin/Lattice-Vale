@@ -1,6 +1,6 @@
 # LatticeVale 14.6.1 Test Confidence Levels
 
-## v14.6.0 policy-13 release additions
+## v14.6.1 current contract (inheriting v14.6.0 policy-13 architecture)
 
 The canonical architecture fixture includes a **3,328-case** CPU/backend/service-topology property sweep (13 CPU counts × 4 acceleration modes × 64 service/DirectML topologies), irregular RAM/resource sweeps, explicit boundary probes around host-reserve floor/ratio/cap transitions, GPU opt-out, DirectML fail-closed fallback, schema-21→23 and schema-22→23 migration, and aggregate CPU conservation. DirectML fixtures prohibit `torch.inference_mode()` and require `torch.no_grad()`, require the fail-closed fallback helper to exist, require bounded gateway diagnostics on a failed HTTP self-test, and require the version-gated Qwen2 `torch.where` compatibility path. The regression runner isolates each fixture in its own process group so descendants cannot retain CI pipes.
 
@@ -15,6 +15,6 @@ A lower level does not claim proof of a higher one. `docs/WINDOWS-INTEGRATION-TE
 
 ## Current deterministic contract
 
-v14.6.0 requires exactly **142 deterministic fixtures** across six shards, plus both resume simulations, static architecture checks, source-manifest/release-policy verification, and contamination rejection. Resource-policy fixtures sweep irregular/boundary CPU/RAM/model/GPU inputs and assert invariants; they do not target a specific machine topology.
+v14.6.1 requires exactly **144 deterministic fixtures** across six shards, plus both resume simulations, static architecture checks, source-manifest/release-policy verification, and contamination rejection. The two v14.6.1 additions cover same-version canonical runtime-policy/DirectML repair convergence and cross-version continuity for all eight installer options (v14.5.2 Options 1-7 plus the v14.6.0 Option 8 baseline). Resource-policy fixtures sweep irregular/boundary CPU/RAM/model/GPU inputs and assert invariants; they do not target a specific machine topology.
 
 Current GPU/backend regression coverage must include: DirectML with zero Linux-native Ollama adapters; missing `torch_directml.gpu_memory()` with canonical Windows capacity fallback; >4 GiB devices where legacy 32-bit telemetry is only a lower bound; UMA/shared-memory admission across irregular WSL RAM envelopes; same-name multi-GPU stable-ID selection; a generic non-named-vendor DirectX 12 adapter; transient DirectML failure that activates fallback without changing the policy fingerprint; CUDA/ROCm/Vulkan auto paths; forced-backend fail-closed behavior; and CPU-only qualification. A named physical test PC may appear as an example fixture but must never be a production policy branch or exact resource target.

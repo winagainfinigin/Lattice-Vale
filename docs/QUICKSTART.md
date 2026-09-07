@@ -29,7 +29,7 @@ For an existing installer-managed LatticeVale stack, use the **full current rele
 
 ## 4. GPU/backend behavior
 
-14.6.0 separates durable user preference from derived capability state. The installer records Windows hardware into a derived snapshot, WSL probes its own live devices, and the canonical backend engine classifies DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU independently. A missing Linux-native GPU does not automatically invalidate WSL-host DirectML. DirectML memory admission uses runtime capacity when available, otherwise bounded canonical Windows adapter evidence; unknown capacity fails safely to fallback rather than loading an unbounded model.
+v14.6.1 retains the v14.6.0 separation of durable user preference from derived capability state. The installer records Windows hardware into a derived snapshot, WSL probes its own live devices, and the canonical backend engine classifies DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU independently. A missing Linux-native GPU does not automatically invalidate WSL-host DirectML. DirectML memory admission uses runtime capacity when available, otherwise bounded canonical Windows adapter evidence; unknown capacity fails safely to fallback rather than loading an unbounded model.
 
 See [GPU-BACKENDS.md](GPU-BACKENDS.md) for the capability model and [RESOURCE-POLICY.md](RESOURCE-POLICY.md) for memory admission.
 

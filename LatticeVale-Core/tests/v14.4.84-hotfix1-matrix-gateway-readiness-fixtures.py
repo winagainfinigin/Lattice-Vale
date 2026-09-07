@@ -56,8 +56,8 @@ kanban=cfg[cfg.index('stage_kanban_gateway()'):cfg.index('stage_finalize()')]
 assert 'ensure_matrix_online 60' in kanban
 assert 'wait_matrix_backend_from_hermes 60' in kanban
 checkpoint=cfg[cfg.index('checkpoint_revision()'):cfg.index('matrix_profile_activation_pending()')]
-assert "kanban_gateway) printf '4'" in checkpoint
-assert "reconcile) printf '4'" in checkpoint  # v14.4.85 retains revision 4 for both lifecycle stages; Hotfix 1 ordering remains covered.
+assert "kanban_gateway) printf '5'" in checkpoint
+assert "reconcile) printf '5'" in checkpoint  # v14.4.85 advances to revision 5 for both lifecycle stages; Hotfix 1 ordering remains covered.
 
 # Audit must stop claiming RUNNING when only the gateway process is alive.
 assert 'matrix_backend_reachable_from_hermes' in audit

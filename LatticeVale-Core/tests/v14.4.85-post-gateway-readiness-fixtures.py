@@ -12,8 +12,12 @@ stage=cfg[cfg.index('stage_reconcile()'):cfg.index('stage_kanban_gateway()')]
 restart=stage.index('start_or_restart_default_gateway_exact')
 post=stage.rindex("wait_hermes_gateway_surfaces 'reconcile gateway restart' 60")
 assert restart < post
-assert stage.index('wait_http Hermes-API') < restart < post
-assert stage.index('wait_http Dashboard') < restart < post
+# v14.6.1 hotfix: API/Dashboard are gateway-owned surfaces. A stopped-stack repair
+# must not gate on them before the default gateway start/restart that restores them.
+pre=stage[:restart]
+assert 'wait_http Hermes-API' not in pre
+assert 'wait_http Dashboard' not in pre
+assert restart < post
 assert post > stage.index('wait_http Honcho')
 
 kanban=cfg[cfg.index('stage_kanban_gateway()'):cfg.index('stage_finalize()')]
@@ -25,8 +29,8 @@ assert 'DASHBOARD_HOST_PORT' in verify
 assert 'matrix_backend_ready_from_hermes' in verify
 
 checkpoint=cfg[cfg.index('checkpoint_revision()'):cfg.index('matrix_profile_activation_pending()')]
-assert "reconcile) printf '4'" in checkpoint
-assert "kanban_gateway) printf '4'" in checkpoint
+assert "reconcile) printf '5'" in checkpoint
+assert "kanban_gateway) printf '5'" in checkpoint
 
 for marker in (
     "wait_hermes_gateway_surfaces_manage 'stack start/gateway reconciliation'",

@@ -11,7 +11,7 @@ Installer-owned `.tailscale-info` also records `TAILSCALE_IPV4`, `WINDOWS_DNS_ST
 
 Canonical diagnostics expose `gpuAccelerationEnabled`, `directmlFallbackPolicy`, fallback-enabled/fail-closed state, and the conserved CPU envelope. Resource-policy state includes `CPU_SYSTEM_HEADROOM_MILLI`, `CPU_DIRECTML_RESERVE_MILLI`, `CPU_DOCKER_ENVELOPE_MILLI`, and `CPU_DOCKER_ALLOCATED_MILLI`; audit rejects mismatched or overcommitted values.
 
-14.6.0 separates diagnostic evidence by layer so one failed GPU API is not reported as "no GPU" for every backend.
+v14.6.1 retains the v14.6.0 layered diagnostic model so one failed GPU API is not reported as "no GPU" for every backend.
 
 ## Installer diagnostics
 

@@ -6,7 +6,7 @@ The installer asks **Use GPU acceleration?**. Choosing No is a durable CPU-only 
 
 ## Capability model
 
-14.6.0 does not equate "a GPU exists" with "a backend works." It records Windows GPU identity separately from WSL-visible device/runtime capability and classifies each inference route independently.
+v14.6.1 retains the v14.6.0 rule that "a GPU exists" does not mean "a backend works." It records Windows GPU identity separately from WSL-visible device/runtime capability and classifies each inference route independently.
 
 | Route | Minimum topology signal | Runtime proof |
 |---|---|---|
@@ -25,7 +25,7 @@ Microsoft supports PyTorch with DirectML inside WSL2 on supported Windows 11 bui
 
 The managed DirectML environment is isolated under the LatticeVale stack and pins the tested PyTorch/torch-directml/Transformers envelope. A system-wide Python or CUDA wheel is not used as runtime proof for the managed gateway. The installer first performs a real DirectML tensor operation, then a model-generation self-test before marking DirectML healthy.
 
-Transformers 4.46.3 Qwen2/Qwen2.5 uses causal-mask operations that have failed on torch-directml despite a successful basic tensor probe. v14.6.0 applies a narrowly scoped process-local compatibility shim for that pinned Qwen2 path, replacing the problematic in-place boolean multiplication/`masked_fill` construction with equivalent `torch.where` operations. The shim is version-gated, does not patch upstream files on disk, and is not keyed to AMD, NVIDIA, Intel, Qualcomm, a GPU model name, or a fixed PC configuration. Other models remain subject to the normal model self-test and fail/fallback policy.
+Transformers 4.46.3 Qwen2/Qwen2.5 uses causal-mask operations that have failed on torch-directml despite a successful basic tensor probe. v14.6.1 retains the narrowly scoped process-local compatibility shim introduced in v14.6.0 for that pinned Qwen2 path, replacing the problematic in-place boolean multiplication/`masked_fill` construction with equivalent `torch.where` operations. The shim is version-gated, does not patch upstream files on disk, and is not keyed to AMD, NVIDIA, Intel, Qualcomm, a GPU model name, or a fixed PC configuration. Other models remain subject to the normal model self-test and fail/fallback policy.
 
 ## DirectML memory admission
 
