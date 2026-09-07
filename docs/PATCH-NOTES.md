@@ -1,4 +1,22 @@
 # Current v14.6.1 patch notes
+- Same-version Resume / repair reconstructs a missing exact Hermes s6 gateway slot from preserved profile state through the upstream runtime registration API, then verifies and starts only that slot; no profile recreation or credential rewrite is used. Reconcile/final gateway checkpoint revisions advance to 5.
+
+### v14.6.1 hotfix — canonical runtime-policy and DirectML repair convergence
+- Resume / repair refreshes canonical hardware/backend-derived state before runtime-policy reconciliation even when `prepare_config` remains checkpoint-complete.
+- Runtime-policy generation consumes canonical hardware CPU/RAM, canonical validation rejects CPU/RAM/hardware-fingerprint drift, and post-write verification emits classified expected/actual diagnostics.
+- DirectML-only host-gateway failure is repaired independently from healthy Docker infrastructure, preventing unnecessary broad pull/build recovery while preserving `directmlFallbackPolicy=none` fail-closed behavior.
+- DirectML `/health` no longer waits on the model-load lock, so long first-load inference cannot make a healthy gateway look dead to its supervisor.
+- The DirectML supervisor confirms a live worker health miss before replacement, and installer repair uses bounded readiness after self-test instead of a one-shot health probe.
+- Corrects the DirectML HTTP `Server` header to report the current 14.6.1 gateway version.
+- Adds the dedicated v14.6.1 repair regression plus an eight-option cross-version baseline gate and raises the deterministic contract to 144 fixtures.
+
+## v14.6.1 hotfix — stopped-stack Hermes API reconcile ordering
+
+- Keeps the release identity at **14.6.1**.
+- Fixes Resume / repair of a fully configured but stopped stack where `hermes-agent` and the Hermes CLI become available before the default gateway-owned API/Dashboard surfaces are ready.
+- Removes the premature pre-gateway `Hermes-API`/Dashboard HTTP gate from `stage_reconcile`. The installer now reaches the exact default-gateway start/restart first, then uses the existing bounded `wait_hermes_gateway_surfaces` barrier as the authoritative API/Dashboard readiness check.
+- This prevents a circular failure where repair aborted on `http://127.0.0.1:8642/health` before the lifecycle action that restores that endpoint could execute.
+
 
 ## v14.6.1 live Matrix/Tailscale repair convergence hotfix
 
@@ -22,7 +40,7 @@
 - Validates the public Matrix versions endpoint, exact client well-known base URL, and login-flow endpoint before preserving the Serve mapping.
 - Rolls the installer-owned Matrix Serve mapping and Synapse public base URL back when client-path validation fails.
 - Leaves authentication ownership unchanged: no MAS deployment/migration, `server_name` change, or Matrix-ID rewrite is introduced by this hotfix.
-- Retains schema 23, policy 13, managed-refresh revision 4, and 142 deterministic fixtures.
+- Retains schema 23, policy 13, managed-refresh revision 4, and 143 deterministic fixtures.
 
 ## v14.6.0 same-version schema-23 / policy-13 completion
 

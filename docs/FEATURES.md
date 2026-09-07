@@ -25,7 +25,7 @@
 > **v14.5.43 universal repair migration:** the full installer can directly repair/migrate any older recognized installer-managed stack without intermediate releases. It proves ownership, checks version/schema/downgrade safety, takes a verified rollback backup, refreshes installer-owned files and managed pins, replays cumulative checkpoint migrations, and regenerates policy v11. Same-version repair stays local-first; unrecognized/corrupt stacks fail closed.
 > **Migration preservation rule:** v14.5.43 introduced cumulative preservation-first migration. v14.6.0 normalizes recognized historical/versionless durable choices to current schema 23 while application/user state is preserved; legacy managed Ollama with no acceleration setting remains safely adoptable as explicit CPU rather than being silently switched to GPU.
 > **v14.5.42 hardware-resource policy v11:** WSL RAM and CPU profiles, per-GPU NVIDIA/AMD VRAM inventory, single-GPU-first/multi-GPU-spread model-fit planning, GPU-aware context, `OLLAMA_GPU_OVERHEAD`, shared DirectML/Ollama VRAM coordination, lower GPU-backed CPU quota, and bounded `ollama ps` offload proof with safe Auto CPU fallback.
-> **v14.5.42 canonical-policy diagnostics:** one finalized resource object drives Compose/state/audit; separate hardware and policy SHA-256 fingerprints plus secret-free `resource-policy-report.txt` explain exactly why each CPU/RAM/VRAM/context limit was chosen. v14.5.42 used a six-shard 135-fixture deterministic suite; v14.5.43 extended that contract to 136 fixtures; v14.5.44 extended it to 137 fixtures; v14.5.45 extended it to 138 fixtures; v14.5.46 extended it to 139 fixtures; v14.5.47 extended it to 140 fixtures; current v14.6.1 retains the deterministic contract to 142 fixtures with canonical-architecture and release-content-policy gates.
+> **v14.5.42 canonical-policy diagnostics:** one finalized resource object drives Compose/state/audit; separate hardware and policy SHA-256 fingerprints plus secret-free `resource-policy-report.txt` explain exactly why each CPU/RAM/VRAM/context limit was chosen. v14.5.42 used a six-shard 135-fixture deterministic suite; v14.5.43 extended that contract to 136 fixtures; v14.5.44 extended it to 137 fixtures; v14.5.45 extended it to 138 fixtures; v14.5.46 extended it to 139 fixtures; v14.5.47 extended it to 140 fixtures; current v14.6.1 extends the deterministic contract to 144 fixtures with canonical-architecture and release-content-policy gates.
 
 > **v14.5.4 local-AI hardening:** DirectML adds developer-managed dedicated-VRAM admission, context reduction, low-memory model loading, and automatic Ollama fallback; WSL allocations of 12 GiB or less use a tighter supporting-service profile while preserving the Hermes safety floor.
 
@@ -684,11 +684,13 @@ These prompts are intended to prevent LatticeVale from silently taking ownership
 
 ---
 
-# 5. Existing-install menu — all seven modes
+# 5. Existing-install menu — all eight modes
 
 Lifecycle shortcuts in v14.4.84 invoke `./manage.sh start|stop` directly with WSL `--cd`; repair treats older/broken shortcut runtime contracts as drift and rewrites them. Before using **Resume / repair installation** or **Update / repair installer-managed software**, use **Shut Down LatticeVale** to stop the managed stack if the shortcut is available. Do not use targeted `wsl --terminate`. If v14.4.84 detects the installer-owned legacy targeted-termination helper, the repair run performs its own bounded global WSL shutdown + `WslService` transport reset before replacing the helper.
 
-When a recognized installer-managed stack exists, LatticeVale offers seven top-level modes.
+When a recognized installer-managed stack exists, LatticeVale offers eight top-level modes.
+
+For a proven older managed stack whose saved version/schema requires cumulative migration, every **mutating** choice—Options **1, 2, 4, 5, and 6**—first performs the same verified preservation-first migration to the current schema and managed layer, then continues with that option's own semantics. Options **3, 7, and 8** remain read-only or isolated maintenance and do not migrate the stack. This keeps the v14.5.2 option roles intact while preventing a non-Option-1 mutating path from operating on only-partially-migrated durable state.
 
 ## 5.1 Resume / repair installation
 
@@ -816,6 +818,10 @@ Safety invariants are enforced both by the installer and the bundle-owned cleanu
 A recognized managed installation that is below the ordinary managed-repair free-space requirement may still enter Option 3 Verify or Option 7 Cleanup. Options 1/2/4/5/6 remain storage-gated until enough host-partition space is available. A fresh or unrecognized stack cannot use that exception.
 
 TRIM advertises already-freed filesystem blocks to the virtual-disk layer but is not treated as a promise that the Windows-visible VHDX file length will shrink immediately. Windows-side VHDX compaction/move/resize remains outside Option 7.
+
+## 5.8 Diagnostics / compatibility test
+
+Read-only Windows + WSL + GPU/backend + stack compatibility diagnostics. Option 8 stages the **current bundle's** `state-audit.py`, canonical architecture library, compatibility contract, and a fresh Windows hardware snapshot into a temporary WSL directory, runs the audit against the existing stack, prints the Windows GPU/backend plan plus persistent-install verification, removes the temporary staging, and exits. It does not migrate schemas, rewrite installer-owned configuration, restart services, reconcile containers, update packages/images/source, or modify application data. This makes Option 8 useful even when diagnosing a pre-14.6 managed stack before deciding which mutating repair mode to run.
 
 ---
 

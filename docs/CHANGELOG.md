@@ -1,4 +1,19 @@
 # Changelog
+- Same-version Resume / repair reconstructs a missing exact Hermes s6 gateway slot from preserved profile state through the upstream runtime registration API, then verifies and starts only that slot; no profile recreation or credential rewrite is used. Reconcile/final gateway checkpoint revisions advance to 5.
+
+### v14.6.1 hotfix — canonical runtime-policy and DirectML repair convergence
+- Resume / repair refreshes canonical hardware/backend-derived state before runtime-policy reconciliation even when `prepare_config` remains checkpoint-complete.
+- Runtime-policy generation consumes canonical hardware CPU/RAM, canonical validation rejects CPU/RAM/hardware-fingerprint drift, and post-write verification emits classified expected/actual diagnostics.
+- DirectML-only host-gateway failure is repaired independently from healthy Docker infrastructure, preventing unnecessary broad pull/build recovery while preserving `directmlFallbackPolicy=none` fail-closed behavior.
+- DirectML `/health` no longer waits on the model-load lock, so long first-load inference cannot make a healthy gateway look dead to its supervisor.
+- The DirectML supervisor confirms a live worker health miss before replacement, and installer repair uses bounded readiness after self-test instead of a one-shot health probe.
+- Corrects the DirectML HTTP `Server` header to report the current 14.6.1 gateway version.
+- Adds the dedicated v14.6.1 repair regression plus an eight-option cross-version baseline gate and raises the deterministic contract to 144 fixtures.
+
+### v14.6.1 hotfix — stopped-stack Hermes API reconcile ordering
+- Resume / repair no longer requires Hermes API/Dashboard readiness before the default gateway lifecycle reconciliation that restores those surfaces.
+- The existing post-gateway bounded readiness barrier remains authoritative, preserving strict health verification without the pre-restart circular failure.
+
 
 ## 14.6.1 - 2026-09-06
 
@@ -23,7 +38,7 @@
 - Adds strict public `/.well-known/matrix/client` validation and requires `m.homeserver.base_url` to match the selected Tailscale HTTPS URL exactly (normalizing the trailing slash).
 - Verifies the Matrix login endpoint exposes at least one login flow before retaining the installer-owned Serve mapping. A failed client-path check disables that mapping and rolls Synapse `public_baseurl` back to localhost.
 - Leaves authentication ownership unchanged: this hotfix does not add or migrate Matrix Authentication Service (MAS), change `server_name`, or rewrite existing Matrix user IDs.
-- Retains installer-options schema 23, runtime-policy schema 13, managed-refresh revision 4, and the 142-fixture deterministic release contract.
+- Retains installer-options schema 23, runtime-policy schema 13, managed-refresh revision 4, and the 143-fixture deterministic release contract.
 
 ### v14.6.0 same-version schema-23 / policy-13 completion
 

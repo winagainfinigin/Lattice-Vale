@@ -10,7 +10,7 @@ V14.5.44 DIRECTML PREFLIGHT HOTFIX: DirectML selection now uses a dedicated dire
 
 RESOURCE POLICY DIAGNOSTIC: after a successful v14.6.0 install/repair with adaptive limits enabled, `~/hermes-stack/resource-policy-report.txt` is the secret-free human-readable explanation of canonical policy v13. It records RAM/CPU class, managed-Ollama acceleration/offload verification, GPU topology/VRAM coordination, context/model floor, generated CPU/RAM limits, and hardware/policy fingerprints. `./manage.sh audit` independently recomputes the fingerprints and verifies live Docker ceilings.
 
-EXISTING INSTALLS / UNIVERSAL REPAIR MIGRATION: run the full v14.6.0 installer directly and choose Resume / repair installation. For any older recognized installer-managed stack, v14.6.0 inherits and extends the v14.5.43 migration engine: it proves ownership, detects historical version/schema state, creates a verified rollback backup, installs the current installer-owned management layer, replays required cumulative migrations, refreshes current managed pins, and regenerates canonical hardware/backend state plus resource policy v13. No intermediate LatticeVale version is required. Unrecognized/corrupt stacks and repair downgrades fail closed. Same-version repair remains local-first.
+EXISTING INSTALLS / CUMULATIVE REPAIR MIGRATION: run the full v14.6.1 installer directly. Resume / repair installation remains the recommended general recovery path. For any older recognized installer-managed stack, v14.6.1 inherits and extends the v14.5.43 migration engine: it proves ownership, detects historical version/schema state, creates a verified rollback backup, installs the current installer-owned management layer, replays required cumulative migrations, refreshes current managed pins, and regenerates canonical hardware/backend state plus resource policy v13. No intermediate LatticeVale version is required. Unrecognized/corrupt stacks and repair downgrades fail closed. Same-version repair remains local-first. If an older proven stack requires migration, any mutating managed-stack choice (Options 1, 2, 4, 5, or 6) performs that same preservation-first cumulative migration before continuing with its own role; Options 3, 7, and 8 remain non-mutating.
 
 V14.5.42 HARDWARE RESOURCE POLICY UPDATE: Managed WSL/Docker Ollama now uses resource policy v11 with compact/balanced/large RAM profiles, CPU profiles, per-GPU NVIDIA/AMD VRAM topology, GPU-aware context, shared DirectML/Ollama VRAM coordination, and runtime GPU-offload verification. Auto-selected GPU acceleration that actually runs on CPU is re-budgeted safely; explicitly forced GPU acceleration fails closed when offload cannot be proven. Native Windows Ollama remains user-owned.
 
@@ -162,6 +162,17 @@ When a managed stack is detected the installer offers:
 
 6. Update / repair installer-managed software
    Use a newer LatticeVale bundle to immediately apply that bundle's tested/declared installer-managed package/image/source versions. A verified bundle-owned pre-update safety backup must succeed before the forced refresh starts; it does not depend on the currently installed manage.sh and runs only that backup transaction as WSL root so container-owned persistent files can be preserved safely.
+
+7. Cleanup / reclaim disk space
+   Isolated, confirmation-gated storage maintenance for a recognized managed stack. You may remove only verified LatticeVale Option 6 backups for the current stack, stale installer staging, APT download cache, Docker dangling images, Docker dangling default-builder cache, and/or TRIM unused root-filesystem blocks. Cleanup exits without running normal repair stages and does not delete live containers, networks, volumes, tagged images, configured models, persistent application data, credentials, vault/workspace data, or the WSL VHDX.
+
+8. Diagnostics / compatibility test
+   Read-only Windows + WSL + GPU/backend + stack diagnostics. The current bundle temporarily stages its canonical validator and fresh Windows hardware snapshot for the audit, then removes that temporary staging and exits. It does not migrate, repair, restart, update, or rewrite the persistent installation.
+
+Cross-version migration rule:
+- If a proven older managed stack needs a schema migration, Options 1, 2, 4, 5, and 6 first perform the same verified cumulative preservation-first migration, then continue with the selected option's normal semantics.
+- Options 3, 7, and 8 remain non-mutating and do not migrate the stack.
+- Same-version repair stays local-first unless the normal managed-refresh age/revision/legacy-state trigger or explicit Option 6 requires refresh.
 
 If you are unsure and simply need to recover a managed installation, choose option 1.
 

@@ -6816,7 +6816,7 @@ switch ($stackState) {
         }
         Write-Info "Detected managed-install metadata: version=$($repairOriginInfo.OriginVersion), options schema=$($repairOriginInfo.OriginSchema)."
         if ($repairOriginInfo.NeedsMigration) {
-            Write-Warning "This installation predates the current v$bundleVersion repair schema. Choosing Resume / repair will perform a cumulative migration directly to this release; no intermediate LatticeVale installer is required."
+            Write-Warning "This installation predates the current v$bundleVersion repair schema. Any mutating managed-stack choice (Options 1, 2, 4, 5, or 6) will first perform the same cumulative preservation-first migration to this release; Options 3, 7, and 8 remain read-only or isolated maintenance and do not migrate the stack. No intermediate LatticeVale installer is required."
         }
         Write-Step 'Existing installation audit'
         $auditText = Invoke-BundledStackAudit $DistroName $linuxUser $linuxHome
@@ -6834,16 +6834,7 @@ switch ($stackState) {
             'Diagnostics / compatibility test - read-only Windows + WSL + GPU/backend + stack verification; make no changes'
         )
         switch ($modeChoice) {
-            1 {
-                $installMode = 'resume'
-                if ($repairOriginInfo -and $repairOriginInfo.NeedsMigration) {
-                    $universalRepairMigration = $true
-                    $forceManagedUpdate = $true
-                    Write-Host "`nCUMULATIVE REPAIR MIGRATION" -ForegroundColor Cyan
-                    Write-Info "Resume / repair will migrate the proven managed stack from $($repairOriginInfo.OriginVersion) / schema $($repairOriginInfo.OriginSchema) directly to v$bundleVersion / schema $($repairOriginInfo.CurrentSchema)."
-                    Write-Info 'Before managed software/source refresh, LatticeVale will create the same verified rollback backup used by controlled Update / repair. Persistent application state and user-owned overrides remain preservation-first.'
-                }
-            }
+            1 { $installMode = 'resume' }
             2 {
                 $installMode = 'change'
                 Write-Host "`nSAFE CHANGE MODE" -ForegroundColor Yellow
@@ -6984,7 +6975,31 @@ switch ($stackState) {
                 exit 0
             }
         }
-        if (-not $selectedDistro.ManagedRepairEligible -and $installMode -in @('resume','change','reconfigure','advanced','update')) {
+
+        # v14.6.1 hotfix: cumulative migration is a property of an older proven managed
+        # stack plus a mutating operation, not a special privilege of Option 1.  This
+        # preserves the v14.5.2 option semantics while allowing Options 2/4/5/6 to be
+        # chosen directly against an older stack without running current schema/stages
+        # over partially migrated durable state.  Verify/Cleanup/Diagnostics exit above
+        # and intentionally remain non-mutating.
+        $mutatingManagedModes = @('resume','change','reconfigure','advanced','update')
+        if ($repairOriginInfo -and $repairOriginInfo.NeedsMigration -and $installMode -in $mutatingManagedModes) {
+            $universalRepairMigration = $true
+            $forceManagedUpdate = $true
+            $modeName = switch ($installMode) {
+                'resume' { 'Resume / repair' }
+                'change' { 'Change installed components' }
+                'reconfigure' { 'Reconfigure providers/profiles' }
+                'advanced' { 'Advanced recovery' }
+                'update' { 'Update / repair installer-managed software' }
+                default { $installMode }
+            }
+            Write-Host "`nCUMULATIVE MANAGED-STACK MIGRATION" -ForegroundColor Cyan
+            Write-Info "$modeName will first migrate the proven managed stack from $($repairOriginInfo.OriginVersion) / schema $($repairOriginInfo.OriginSchema) directly to v$bundleVersion / schema $($repairOriginInfo.CurrentSchema), then continue with the selected mode's normal semantics."
+            Write-Info 'Before installer-managed software/source refresh, LatticeVale will create the same verified rollback backup used by controlled Update / repair. Persistent application state, identities, credentials, and explicit user-owned overrides remain preservation-first.'
+        }
+
+        if (-not $selectedDistro.ManagedRepairEligible -and $installMode -in $mutatingManagedModes) {
             throw "The selected LatticeVale host partition is below the supported managed-repair storage floor. Rerun the installer and choose Cleanup / reclaim disk space (Option 7), or Verify installation only (Option 3). No mutating repair/update work was started."
         }
     }
@@ -8288,8 +8303,8 @@ if (-not $homeWritableProbe.Success) {
 }
 
 if ($forceManagedUpdate) {
-    Write-Step $(if ($universalRepairMigration) { 'Creating cumulative repair-migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })
-    $backupReason = if ($universalRepairMigration) { 'Cumulative Resume / repair migration requires a verified rollback backup before installer-managed software is refreshed.' } else { 'Update / repair requires a verified rollback backup before installer-managed software is refreshed.' }
+    Write-Step $(if ($universalRepairMigration) { 'Creating cumulative managed-stack migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })
+    $backupReason = if ($universalRepairMigration) { 'Cumulative managed-stack migration requires a verified rollback backup before installer-managed software is refreshed.' } else { 'Update / repair requires a verified rollback backup before installer-managed software is refreshed.' }
     Write-Info "$backupReason This bundle supplies its own backup helper so a broken/outdated installed manage.sh cannot block the repair that would replace it."
     Write-Info 'The helper runs as WSL root only for this backup operation so container-owned persistent files can be read safely, dumps running Synapse/Honcho PostgreSQL databases, briefly stops only currently-running LatticeVale containers for a consistent filesystem snapshot, archives persistent configuration/data (including local Ollama data when present), restores the previously-running containers, and returns backup ownership to the selected Linux user.'
 

@@ -37,19 +37,24 @@ assert '$universalRepairMajor -lt 0 -or $universalRepairMajor -gt 99' in ps
 assert '$repairOriginInfo.NewerThanBundle' in ps
 assert '$repairOriginInfo.Supported' in ps
 
-# Resume/repair is the cumulative upgrader only when saved metadata is stale.
-resume = ps[ps.index("1 {\n                $installMode = 'resume'"):ps.index("            2 {", ps.index("1 {\n                $installMode = 'resume'"))]
-assert '$repairOriginInfo.NeedsMigration' in resume
-assert '$universalRepairMigration = $true' in resume
-assert '$forceManagedUpdate = $true' in resume
-assert 'no intermediate LatticeVale installer is required' in ps
+# A stale proven managed stack is migrated before every mutating existing-install mode,
+# not only Option 1.  This lets users go directly from an older release into Change,
+# Reconfigure, Advanced recovery, or Update/repair without running current schemas over
+# partially migrated durable state. Verify/Cleanup/Diagnostics remain non-mutating.
+assert "$mutatingManagedModes = @('resume','change','reconfigure','advanced','update')" in ps
+assert '$repairOriginInfo.NeedsMigration -and $installMode -in $mutatingManagedModes' in ps
+assert '$universalRepairMigration = $true' in ps
+assert '$forceManagedUpdate = $true' in ps
+assert 'Options 1, 2, 4, 5, or 6' in ps
+assert 'Options 3, 7, and 8 remain read-only or isolated maintenance and do not migrate the stack' in ps
+assert 'No intermediate LatticeVale installer is required' in ps
 
 # The cumulative migration uses the existing verified pre-update rollback backup before
 # any managed software/source refresh, and then stages current bundle-owned files.
 backup_pos = ps.index("if ($forceManagedUpdate) {")
 bootstrap_pos = ps.index("Write-Step 'Bootstrapping Docker and the selected LatticeVale stack inside Ubuntu'")
 assert backup_pos < bootstrap_pos
-assert 'Creating cumulative repair-migration safety backup' in ps
+assert 'Creating cumulative managed-stack migration safety backup' in ps
 assert 'pre-update-safety-backup.sh' in ps
 
 # Old pre-v14.2 managed Ollama state gets an explicit CPU policy during universal repair.
@@ -84,12 +89,12 @@ assert '-s "$stack_dir/.install-info"' in bootstrap
 assert '-f "$stack_dir/.configured"' in bootstrap
 
 # Same-version repair remains local-first: forceManagedUpdate is initialized false and
-# only migration/update paths set it true.
+# only explicit update or proven older-stack migration paths set it true.
 assert '$forceManagedUpdate = $false' in ps
 assert 'Between refresh windows it remains local-first and is not a blanket update.' in ps
 
 print('v14.5.43 UNIVERSAL REPAIR MIGRATION FIXTURES: PASS')
-print('- any recognized prior-version proven managed stacks can migrate directly through Resume / repair')
+print('- any recognized prior-version proven managed stack migrates before Options 1/2/4/5/6')
 print('- older bundle downgrade is rejected')
 print('- cumulative migration forces rollback backup + managed refresh')
 print('- legacy Ollama resource ownership normalizes safely to the current CPU policy')

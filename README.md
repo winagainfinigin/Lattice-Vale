@@ -1,9 +1,19 @@
 # LatticeVale v14.6.1
 
-> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.1 release** and choose **Resume / repair installation**. v14.6.1 inherits the v14.6.0 canonical hardware/backend/resource architecture and adds Matrix/Tailscale client-discovery validation plus true second-device remote-access validation. No intermediate release is required.
+> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.1 release**. **Resume / repair installation** remains the recommended general recovery path, while every mutating managed-stack choice (Options 1, 2, 4, 5, and 6) now performs the same preservation-first cumulative migration first when an older schema requires it. Options 3, 7, and 8 remain non-mutating. v14.6.1 inherits the v14.6.0 canonical hardware/backend/resource architecture and adds Matrix/Tailscale client-discovery validation plus true second-device remote-access validation. No intermediate release is required.
 
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
+
+## v14.6.1 — same-version runtime-policy / DirectML repair convergence hotfix
+
+A same-version **Resume / repair** run now refreshes canonical WSL hardware and backend-derived state before runtime-policy reconciliation even when the older `prepare_config` checkpoint is still valid. Runtime-policy generation consumes CPU/RAM only from that canonical hardware snapshot, and canonical validation rejects CPU, RAM, or hardware-fingerprint disagreement with classified diagnostics instead of the former opaque post-write failure.
+
+DirectML recovery is also isolated from Docker infrastructure recovery: a stopped or unhealthy WSL-host DirectML gateway no longer makes otherwise healthy local Docker services trigger broad image pull/build repair. LatticeVale repairs the installer-owned DirectML environment/gateway independently and preserves `directmlFallbackPolicy=none` as fail-closed. Existing profiles, Matrix identities, Honcho data, Obsidian, Tailscale configuration, provider settings, and other persistent data remain preservation-first.
+
+The deterministic release contract is now **144 fixtures**, including the exact 3-CPU / ~9946-MiB WSL / RX 6700 XT DirectML repair regression plus a cross-version eight-option baseline regression anchored to v14.5.2 (Options 1-7) and v14.6.0 (Option 8).
+
+**Same-version gateway-slot repair hardening:** Resume / repair now treats a missing `/run/service/gateway-default` or installer-managed `/run/service/gateway-<profile>` directory as recoverable ephemeral s6 supervisor state. LatticeVale first allows Hermes' boot reconciler a bounded registration window, then uses Hermes' own `S6ServiceManager.register_profile_gateway()` API to recreate only the exact missing slot from the preserved profile and verifies that slot before normal start/restart. Persistent profile files, Matrix identities, credentials, sessions, and provider configuration are not recreated or rewritten. The `reconcile` and final `kanban_gateway` checkpoint revisions advance to 5 so existing same-version installs replay this corrected lifecycle path.
 
 ## v14.6.1 — Matrix/Tailscale client-discovery validation hotfix
 

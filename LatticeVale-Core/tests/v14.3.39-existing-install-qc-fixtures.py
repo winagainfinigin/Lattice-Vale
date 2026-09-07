@@ -52,7 +52,7 @@ assert 'cp -a data/hermes/platforms/matrix/store "$recovery_dir/matrix-store"' i
 assert '[[ ! -e .matrix-identity-rebuild-pending ]] || return 1' in cfg
 
 # Update/repair must back up before the Linux staging/bootstrap path begins.
-backup_idx=ps.index("Write-Step $(if ($universalRepairMigration) { 'Creating cumulative repair-migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })")
+backup_idx=ps.index("Write-Step $(if ($universalRepairMigration) { 'Creating cumulative managed-stack migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })")
 stage_idx=ps.index('$stageLinux = "/tmp/$stageName"', backup_idx)
 assert backup_idx < stage_idx
 backup_block=ps[backup_idx:stage_idx]

@@ -15,9 +15,9 @@ assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','
 
 # The release runner is deterministic, sharded, and refuses generated tree contamination.
 for token in (
-    'EXPECTED_FIXTURE_COUNT = 142', '("01-core", 1, 25)', '("02-installer", 26, 50)',
+    'EXPECTED_FIXTURE_COUNT = 144', '("01-core", 1, 25)', '("02-installer", 26, 50)',
     '("03-repair-update", 51, 75)', '("04-resource-policy", 76, 100)',
-    '("05-gpu-directml", 101, 120)', '("06-release", 121, 142)',
+    '("05-gpu-directml", 101, 120)', '("06-release", 121, 144)',
     'PYTHONDONTWRITEBYTECODE', '__pycache__', '.pyc', '.pyo', '.tmp', '.bak', '.swp',
     '.DS_Store', 'Thumbs.db', 'skipped": 0',
 ):
@@ -78,7 +78,7 @@ for line in (
 ):
     assert line in cfg
 assert '127.0.0.1:${HERMES_API_HOST_PORT:-8642}:8642' in compose
-assert 'wait_http Hermes-API http://127.0.0.1:${HERMES_API_HOST_PORT}/health 60' in cfg
+assert "wait_hermes_gateway_surfaces 'reconcile gateway restart' 60" in cfg
 assert 'check_http Hermes-API http://127.0.0.1:${HERMES_API_HOST_PORT}/health' in manage
 assert 'API_SERVER_CORS_ORIGINS' in cfg and 'remove_env_keys data/hermes/.env API_SERVER_CORS_ORIGINS' in cfg
 assert 'remove_env_keys secrets/hermes-runtime.env API_SERVER_ENABLED API_SERVER_HOST API_SERVER_PORT API_SERVER_KEY' in cfg
