@@ -910,7 +910,6 @@ install -m 0644 -o "$linux_uid" -g "$linux_gid" \
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/Dockerfile.qmd" "$stack_dir/Dockerfile.qmd"
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
-install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/compatibility.conf" "$stack_dir/compatibility.conf"
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/latticevale_arch.py" "$stack_dir/latticevale_arch.py"

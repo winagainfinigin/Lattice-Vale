@@ -1,9 +1,12 @@
 # LatticeVale v14.6.2 audit
 
+> **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
+
+
 ## v14.6.2 managed-upstream delta audit
 
-The current v14.6.2 release retains the qualified v14.6.1 canonical architecture and adds latest-supported managed-upstream resolution: Option 6 forces the resolver, due/revision-triggered Option 1 uses the same resolver, stateful majors and the DirectML ABI remain compatibility-bounded, explicit overrides remain user-owned, and exact resolved image/source identity is recorded for diagnostics and rollback.
-Managed-refresh revision **5** is the current compatibility trigger, and the deterministic contract is **145 fixtures**. QMD uses its upstream `--host` support at the stable npm channel; the retired v2.5.3 listener source patch is removed from current release content.
+The current v14.6.2 Hotfix release retains the qualified v14.6.1 canonical architecture and adds latest-supported managed-upstream resolution: Option 6 forces the resolver, due/revision-triggered Option 1 uses the same resolver, stateful majors and the DirectML ABI remain compatibility-bounded, explicit overrides remain user-owned, and exact resolved image/source identity is recorded for diagnostics and rollback.
+Managed-refresh revision **5** is the current compatibility trigger, and the deterministic contract is **146 fixtures**. QMD uses its upstream `--host` support at the stable npm channel; the retired v2.5.3 listener source patch is removed from current release content.
 
 
 > **Policy-13 audit gate:** verify `useGpuAcceleration` and `directmlFallbackPolicy` survive Resume / repair; verify DirectML `none` never creates/retains a forced-Ollama marker; verify `torch.no_grad()` is used instead of `torch.inference_mode()`; and verify the sum of all enabled Docker CPU quotas never exceeds `CPU_DOCKER_ENVELOPE_MILLI`. The canonical regression sweep covers 3,328 CPU/backend/service-topology combinations plus irregular RAM envelopes.

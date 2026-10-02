@@ -1,4 +1,7 @@
-## v14.6.2 latest-supported upstream source policy
+## v14.6.2 Hotfix latest-supported upstream source policy
+
+> **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
+
 
 LatticeVale no longer treats its own release bundle as the permanent application-version authority. When a managed refresh is due or Option 6 is selected, installer-owned Hermes, Synapse, SearXNG, Ollama, and QMD resolve through stable upstream channels; installer-owned Honcho resolves the newest stable semantic-version tag from the official `plastic-labs/honcho` origin. Stateful database/cache services remain on compatible major channels (PostgreSQL 16, pgvector/PG15, Redis 8, Valkey 8), and the WSL DirectML Python environment remains a tested PyTorch/torch-directml/Transformers compatibility envelope rather than floating each ABI-sensitive package independently. Explicit user-owned image/source overrides are preserved. After successful pull/build/reconciliation, LatticeVale records exact image IDs/digests, Honcho commit/tag/origin, selected channels, and the DirectML requirements hash in `data/latticevale/managed-upstreams.json`.
 

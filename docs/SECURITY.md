@@ -1,4 +1,7 @@
-## v14.6.2 managed-upstream security boundary
+## v14.6.2 Hotfix managed-upstream security boundary
+
+> **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
+
 
 Latest-supported refresh does not broaden LatticeVale's ownership of persistent data or secrets. Only installer-owned software/image/source references are advanced automatically; explicit custom refs remain user-owned. Option 6 still fails closed if the verified pre-update safety backup fails. Stateful database/cache majors and the DirectML ABI do not float across incompatible boundaries, and exact pulled/built artifact identity is recorded for audit/rollback. QMD now uses its upstream `--host` CLI instead of source rewriting.
 

@@ -19,7 +19,8 @@ if (-not (Test-Path -LiteralPath $Verifier -PathType Leaf)) { throw "Release ver
 if (-not (Test-Path -LiteralPath $CoreUninstaller -PathType Leaf)) { throw "Core uninstaller not found: $CoreUninstaller" }
 if (-not (Test-Path -LiteralPath $VersionFile -PathType Leaf)) { throw "Version file not found: $VersionFile" }
 $ReleaseVersion = (Get-Content -LiteralPath $VersionFile -Raw).Trim()
-Write-Host "LatticeVale v$ReleaseVersion uninstaller" -ForegroundColor Cyan
+$ReleaseDisplayVersion = if ($ReleaseVersion -eq '14.6.2') { '14.6.2 Hotfix' } else { $ReleaseVersion }
+Write-Host "LatticeVale v$ReleaseDisplayVersion uninstaller" -ForegroundColor Cyan
 Write-Host "Core uninstaller: $CoreUninstaller"
 Write-Host 'The uninstaller source is plain text and can be inspected before execution.'
 

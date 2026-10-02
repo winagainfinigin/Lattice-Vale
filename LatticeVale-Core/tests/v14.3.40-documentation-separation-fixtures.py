@@ -2,13 +2,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 version = (ROOT / "LatticeVale-Core" / "VERSION.txt").read_text(encoding="ascii").strip()
+display_version = f'{version} Hotfix' if version == '14.6.2' else version
 instructions = (ROOT / "docs" / "Instructions.txt").read_text(encoding="utf-8")
 description = (ROOT / "docs" / "Installer Description.txt").read_text(encoding="utf-8")
 changelog = (ROOT / "docs" / "CHANGELOG.md").read_text(encoding="utf-8")
 
 assert version in {"14.3.40", "14.3.41","14.3.42","14.3.43","14.4.0","14.4.1","14.4.2","14.4.3","14.4.4","14.4.5","14.4.6","14.4.7","14.4.8","14.4.81","14.4.82","14.4.83","14.4.84","14.4.85","14.5.0","14.5.1","14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}
-assert instructions.startswith(f"LATTICEVALE v{version} — INSTRUCTIONS")
-assert description.startswith(f"LATTICEVALE v{version} — INSTALLER DESCRIPTION")
+assert instructions.startswith(f"LATTICEVALE v{display_version} — INSTRUCTIONS")
+assert description.startswith(f"LATTICEVALE v{display_version} — INSTALLER DESCRIPTION")
 assert "procedural operator guide" in instructions
 assert "plain-language capability and configuration guide" in description
 assert "EXISTING INSTALL — CHOOSE THE CORRECT MODE" in instructions

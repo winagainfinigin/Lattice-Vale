@@ -1,4 +1,7 @@
-LATTICEVALE v14.6.2 — INSTRUCTIONS
+LATTICEVALE v14.6.2 Hotfix — INSTRUCTIONS
+
+v14.6.2 HOTFIX: fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an install command immediately before compatibility.conf, causing GNU install to report that the destination was not a directory. No schema, data-layout, managed-update-policy, database-major, DirectML/PyTorch compatibility, or explicit-override behavior changes. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
+
 
 > **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
@@ -258,7 +261,7 @@ Use installer option 4 when you want the installer to rerun provider/profile set
 8A. RAM / ADAPTIVE RESOURCE POLICY
 ================================================================================
 
-If you selected adaptive CPU/RAM ceilings, current v14.6.2 uses canonical resource policy v13. The audit measures CPUs actually available to the WSL process using the same effective semantics as `nproc`, while RAM fingerprint comparison uses the current WSL-visible allocation. These are per-stack ceilings/tuning defaults; they do not write or replace host-wide WSL memory policy.
+If you selected adaptive CPU/RAM ceilings, current v14.6.2 Hotfix uses canonical resource policy v13. The audit measures CPUs actually available to the WSL process using the same effective semantics as `nproc`, while RAM fingerprint comparison uses the current WSL-visible allocation. These are per-stack ceilings/tuning defaults; they do not write or replace host-wide WSL memory policy.
 
 Policy v13 has no fixed host-RAM band table and no machine/model-specific tuning branch. The canonical architecture library derives host reserve, DirectML WSL-host reserve, total container budget, CPU quotas, service-memory water filling, model/context/concurrency limits, GPU coordination, and allocator/PostgreSQL/Synapse tuning from live WSL CPU/RAM plus enabled services, actual model information, selected backend, and measured GPU/UMA capability. Generation, verification, diagnostics, repair planning, and state audit consume the same canonical calculations.
 
@@ -299,7 +302,7 @@ LatticeVale can provision Synapse, the default bot, and selected named-profile b
 
 If a named profile remains pending after installation, use the exact matrix-profile-finish procedure in section 6. Do not rebuild an identity simply because activation is pending.
 
-If exposing Matrix through Windows Tailscale, verify the Tailscale client is signed in and that your tailnet ACLs/grants permit only the access you intend. During current v14.6.2 setup/repair, complete the one-time second-device validation when prompted: open the generated private Tailscale HTTPS URL on the phone or other peer you will actually use remotely (cellular is preferred for the strongest external-path check) and enter the displayed token back into the installer. PASS requires that current-run second-device proof; skipping it reports PARTIAL, while DNS, transport, TLS, Serve, relay, or Matrix failures report FAIL with the corresponding category.
+If exposing Matrix through Windows Tailscale, verify the Tailscale client is signed in and that your tailnet ACLs/grants permit only the access you intend. During current v14.6.2 Hotfix setup/repair, complete the one-time second-device validation when prompted: open the generated private Tailscale HTTPS URL on the phone or other peer you will actually use remotely (cellular is preferred for the strongest external-path check) and enter the displayed token back into the installer. PASS requires that current-run second-device proof; skipping it reports PARTIAL, while DNS, transport, TLS, Serve, relay, or Matrix failures report FAIL with the corresponding category.
 
 ================================================================================
 11. OLLAMA / LOCAL AI

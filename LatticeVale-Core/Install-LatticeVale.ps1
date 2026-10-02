@@ -20,7 +20,7 @@ function Start-LatticeValeRemoteAccessLog {
         New-Item -ItemType Directory -Path $base -Force | Out-Null
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $script:RemoteAccessLogPath = Join-Path $base "remote-access-$stamp.log"
-        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.2 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.2 Hotfix remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
         return $script:RemoteAccessLogPath
     } catch {
         $script:RemoteAccessLogPath = ''
@@ -6742,7 +6742,8 @@ $bundleVersion = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION.txt
 if ($bundleVersion -notmatch '^[A-Za-z0-9._-]{1,64}$') {
     throw "VERSION.txt contains an invalid installer version identifier: '$bundleVersion'"
 }
-Write-Info "Installer bundle version: $bundleVersion"
+$bundleDisplayVersion = if ($bundleVersion -eq '14.6.2') { '14.6.2 Hotfix' } else { $bundleVersion }
+Write-Info "Installer bundle version: $bundleDisplayVersion"
 
 $wslInfo = Get-WslCapabilities
 $selectedDistro = Select-ExistingUbuntuDistro $DistroName $wslInfo.DistroNames

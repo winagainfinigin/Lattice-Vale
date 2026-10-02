@@ -1,4 +1,7 @@
-## v14.6.2 architecture support
+## v14.6.2 Hotfix architecture support
+
+> **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
+
 
 > **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
@@ -32,11 +35,11 @@ GPU recommendation is advisory. If runtime tensor/offload/model-admission checks
 
 ## v14.5.45 PowerShell 7.6 compatibility support
 
-If an older v14.5.44 checkout fails after DirectML preflight with `Argument types do not match`, upgrade the repository/full installer to the current v14.6.2 release. v14.5.45 introduced the underlying PowerShell compatibility fix. Do not require users to hand-edit PowerShell source or downgrade PowerShell. v14.5.45 removes the unsafe generic `New-Object` collection pattern repository-wide.
+If an older v14.5.44 checkout fails after DirectML preflight with `Argument types do not match`, upgrade the repository/full installer to the current v14.6.2 Hotfix release. v14.5.45 introduced the underlying PowerShell compatibility fix. Do not require users to hand-edit PowerShell source or downgrade PowerShell. v14.5.45 removes the unsafe generic `New-Object` collection pattern repository-wide.
 
 ## v14.5.44 DirectML preflight support note
 
-If the installer previously claimed `/dev/dxg` was missing even though `ls -l /dev/dxg` succeeded inside the selected WSL2 distro, use the full **v14.6.2** installer. v14.5.44 introduced the dedicated DirectML preflight fix inherited by current releases. DirectML now probes that path directly, retries as root, and reports D3D12/DXCore bridge libraries separately. A probe failure is no longer labeled as confirmed DXG absence. If an installer-owned DirectML venv already exists, repair also performs a real tensor probe; a failed environment remains Ollama-fallback capable and repair retries the DirectML environment.
+If the installer previously claimed `/dev/dxg` was missing even though `ls -l /dev/dxg` succeeded inside the selected WSL2 distro, use the full **v14.6.2 Hotfix** installer. v14.5.44 introduced the dedicated DirectML preflight fix inherited by current releases. DirectML now probes that path directly, retries as root, and reports D3D12/DXCore bridge libraries separately. A probe failure is no longer labeled as confirmed DXG absence. If an installer-owned DirectML venv already exists, repair also performs a real tensor probe; a failed environment remains Ollama-fallback capable and repair retries the DirectML environment.
 
 ## v14.5.43 universal repair-migration support note
 
@@ -55,7 +58,7 @@ For resource-policy troubleshooting, inspect `~/hermes-stack/resource-policy-rep
 
 ## v14.5.4 DirectML / low-memory support note
 
-DirectML is optional and experimental. Current v14.6.2 keeps fail-closed model admission, but capacity no longer depends on a single `torch_directml` memory API. The selected adapter is correlated to canonical Windows hardware evidence; high-confidence dedicated-memory sources are preferred, legacy 32-bit values can only fill gaps as lower bounds, and UMA/shared-memory adapters receive a WSL-RAM-bounded admission ceiling. The default DirectML percentage remains bounded and may be reduced when a resource-relevant managed-Ollama GPU path shares the same adapter/vendor envelope. If capacity cannot be bounded safely, DirectML refuses model placement and Ollama remains the text fallback; Honcho embeddings remain on Ollama. Rerun the full **v14.6.2** installer and choose Resume / repair to refresh the isolated DirectML environment, hardware/backend state, and policy v13. Existing installations are not switched to DirectML automatically.
+DirectML is optional and experimental. Current v14.6.2 keeps fail-closed model admission, but capacity no longer depends on a single `torch_directml` memory API. The selected adapter is correlated to canonical Windows hardware evidence; high-confidence dedicated-memory sources are preferred, legacy 32-bit values can only fill gaps as lower bounds, and UMA/shared-memory adapters receive a WSL-RAM-bounded admission ceiling. The default DirectML percentage remains bounded and may be reduced when a resource-relevant managed-Ollama GPU path shares the same adapter/vendor envelope. If capacity cannot be bounded safely, DirectML refuses model placement and Ollama remains the text fallback; Honcho embeddings remain on Ollama. Rerun the full **v14.6.2 Hotfix** installer and choose Resume / repair to refresh the isolated DirectML environment, hardware/backend state, and policy v13. Existing installations are not switched to DirectML automatically.
 
 There is no supported "one-size" WSL RAM target. Policy v13 adapts from the CPU/RAM allocation WSL actually exposes, enabled services, selected model artifacts/context, backend type, and GPU/UMA capacity evidence. Genuinely impossible service/model combinations fail with an actionable safety message rather than being forced into a machine-specific low-memory profile.
 

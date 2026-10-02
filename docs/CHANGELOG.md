@@ -1,5 +1,13 @@
 # Changelog
 
+## 14.6.2 Hotfix — 2026-10-01
+
+- Fixes the original v14.6.2 Linux bootstrap staging typo: a duplicated `install -m 0644 ... \` prefix before the `compatibility.conf` copy caused GNU `install` to interpret the destination as a directory and abort repair/update staging.
+- Adds a dedicated regression that checks the exact copy stanza and `bash -n` syntax.
+- Retains the v14.6.2 latest-supported managed software policy, schema 23, refresh policy revision 5, persistent data, user overrides, database-major constraints, and PyTorch/DirectML compatibility envelope unchanged.
+- Existing installations that already created a verified pre-update backup can apply the hotfix and rerun Resume / repair or Update / repair; no uninstall or data reset is required.
+
+
 > **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Deterministic, sharded LatticeVale regression-suite runner.
 
-The release contract is intentionally explicit: v14.6.2 ships 145 deterministic
+The release contract is intentionally explicit: v14.6.2 Hotfix ships 146 deterministic
 *-fixtures.py programs.  The suite can be run as six bounded shards to avoid CI or
 wrapper time ceilings, while invoking this file without --shard still executes all
-shards and reports one authoritative 145/145 result.
+shards and reports one authoritative 146/146 result.
 """
 from __future__ import annotations
 
@@ -22,14 +22,14 @@ from typing import Iterable
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent.parent
-EXPECTED_FIXTURE_COUNT = 145
+EXPECTED_FIXTURE_COUNT = 146
 SHARDS: tuple[tuple[str, int, int], ...] = (
     ("01-core", 1, 25),
     ("02-installer", 26, 50),
     ("03-repair-update", 51, 75),
     ("04-resource-policy", 76, 100),
     ("05-gpu-directml", 101, 120),
-    ("06-release", 121, 145),
+    ("06-release", 121, 146),
 )
 FORBIDDEN_FILE_NAMES = {".DS_Store", "Thumbs.db"}
 FORBIDDEN_SUFFIXES = {".pyc", ".pyo", ".tmp", ".bak", ".swp"}

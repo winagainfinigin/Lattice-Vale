@@ -6,15 +6,16 @@ import re
 CORE = Path(__file__).resolve().parents[1]
 ROOT = CORE.parent
 version=(CORE / "VERSION.txt").read_text(encoding="ascii").strip()
+display_version = f"{version} Hotfix" if version == "14.6.2" else version
 assert version in {"14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}
 
 headers = {
-    ROOT / "README.md": f"# LatticeVale v{version}",
-    CORE / "README.md": f"# LatticeVale v{version} — Technical README",
-    ROOT / "docs/README.md": f"# LatticeVale v{version} — Stable",
-    ROOT / "docs/FEATURES.md": f"# LatticeVale v{version} — Complete Features and Install Options Reference",
-    ROOT / "docs/Instructions.txt": f"LATTICEVALE v{version} — INSTRUCTIONS",
-    ROOT / "docs/Installer Description.txt": f"LATTICEVALE v{version} — INSTALLER DESCRIPTION",
+    ROOT / "README.md": f"# LatticeVale v{display_version}",
+    CORE / "README.md": f"# LatticeVale v{display_version} — Technical README",
+    ROOT / "docs/README.md": f"# LatticeVale v{display_version} — Stable",
+    ROOT / "docs/FEATURES.md": f"# LatticeVale v{display_version} — Complete Features and Install Options Reference",
+    ROOT / "docs/Instructions.txt": f"LATTICEVALE v{display_version} — INSTRUCTIONS",
+    ROOT / "docs/Installer Description.txt": f"LATTICEVALE v{display_version} — INSTALLER DESCRIPTION",
 }
 for path, prefix in headers.items():
     assert path.read_text(encoding="utf-8").startswith(prefix), path
@@ -25,8 +26,8 @@ required = {
     CORE / "AUDIT.md": ["v14.5.2 Option 7 cleanup safety audit", "v14.5.1 adaptive resource-policy / OOM audit"],
     ROOT / "docs/FEATURES.md": ["Cleanup / reclaim disk space", f"Current managed software/source policy (v{version})", "docker builder prune -f", "fstrim -v /"],
     ROOT / "docs/CHANGELOG.md": ["## 14.5.2 - 2026-08-29", "Option 7", "## 14.5.1 - 2026-08-29"],
-    ROOT / "docs/PATCH-NOTES.md": [f"# Current v{version} patch notes", "## v14.5.2 — cleanup / reclaim disk space maintenance release", "## v14.5.1 — adaptive resource policy v9 / model-aware Ollama + adaptive Honcho timeout"],
-    ROOT / "docs/RELEASE.md": [f"v{version} current release", "v14.5.4-vram-lowmem-fixtures.py", "v14.5.2-option7-cleanup-fixtures.py"],
+    ROOT / "docs/PATCH-NOTES.md": [f"# Current v{display_version} patch notes", "## v14.5.2 — cleanup / reclaim disk space maintenance release", "## v14.5.1 — adaptive resource policy v9 / model-aware Ollama + adaptive Honcho timeout"],
+    ROOT / "docs/RELEASE.md": [f"v{display_version} current release", "v14.5.4-vram-lowmem-fixtures.py", "v14.5.2-option7-cleanup-fixtures.py"],
     ROOT / "docs/SUPPORT.md": ["v14.5.2 cleanup / low-space recovery support note"],
     ROOT / "docs/SOURCES.md": ["v14.5.2 source-policy note"],
     ROOT / "docs/WINDOWS-INTEGRATION-TEST-MATRIX.md": ["v14.5.2 cleanup/low-space case"],

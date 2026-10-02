@@ -1,4 +1,7 @@
-# LatticeVale v14.6.2 — Complete Features and Install Options Reference
+# LatticeVale v14.6.2 Hotfix — Complete Features and Install Options Reference
+
+> **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
+
 
 ## v14.6.2 latest-supported update policy and inherited repair continuity
 
@@ -9,7 +12,7 @@
 - DirectML host-gateway recovery is isolated from healthy Docker infrastructure; `/health` remains responsive during model-load locking, the supervisor confirms misses before replacement, and installer self-test uses bounded readiness convergence.
 - Missing ephemeral Hermes `gateway-default` / profile s6 slots can be re-registered from preserved profile state through Hermes' runtime service-manager API instead of forcing profile recreation.
 - For recognized older stacks, mutating Options **1, 2, 4, 5, and 6** perform cumulative preservation-first migration before their mode-specific action. Options **3** and **8** remain read-only; Option **7** remains isolated cleanup.
-- The deterministic contract is **145 fixtures** across six shards, including the same-version runtime-policy/DirectML repair regression and the v14.5.2/v14.6.0 eight-option continuity baseline.
+- The deterministic contract is **146 fixtures** across six shards, including the same-version runtime-policy/DirectML repair regression and the v14.5.2/v14.6.0 eight-option continuity baseline.
 
 ## v14.6.0 schema-23 / policy-13 additions
 
