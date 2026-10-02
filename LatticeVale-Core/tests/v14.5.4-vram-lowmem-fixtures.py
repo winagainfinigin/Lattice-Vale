@@ -93,5 +93,5 @@ else: raise AssertionError('oversized model was admitted to a 4 GiB adapter')
 
 readme=(REPO/'README.md').read_text(); release=(REPO/'docs/RELEASE.md').read_text(); changelog=(REPO/'docs/CHANGELOG.md').read_text()
 assert readme.startswith('# LatticeVale v14.6.2') and 'VRAM' in readme
-assert 'v14.6.2 current release' in release and '14.5.4' in changelog
+assert 'v14.6.2 Hotfix current release' in release and '14.5.4' in changelog
 print('v14.5.4 VRAM / ADAPTIVE SMALL-RESOURCE FIXTURES: PASS')

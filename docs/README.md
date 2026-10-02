@@ -3,13 +3,13 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 > **Current documentation set:** v14.6.2. Repository/release packaging rules are documented in [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md); historical v13 notes are repository-only archives.
 
 
-**Current release:** v14.6.2 retains the canonical architecture and adds latest-supported managed upstream resolution while preserving hardware discovery, backend capability/health/selection, resource-policy calculation, canonical validation, diagnostics, and repair dependency tracking. Start with [QUICKSTART.md](QUICKSTART.md); task-oriented current docs are now separate from historical changelog material.
+**Current release:** v14.6.2 Hotfix retains the canonical architecture and adds latest-supported managed upstream resolution while preserving hardware discovery, backend capability/health/selection, resource-policy calculation, canonical validation, diagnostics, and repair dependency tracking. Start with [QUICKSTART.md](QUICKSTART.md); task-oriented current docs are now separate from historical changelog material.
 
 **Architecture:** durable choices stay in `install-options.json`; generated Windows/WSL hardware, backend, health, and resource-policy state lives under `data/latticevale/` with explicit schemas and fingerprints. DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU are capabilities rather than vendor assumptions.
 
@@ -17,13 +17,13 @@
 
 **GPU paths:** managed Ollama supports Auto, CPU, NVIDIA CUDA, AMD/ROCm, and Vulkan; DirectML remains an optional WSL-host text backend with Ollama fallback; native Windows Ollama remains user-owned. Vulkan requires an existing WSL `/dev/dri/renderD*` device and real `ollama ps` offload proof before GPU execution is trusted. LatticeVale never installs/replaces Windows/vendor display drivers.
 
-**Release qualification:** v14.6.2 requires exactly 145 deterministic fixtures across six shards, both resume simulations, source-tree contamination checks, corrected v14.5.47 schema-21 migration coverage, exact declarative release-content/source-manifest verification, repository-patch round-trip equivalence, and fresh-extraction ZIP byte equivalence before artifacts are publishable.
+**Release qualification:** v14.6.2 Hotfix requires exactly 146 deterministic fixtures across six shards, both resume simulations, source-tree contamination checks, corrected v14.5.47 schema-21 migration coverage, exact declarative release-content/source-manifest verification, repository-patch round-trip equivalence, and fresh-extraction ZIP byte equivalence before artifacts are publishable.
 
 **Resource diagnostics:** `~/hermes-stack/resource-policy-report.txt` remains the secret-free explanation of resource policy v13, GPU/offload state, generated ceilings, and hardware/policy fingerprints; `./manage.sh audit` independently verifies the same state.
 
 **Managed-upstream visibility:** `./manage.sh status` reports the configured stable channels and channel age without performing a network freshness check; Option 6 or a due managed-refresh cycle performs the actual upstream resolution.
 
-> **v14.5.2:** historical cleanup/recovery release. It added the isolated Option 7 cleanup/reclaim path and a low-space recovery gate that permits only Verify or Cleanup for a recognized managed stack below the ordinary repair floor. It otherwise inherited v14.5.1 resource policy v9, OOM-aware audit/repair detection, model-aware managed-Ollama sizing, and live Docker CPU/RAM convergence unchanged. Current installs and repairs should use v14.6.2; Option 7 remains available there.
+> **v14.5.2:** historical cleanup/recovery release. It added the isolated Option 7 cleanup/reclaim path and a low-space recovery gate that permits only Verify or Cleanup for a recognized managed stack below the ordinary repair floor. It otherwise inherited v14.5.1 resource policy v9, OOM-aware audit/repair detection, model-aware managed-Ollama sizing, and live Docker CPU/RAM convergence unchanged. Current installs and repairs should use v14.6.2 Hotfix; Option 7 remains available there.
 
 > **v14.4.85:** prior direct-install release. It promotes the accumulated pre-release reliability fixes into a normal versioned release, retaining the v14.4.84 WSL lifecycle repair while adding startup-aware reconcile/post-gateway readiness, exact checked gateway lifecycle handling, a bundle-owned Option 6 pre-update safety backup that can safely read container-owned persistent files, and a useful Option 3 read-only verification report. Existing v14.4.84 installs should run the full v14.4.85 release and choose Resume / repair.
 

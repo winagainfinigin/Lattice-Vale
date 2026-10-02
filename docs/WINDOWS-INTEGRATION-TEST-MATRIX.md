@@ -3,13 +3,13 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 > **Inherited v14.6.1 true remote Tailscale case:** select Matrix + Windows Tailscale, verify the Windows client is Running with Shields Up disabled, a valid 100.x address, MagicDNS FQDN, and HTTPS capability; verify the Windows-native relay before Serve; verify exact IPv4/IPv6 Tailscale listeners and `/versions`, exact client well-known, and `/login` through the final hostname while connecting directly to the 100.x address. Then open the temporary challenge from a second Tailscale peer on both Wi-Fi and cellular where available. Only an exact current-run token may produce `PASS`; skip must produce `PARTIAL`; DNS/transport/TLS/Serve failure must produce `FAIL` with the corresponding diagnostic category. A prior saved PASS must not satisfy the current run.
 
 
-> **Current release: v14.6.2.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+> **Current release: v14.6.2 Hotfix.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
 
 ## v14.6.0 confidence levels and architecture cases
 

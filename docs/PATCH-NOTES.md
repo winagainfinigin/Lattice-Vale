@@ -4,13 +4,13 @@
 
 The original v14.6.2 source contained two consecutive `install -m 0644 ... \` command prefixes immediately before the `compatibility.conf` copy in `LatticeVale-Core/linux/bootstrap.sh`. Because the first prefix escaped its newline, Bash joined the commands and GNU `install` interpreted the final `compatibility.conf` path as a required directory destination.
 
-The Hotfix removes the duplicate prefix and adds a dedicated regression for the exact staging stanza plus shell syntax. It does **not** change schemas, refresh policy revision 5, latest-supported upstream selection, database-major bounds, DirectML requirements, persistent data, profiles, Matrix identities, provider settings, or user-owned overrides.
+The Hotfix removes the duplicate prefix and adds a dedicated regression for the exact staging stanza plus shell syntax. The Hotfix therefore has **146 deterministic fixtures**; the original v14.6.2 release entry below remains historical at 145. It does **not** change schemas, refresh policy revision 5, latest-supported upstream selection, database-major bounds, DirectML requirements, persistent data, profiles, Matrix identities, provider settings, or user-owned overrides.
 
 If the original v14.6.2 installer already created a verified pre-update backup and then failed at this staging line, keep that data in place and rerun the Hotfix installer using Resume / repair or Update / repair.
 
 ---
 
-> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ### v14.6.2 latest-supported managed upstreams
