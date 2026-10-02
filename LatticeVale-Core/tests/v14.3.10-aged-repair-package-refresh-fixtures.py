@@ -4,7 +4,7 @@ import re
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text().strip()
-assert version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}, version
+assert version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}, version
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
@@ -14,7 +14,7 @@ compat=(ROOT/'compatibility.conf').read_text(encoding='utf-8')
 # version change as a bounded managed-refresh trigger. v14.4.6 supersedes that behavior:
 # the explicit policy revision is the immediate convergence signal and VERSION is provenance.
 assert 'MANAGED_REPAIR_REFRESH_DAYS=30' in compat
-assert ('MANAGED_REPAIR_REFRESH_REVISION=4' in compat) if version in {'14.6.0','14.6.1'} else (('MANAGED_REPAIR_REFRESH_REVISION=3' in compat) if version == '14.5.47' else (('MANAGED_REPAIR_REFRESH_REVISION=2' in compat) if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'} else ('MANAGED_REPAIR_REFRESH_REVISION=1' in compat)))
+assert ('MANAGED_REPAIR_REFRESH_REVISION=5' in compat) if version == '14.6.2' else (('MANAGED_REPAIR_REFRESH_REVISION=4' in compat) if version in {'14.6.0','14.6.1'} else (('MANAGED_REPAIR_REFRESH_REVISION=3' in compat) if version == '14.5.47' else (('MANAGED_REPAIR_REFRESH_REVISION=2' in compat) if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46'} else ('MANAGED_REPAIR_REFRESH_REVISION=1' in compat))))
 assert "MANAGED_REPAIR_REFRESH_DAYS'" in ps and 'ManagedRepairRefreshDays' in ps
 assert "MANAGED_REPAIR_REFRESH_REVISION'" in ps and 'ManagedRepairRefreshRevision' in ps
 assert '.repair-package-refresh' in boot and '.repair-package-refresh-pending' in boot
@@ -22,11 +22,11 @@ assert 'installer-config.tar.gz' in boot and '.repair-package-refresh .repair-pa
 assert 'legacy installs without a refresh marker refresh once' in boot
 assert 'now_epoch - last_refresh_epoch >= repair_refresh_interval_seconds' in boot
 assert 'last_refresh_revision' in boot and 'last_refresh_revision" != "$repair_refresh_revision' in boot
-if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}:
+if version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}:
     assert r"printf 'POLICY_REVISION=%s\nINSTALLER_VERSION=%s\n'" in boot
     assert 'last_refresh_installer_version' in boot
     assert 'pending_refresh_installer_version' in boot
-    if version in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}:
+    if version in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}:
         assert '[[ "$last_refresh_installer_version" != "$installer_version" ]]' not in boot
         assert '[[ "$pending_refresh_revision" == "$repair_refresh_revision" ]]' in boot
 else:
@@ -66,23 +66,26 @@ assert 'LAST_SUCCESS_EPOCH=' in cfg and 'POLICY_REVISION=' in cfg
 assert "s/^POLICY_REVISION=//p' .repair-package-refresh-pending" in cfg
 assert 'rm -f .repair-package-refresh-pending' in cfg
 
-# NVIDIA toolkit is also re-evaluated on a due package refresh rather than being skipped
-# solely because an older working runtime is present; newer complete toolkits remain preserved
-# by the existing no-downgrade logic.
+# NVIDIA toolkit is re-evaluated on a due package refresh and follows NVIDIA's official
+# stable repository without a LatticeVale-fixed package version or forced downgrade.
 assert 'nvidia_runtime_ready && [[ "$repair_root_refresh_needed" != true ]]' in boot
-assert 'toolkit_has_newer' in boot and 'preserving it and verifying the runtime instead of downgrading' in boot
+assert 'https://nvidia.github.io/libnvidia-container/' in boot
+assert 'nvidia_toolkit_packages=(' in boot
+for pkg in ('nvidia-container-toolkit','nvidia-container-toolkit-base','libnvidia-container-tools','libnvidia-container1'):
+    assert pkg in boot
+assert 'does not request package downgrades' in boot
+assert 'toolkit_has_newer' not in boot
 
 
-# Periodic convergence must advance only LatticeVale-owned app pins/source. Custom values
-# remain outside the automatic repair boundary.
-assert 'LATTICEVALE_SEARXNG_IMAGE_AUTO' in cfg
-assert 'repair_package_refresh_pending && [[ "$searxng_installer_owned" == true ]]' in cfg
-assert 'Preserving user-set SEARXNG_IMAGE=' in cfg
-assert 'between refresh windows keep the' in cfg and 'marker on the old value actually in use' in cfg
-assert 'Preserving installer-owned OLLAMA_IMAGE=' in cfg
-assert 'repair_package_refresh_pending || [[ "$ollama_policy_switch" == true ]]' in cfg
-assert 'LATTICEVALE_HONCHO_SOURCE_AUTO' in cfg
-assert 'repair_package_refresh_pending && [[ "$honcho_installer_owned" == true ]]' in cfg
-assert 'Preserving custom/legacy Honcho source commit' in cfg
+# Periodic convergence advances only installer-owned upstream references. Ownership
+# and user-override preservation are centralized in managed-upstreams.py.
+upstreams=(ROOT/'stack/managed-upstreams.py').read_text(encoding='utf-8')
+assert 'LATTICEVALE_SEARXNG_IMAGE_AUTO' in upstreams
+assert 'LATTICEVALE_OLLAMA_IMAGE_AUTO' in upstreams
+assert 'LATTICEVALE_HONCHO_SOURCE_AUTO' in upstreams
+assert 'installer_owned' in upstreams and 'user-override' in upstreams
+assert 'refresh=args.refresh' in upstreams
+assert 'repair_package_refresh_pending' in cfg and 'managed-upstreams.py' in cfg
+assert '--refresh' in cfg
 
 print('v14.3.10 aged repair package-refresh fixtures: PASS')

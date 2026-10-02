@@ -4,3 +4,4 @@
 LatticeVale-Core/tests/v14.4.84-hotfix2-reconcile-startup-fixtures.py
 LatticeVale-Core/tests/v14.4.84-hotfix2-post-gateway-readiness-fixtures.py
 LatticeVale-Core/tests/v14.4.84-hotfix2-update-backup-audit-fixtures.py
+LatticeVale-Core/stack/patch-qmd-bind.py

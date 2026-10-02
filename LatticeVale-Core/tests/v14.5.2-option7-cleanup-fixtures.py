@@ -16,7 +16,7 @@ existing = [
     'Verify installation only - read-only audit; make no changes',
     'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',
     'Advanced recovery - reset checkpoints or explicitly rebuild installer-owned identities',
-    "Update / repair installer-managed software - force this bundle''s declared component versions/channels and managed package/image/source layer now, then run normal repair",
+    'Update / repair installer-managed software - force latest supported stable upstream channels/sources now, preserve compatible stateful majors and explicit overrides, then run normal repair',
     'Cleanup / reclaim disk space - choose safe cleanup categories without changing the current LatticeVale runtime/data configuration',
 ]
 pos = [ps.index(x) for x in existing]

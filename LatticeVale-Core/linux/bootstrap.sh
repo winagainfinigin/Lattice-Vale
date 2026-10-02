@@ -85,7 +85,7 @@ if [[ -d "$stack_dir" ]]; then
   backup_dir="$stack_dir/backups/pre-$installer_version-$stamp"
   install -d -m 0700 -o "$linux_uid" -g "$linux_gid" "$backup_dir"
   backup_items=()
-  for item in compose.yaml compose.latticevale.yaml compose.override.yaml compatibility.conf configure-stack.sh manage.sh state-audit.py latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json data/latticevale .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
+  for item in compose.yaml compose.latticevale.yaml compose.override.yaml compatibility.conf configure-stack.sh manage.sh managed-upstreams.py state-audit.py latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json data/latticevale .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-managed-profiles; do
     [[ -e "$stack_dir/$item" ]] && backup_items+=("$item")
   done
   # Logs are diagnostic, not application state. Preserve them in the configuration
@@ -148,7 +148,7 @@ if [[ "$repair_run" == true ]]; then
     if [[ "$force_managed_update" == true ]]; then
       repair_refresh_pending=true
       repair_root_refresh_needed=true
-      echo "Explicit Update / repair requested: forcing this bundle's installer-managed package/image/source refresh now; the ${repair_refresh_days}-day periodic gate is bypassed for this run."
+      echo "Explicit Update / repair requested: forcing a latest-supported installer-managed package/image/source refresh now; the ${repair_refresh_days}-day periodic gate is bypassed for this run."
     elif [[ ! "$last_refresh_epoch" =~ ^[0-9]+$ ]] || [[ "$last_refresh_revision" != "$repair_refresh_revision" ]] || (( now_epoch - last_refresh_epoch >= repair_refresh_interval_seconds )); then
       repair_refresh_pending=true
       repair_root_refresh_needed=true
@@ -158,7 +158,7 @@ if [[ "$repair_run" == true ]]; then
         echo "Managed repair package/image refresh is due (interval: ${repair_refresh_days} days; legacy installs without a refresh marker refresh once)."
       fi
     elif [[ -n "$last_refresh_installer_version" && "$last_refresh_installer_version" != "$installer_version" ]]; then
-      echo "LatticeVale bundle changed since the last managed component refresh (saved refresh: $last_refresh_installer_version; current bundle: $installer_version), but managed-refresh policy revision $repair_refresh_revision is unchanged and the age gate is not due. Resume / repair remains local-first; stage migrations and live verifiers still apply. Choose Update / repair installer-managed software to force package/image/source refresh now."
+      echo "LatticeVale bundle changed since the last managed component refresh (saved refresh: $last_refresh_installer_version; current bundle: $installer_version), but managed-refresh policy revision $repair_refresh_revision is unchanged and the age gate is not due. Resume / repair remains local-first; stage migrations and live verifiers still apply. Choose Update / repair installer-managed software to force a latest-supported package/image/source refresh now."
     fi
     unset last_refresh_epoch last_refresh_revision last_refresh_installer_version now_epoch
   fi
@@ -383,38 +383,22 @@ install_nvidia_container_toolkit_if_needed() {
     daemon_backup="/etc/docker/daemon.json.latticevale-pre-$repo_stamp.bak"
     cp -a /etc/docker/daemon.json "$daemon_backup"
   fi
-  local nvidia_toolkit_version='1.20.0-1'
   local -a nvidia_toolkit_packages=(
     nvidia-container-toolkit
     nvidia-container-toolkit-base
     libnvidia-container-tools
     libnvidia-container1
   )
-  local toolkit_install_needed=false toolkit_has_newer=false toolkit_has_older=false toolkit_missing=false pkg installed_version
+  # On an explicit/due managed refresh, consult NVIDIA's stable APT channel and
+  # upgrade the complete toolkit set to the newest candidate. Outside a refresh,
+  # an already-installed toolkit is reused and only repaired when incomplete.
+  local toolkit_install_needed="$repair_root_refresh_needed" pkg installed_version
   for pkg in "${nvidia_toolkit_packages[@]}"; do
     installed_version="$(dpkg-query -W -f='${Version}' "$pkg" 2>/dev/null || true)"
     if [[ -z "$installed_version" ]]; then
-      toolkit_missing=true
-      toolkit_install_needed=true
-      continue
-    fi
-    if dpkg --compare-versions "$installed_version" gt "$nvidia_toolkit_version"; then
-      toolkit_has_newer=true
-    elif dpkg --compare-versions "$installed_version" lt "$nvidia_toolkit_version"; then
-      toolkit_has_older=true
       toolkit_install_needed=true
     fi
   done
-
-  if [[ "$toolkit_has_newer" == true ]]; then
-    if [[ "$toolkit_missing" == false && "$toolkit_has_older" == false ]] && command -v nvidia-ctk >/dev/null 2>&1; then
-      echo "A complete NVIDIA Container Toolkit newer than LatticeVale's tested ${nvidia_toolkit_version} pin is already installed; preserving it and verifying the runtime instead of downgrading."
-      toolkit_install_needed=false
-    else
-      echo "A mixed NVIDIA Container Toolkit installation contains package(s) newer than LatticeVale's tested ${nvidia_toolkit_version} pin plus missing/older components. LatticeVale will not downgrade the newer packages automatically. Align the NVIDIA Container Toolkit packages manually, or rerun with CPU acceleration." >&2
-      return 1
-    fi
-  fi
 
   if [[ "$toolkit_install_needed" == true ]] || ! command -v nvidia-ctk >/dev/null 2>&1; then
     local source_path=/etc/apt/sources.list.d/nvidia-container-toolkit.list
@@ -456,14 +440,11 @@ install_nvidia_container_toolkit_if_needed() {
       if [[ -n "$key_backup" && -f "$key_backup" ]]; then cp -a "$key_backup" "$key_path" || true; else rm -f "$key_path"; fi
       return 1
     fi
-    # Install the complete tested package set only when doing so is an upgrade or
-    # first install. A newer complete toolkit is preserved above, so no downgrade
-    # permission is necessary or desirable here.
+    # Follow NVIDIA's official stable repository to the newest available toolkit
+    # package set. LatticeVale does not request package downgrades; a locally newer package is
+    # never intentionally forced backward by LatticeVale.
     if ! apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
-      "nvidia-container-toolkit=${nvidia_toolkit_version}" \
-      "nvidia-container-toolkit-base=${nvidia_toolkit_version}" \
-      "libnvidia-container-tools=${nvidia_toolkit_version}" \
-      "libnvidia-container1=${nvidia_toolkit_version}"; then
+      "${nvidia_toolkit_packages[@]}"; then
       if [[ -n "$source_backup" && -f "$source_backup" ]]; then cp -a "$source_backup" "$source_path" || true; else rm -f "$source_path"; fi
       if [[ -n "$key_backup" && -f "$key_backup" ]]; then cp -a "$key_backup" "$key_path" || true; else rm -f "$key_path"; fi
       return 1
@@ -497,11 +478,11 @@ if [[ "$local_ai_requested" == true && "$ollama_backend" == managed && "$ollama_
   if [[ "$ollama_acceleration" == nvidia ]]; then
     install_nvidia_container_toolkit_if_needed || { echo 'NVIDIA acceleration was explicitly selected but the NVIDIA Container Toolkit could not be configured/verified. No Linux NVIDIA display driver was installed. Fix Windows/WSL GPU support or rerun with Auto/CPU.' >&2; exit 5; }
   elif [[ "$ollama_acceleration" == amd ]]; then
-    echo 'AMD/ROCm managed Ollama selected. Reusing the WSL-provided /dev/kfd + /dev/dri device path and the pinned Ollama ROCm container image; LatticeVale does not install or replace the Windows/host display driver.'
+    echo 'AMD/ROCm managed Ollama selected. Reusing the WSL-provided /dev/kfd + /dev/dri device path and the stable Ollama ROCm channel; LatticeVale does not install or replace the Windows/host display driver.'
   elif [[ "$ollama_acceleration" == vulkan ]]; then
     shopt -s nullglob; vulkan_nodes=(/dev/dri/renderD*); shopt -u nullglob
     (( ${#vulkan_nodes[@]} > 0 )) || { echo 'Vulkan acceleration was explicitly selected but WSL exposes no DRM render node under /dev/dri/renderD*.' >&2; exit 5; }
-    echo 'Vulkan managed Ollama selected. LatticeVale passes the existing WSL DRM render devices to the standard pinned Ollama image and verifies real model offload before accepting the GPU policy.'
+    echo 'Vulkan managed Ollama selected. LatticeVale passes the existing WSL DRM render devices to the standard stable Ollama channel and verifies real model offload before accepting the GPU policy.'
   elif [[ "$ollama_acceleration" == auto ]]; then
     if nvidia_smi_path >/dev/null 2>&1; then
       install_nvidia_container_toolkit_if_needed || echo 'WARNING: NVIDIA GPU was detected, but the Docker NVIDIA runtime could not be configured. Auto mode will fall back to another supported accelerator or CPU.' >&2
@@ -912,7 +893,7 @@ unset rel path
 # Refuse replacement symlinks before root writes installer-controlled files; otherwise a broken
 # or hostile prior install could redirect a repair write outside the dedicated stack tree.
 installer_owned_files=(
-  compose.yaml Dockerfile.qmd patch-qmd-bind.py compatibility.conf configure-stack.sh manage.sh state-audit.py
+  compose.yaml Dockerfile.qmd compatibility.conf configure-stack.sh manage.sh managed-upstreams.py state-audit.py
   latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json
   qmd-index-cycle.sh native-ollama-relay.py native-ollama-relay.sh directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json
 )
@@ -929,7 +910,6 @@ install -m 0644 -o "$linux_uid" -g "$linux_gid" \
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/Dockerfile.qmd" "$stack_dir/Dockerfile.qmd"
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
-  "$bundle_root/stack/patch-qmd-bind.py" "$stack_dir/patch-qmd-bind.py"
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/compatibility.conf" "$stack_dir/compatibility.conf"
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
@@ -946,6 +926,8 @@ install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/configure-stack.sh" "$stack_dir/configure-stack.sh"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/manage.sh" "$stack_dir/manage.sh"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/managed-upstreams.py" "$stack_dir/managed-upstreams.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/state-audit.py" "$stack_dir/state-audit.py"
 install -m 0644 -o "$linux_uid" -g "$linux_gid" \
@@ -986,8 +968,8 @@ verify_write_dirs=(
 )
 [[ "$obsidian_selected" == true ]] || verify_write_dirs+=("$stack_dir/vault")
 verify_write_files=(
-  "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/patch-qmd-bind.py" "$stack_dir/compatibility.conf"
-  "$stack_dir/configure-stack.sh" "$stack_dir/manage.sh" "$stack_dir/state-audit.py"
+  "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/compatibility.conf"
+  "$stack_dir/configure-stack.sh" "$stack_dir/manage.sh" "$stack_dir/managed-upstreams.py" "$stack_dir/state-audit.py"
   "$stack_dir/latticevale_readonly.py" "$stack_dir/latticevale_arch.py" "$stack_dir/hardware-capabilities.py" "$stack_dir/backend-capabilities.py" "$stack_dir/runtime-policy.py" "$stack_dir/diagnostics.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
   "$stack_dir/qmd-index-cycle.sh" "$stack_dir/native-ollama-relay.py" "$stack_dir/native-ollama-relay.sh" "$stack_dir/directml-gateway.py" "$stack_dir/directml-gateway.sh" "$stack_dir/directml-requirements.txt" "$stack_dir/install-options.json" "$stack_dir/.env"
   "$stack_dir/.repair-package-refresh" "$stack_dir/.repair-package-refresh-pending"

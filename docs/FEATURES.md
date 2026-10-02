@@ -1,12 +1,15 @@
-# LatticeVale v14.6.1 — Complete Features and Install Options Reference
+# LatticeVale v14.6.2 — Complete Features and Install Options Reference
 
-## v14.6.1 repair-convergence and eight-option continuity
+## v14.6.2 latest-supported update policy and inherited repair continuity
 
+- Option 6 forces the newest supported stable upstream software now; due/revision-triggered Option 1 refresh uses the same resolver.
+- Application channels float to stable upstream (`latest`/stable package channel), while database majors and PyTorch/DirectML remain compatibility-bounded and explicit user overrides are preserved.
+- Exact resolved image IDs/digests, Honcho tag/commit, channels, and DirectML requirements hash are recorded in `data/latticevale/managed-upstreams.json`.
 - Same-version repair refreshes canonical hardware/backend-derived state before runtime-policy reconciliation, so stale fingerprints/CPU/RAM policy cannot survive behind an older completed checkpoint.
 - DirectML host-gateway recovery is isolated from healthy Docker infrastructure; `/health` remains responsive during model-load locking, the supervisor confirms misses before replacement, and installer self-test uses bounded readiness convergence.
 - Missing ephemeral Hermes `gateway-default` / profile s6 slots can be re-registered from preserved profile state through Hermes' runtime service-manager API instead of forcing profile recreation.
 - For recognized older stacks, mutating Options **1, 2, 4, 5, and 6** perform cumulative preservation-first migration before their mode-specific action. Options **3** and **8** remain read-only; Option **7** remains isolated cleanup.
-- The deterministic contract is **144 fixtures** across six shards, including the same-version runtime-policy/DirectML repair regression and the v14.5.2/v14.6.0 eight-option continuity baseline.
+- The deterministic contract is **145 fixtures** across six shards, including the same-version runtime-policy/DirectML repair regression and the v14.5.2/v14.6.0 eight-option continuity baseline.
 
 ## v14.6.0 schema-23 / policy-13 additions
 
@@ -16,7 +19,7 @@
 - Conserved automatic CPU allocation: system/DirectML reservations are removed before enabled Docker services share one aggregate envelope.
 - DirectML generation uses `torch.no_grad()`; no-fallback mode cannot create or retain forced-Ollama fallback markers.
 
-> **Current managed software/source pins documented by v14.6.1.** Release pin ownership remains declared by the installer/compatibility policy; repair validates the current bundle before managed refresh.
+> **Current managed software/source policy (v14.6.2):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
 
 > **v14.6.0 architecture:** canonical hardware/backend/resource state separates durable user intent from machine-derived capability. Current task docs: `QUICKSTART.md`, `INSTALLATION.md`, `REPAIR.md`, `GPU-BACKENDS.md`, `DIAGNOSTICS.md`, `RESOURCE-POLICY.md`, and `ARCHITECTURE.md`.
 
@@ -33,7 +36,7 @@
 > **v14.5.43 universal repair migration:** the full installer can directly repair/migrate any older recognized installer-managed stack without intermediate releases. It proves ownership, checks version/schema/downgrade safety, takes a verified rollback backup, refreshes installer-owned files and managed pins, replays cumulative checkpoint migrations, and regenerates policy v11. Same-version repair stays local-first; unrecognized/corrupt stacks fail closed.
 > **Migration preservation rule:** v14.5.43 introduced cumulative preservation-first migration. v14.6.0 normalizes recognized historical/versionless durable choices to current schema 23 while application/user state is preserved; legacy managed Ollama with no acceleration setting remains safely adoptable as explicit CPU rather than being silently switched to GPU.
 > **v14.5.42 hardware-resource policy v11:** WSL RAM and CPU profiles, per-GPU NVIDIA/AMD VRAM inventory, single-GPU-first/multi-GPU-spread model-fit planning, GPU-aware context, `OLLAMA_GPU_OVERHEAD`, shared DirectML/Ollama VRAM coordination, lower GPU-backed CPU quota, and bounded `ollama ps` offload proof with safe Auto CPU fallback.
-> **v14.5.42 canonical-policy diagnostics:** one finalized resource object drives Compose/state/audit; separate hardware and policy SHA-256 fingerprints plus secret-free `resource-policy-report.txt` explain exactly why each CPU/RAM/VRAM/context limit was chosen. v14.5.42 used a six-shard 135-fixture deterministic suite; v14.5.43 extended that contract to 136 fixtures; v14.5.44 extended it to 137 fixtures; v14.5.45 extended it to 138 fixtures; v14.5.46 extended it to 139 fixtures; v14.5.47 extended it to 140 fixtures; current v14.6.1 extends the deterministic contract to 144 fixtures with canonical-architecture and release-content-policy gates.
+> **v14.5.42 canonical-policy diagnostics:** one finalized resource object drives Compose/state/audit; separate hardware and policy SHA-256 fingerprints plus secret-free `resource-policy-report.txt` explain exactly why each CPU/RAM/VRAM/context limit was chosen. v14.5.42 used a six-shard 135-fixture deterministic suite; v14.5.43 extended that contract to 136 fixtures; v14.5.44 extended it to 137 fixtures; v14.5.45 extended it to 138 fixtures; v14.5.46 extended it to 139 fixtures; v14.5.47 extended it to 140 fixtures; v14.6.1 extended the deterministic contract to 144 fixtures with canonical-architecture and release-content-policy gates.
 
 > **v14.5.4 local-AI hardening:** DirectML adds developer-managed dedicated-VRAM admission, context reduction, low-memory model loading, and automatic Ollama fallback; WSL allocations of 12 GiB or less use a tighter supporting-service profile while preserving the Hermes safety floor.
 
@@ -57,9 +60,9 @@
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.6.1 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.6.2 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.1 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.2 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -334,7 +337,7 @@ Pending activation alone is not grounds to rebuild a valid identity.
 
 ## 3.9 Windows Tailscale private remote access
 
-**v14.6.1 remote-health contract:** LatticeVale now separates host-local readiness from real remote proof. It verifies client policy/preferences, MagicDNS/HTTPS prerequisites, the Windows-native relay, deterministic Serve listeners, direct-100.x HTTPS/TLS, and the Matrix client path. A current-run second-device HTTPS token is required for `PASS`; skipping it is `PARTIAL`.
+**Inherited v14.6.1 remote-health contract:** LatticeVale now separates host-local readiness from real remote proof. It verifies client policy/preferences, MagicDNS/HTTPS prerequisites, the Windows-native relay, deterministic Serve listeners, direct-100.x HTTPS/TLS, and the Matrix client path. A current-run second-device HTTPS token is required for `PASS`; skipping it is `PARTIAL`.
 
 
 **Prompt:** Use Windows Tailscale for private remote access?
@@ -373,9 +376,9 @@ Available only when Matrix and Tailscale are selected.
 
 LatticeVale uses **Tailscale Serve**, not public Funnel.
 
-v14.6.1 validates remote Matrix as a client path, not only a transport path: the Synapse `public_baseurl` update must succeed, `/_matrix/client/versions` must be reachable, `/.well-known/matrix/client` must advertise the exact Tailscale HTTPS URL, and the login endpoint must expose at least one flow. If those checks fail, the installer-owned Serve mapping is removed and the advertised base URL is rolled back to localhost.
+The v14.6.1 validation retained in v14.6.2 treats remote Matrix as a client path, not only a transport path: the Synapse `public_baseurl` update must succeed, `/_matrix/client/versions` must be reachable, `/.well-known/matrix/client` must advertise the exact Tailscale HTTPS URL, and the login endpoint must expose at least one flow. If those checks fail, the installer-owned Serve mapping is removed and the advertised base URL is rolled back to localhost.
 
-The managed Matrix stack keeps its existing authentication ownership. v14.6.1 does **not** install or migrate Matrix Authentication Service (MAS), change `server_name`, or rewrite existing Matrix IDs; the hotfix is limited to making the already-selected public client URL verifiable and convergent.
+The managed Matrix stack keeps its existing authentication ownership. The inherited v14.6.1 behavior does **not** install or migrate Matrix Authentication Service (MAS), change `server_name`, or rewrite existing Matrix IDs; the hotfix is limited to making the already-selected public client URL verifiable and convergent.
 
 Windows loopback relay ports normally target:
 
@@ -718,7 +721,7 @@ Behavior:
 
 Current periodic managed refresh window: **30 days**. `MANAGED_REPAIR_REFRESH_REVISION` is the explicit compatibility trigger for a release that requires immediate managed package/image/source convergence. A bundle-version change alone does not force a refresh.
 
-Resume/repair is preservation-first but is not guaranteed to be update-free: it performs bounded installer-owned component refresh when the age/revision/legacy-state trigger applies, while preserving explicit user-owned overrides. Option 6 forces the current bundle's managed refresh immediately.
+Resume/repair is preservation-first but is not guaranteed to be update-free: it performs bounded installer-owned component refresh when the age/revision/legacy-state trigger applies, while preserving explicit user-owned overrides. Option 6 forces a latest-supported stable upstream refresh immediately.
 
 ## 5.2 Change installed components
 
@@ -773,40 +776,22 @@ Identity-changing Matrix recovery is intentionally narrow and uses preservation/
 
 ## 5.6 Update / repair installer-managed software
 
-Controlled, on-demand bundle-aligned updater.
+Controlled, on-demand **latest-supported** updater.
 
-Before refresh:
+Before refresh, the bundle-owned pre-update safety backup must succeed. It runs independently of the installed `manage.sh`, validates database dumps/archive output, restores previously-running containers, and fails closed before software mutation when the backup is not trustworthy.
 
-- the **bundle-owned pre-update safety backup** must succeed
-- it runs independently of the currently installed `manage.sh`, so an outdated/broken management script cannot block its own repair
-- the backup transaction runs as WSL root only while required to read container-owned persistent files, validates PostgreSQL dumps/archive output, restores the previously-running containers, and returns backup ownership to the selected Linux user
+The refresh then resolves installer-owned software from official stable upstream channels, reconciles/pulls/builds those artifacts, records exact resolved identities, and continues through the normal repair/verifier sequence. Explicit user overrides are preserved.
 
-Then it forces the software versions/channels declared by the currently running LatticeVale bundle and continues through normal repair/verifiers.
+Update policy:
 
-Managed update scope can include:
+- Hermes Agent, Matrix/Synapse, SearXNG, standard/ROCm Ollama, and QMD follow stable upstream channels.
+- Honcho follows the newest stable semantic-version tag from the official repository; development/default-branch HEAD is not the release channel.
+- Docker/prerequisite packages and NVIDIA Container Toolkit follow their official stable package repositories during the forced refresh.
+- Synapse PostgreSQL stays on major 16, Honcho pgvector/PostgreSQL stays on pg15, and Redis/Valkey stay on major 8 unless LatticeVale ships an explicit tested data-major migration.
+- PyTorch/`torch-directml`/Transformers remain a tested compatibility envelope and do not float independently.
+- `data/latticevale/managed-upstreams.json` records exact image IDs/digests, Honcho tag/commit, configured channels, and DirectML requirements hash for diagnostics/rollback evidence.
 
-- LatticeVale prerequisite packages
-- Docker Engine/CLI/containerd/Buildx/Compose packages
-- selected installer-managed Compose images
-- Hermes image pin
-- Matrix/Synapse image pin
-- SearXNG managed pin
-- managed Ollama pin
-- QMD bundle-declared build version
-- audited installer-owned Honcho source commit
-- selected supporting image/source references
-
-Preserved:
-
-- Matrix/Synapse/Honcho databases
-- Matrix crypto/E2EE state
-- Hermes profiles, memory and sessions
-- credentials
-- Ollama models
-- vault/workspace data
-- explicit custom image/source overrides
-- separately owned native Windows Ollama
-
+Persistent Matrix/Synapse/Honcho data, Matrix E2EE state, Hermes profiles/memory/sessions, credentials, Ollama models, vault/workspace data, and other user/application state remain preservation-first. Native Windows Ollama remains separately owned and is not updated by LatticeVale.
 
 ## 5.7 Cleanup / reclaim disk space
 
@@ -854,8 +839,8 @@ From `~/hermes-stack`, current documented management commands include:
 
 Status/verify can report:
 
-- configured image pins
-- LatticeVale pin date/age as an offline visibility signal
+- configured managed image/source channels plus exact recorded image digests/commits
+- last successful managed-upstream resolution age as an offline visibility signal
 - hardware/resource context
 - GPU VRAM evidence when measurable
 - model-fit advisory information
@@ -886,27 +871,20 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source pins documented by v14.6.1
+# 8. Current managed software/source policy documented by v14.6.2
 
-The release's declared managed references include:
+Installer-owned application defaults use stable upstream channels at refresh time:
 
-- Hermes Agent image: `nousresearch/hermes-agent:v2026.8.16`
-- Matrix Synapse: `matrixdotorg/synapse:v1.158.0`
-- Synapse PostgreSQL: PostgreSQL 16 Alpine line
-- SearXNG managed release: `2026.8.17-374939b88`
-- Valkey: 8 Alpine line
-- QMD: `2.5.3`
-- managed Ollama: `0.32.14` / corresponding ROCm image path when selected
-- Honcho: pinned audited commit `444897975c95393b0d48024470ece03c025d3aa4`
-- Honcho pgvector PostgreSQL image line: pg15-based
-- Honcho Redis: Redis 8 Alpine line
-- optional NVIDIA Container Toolkit tested package set: `1.20.0-1`
-- fresh local Ollama text-model suggestion: `qwen3.5:4b`
-- Honcho embedding-model suggestion: `qwen3-embedding:4b`
+- Hermes Agent: `nousresearch/hermes-agent:latest`
+- Matrix Synapse: `matrixdotorg/synapse:latest`
+- SearXNG: `searxng/searxng:latest`
+- QMD: npm `latest`
+- managed Ollama: `ollama/ollama:latest`; AMD/ROCm uses `ollama/ollama:rocm`
+- Honcho: newest stable semantic-version tag from `plastic-labs/honcho`
 
-Exact current supply-chain references are maintained in `SOURCES.md`; this section is a feature reference, not a replacement for that source-policy file.
+Compatibility-bounded stateful/runtime references remain on their tested line: Synapse PostgreSQL 16 Alpine, Honcho pgvector pg15, Redis 8 Alpine, Valkey 8 Alpine, Node 24 build base, and the qualified DirectML/PyTorch envelope. These advance to a new major/ABI only with a tested migration/compatibility update.
 
----
+Exact upstream/source policy is maintained in `SOURCES.md`.
 
 # 9. Default local ports and exposure behavior
 
@@ -1199,7 +1177,7 @@ If incorporated into a future LatticeVale release, this file should be the **can
 - `docs/Instructions.txt` — procedures and commands
 - `docs/Installer Description.txt` — conceptual post-install/settings guide
 - `docs/SECURITY.md` — trust/ownership/security model
-- `docs/SOURCES.md` — exact runtime acquisition/source pins
+- `docs/SOURCES.md` — runtime acquisition channels, compatibility bounds, and supply-chain policy
 - `docs/CHANGELOG.md` — historical version chronology
 
 Keeping a single feature/options catalog would prevent current questionnaire choices from becoming scattered across several documents again.

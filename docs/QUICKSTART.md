@@ -1,4 +1,7 @@
-# LatticeVale 14.6.1 Quickstart
+# LatticeVale 14.6.2 Quickstart
+
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
 
 ## Current local-AI choice
 
@@ -27,9 +30,11 @@ Choose an existing supported Ubuntu WSL2 distribution and Linux user. Review the
 
 For an existing installer-managed LatticeVale stack, use the **full current release** and choose **Option 1 — Resume / repair installation**. Do not layer the repository patch ZIP over `~/hermes-stack`; the installer owns migration, backup, permissions, generated state, and checkpoint reconciliation.
 
+For an immediate software refresh, choose **Option 6 — Update / repair installer-managed software**. Option 6 always runs the verified pre-update backup first and then resolves the newest supported stable upstream software; Option 1 does the same only when its 30-day/revision/legacy refresh gate is due.
+
 ## 4. GPU/backend behavior
 
-v14.6.1 retains the v14.6.0 separation of durable user preference from derived capability state. The installer records Windows hardware into a derived snapshot, WSL probes its own live devices, and the canonical backend engine classifies DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU independently. A missing Linux-native GPU does not automatically invalidate WSL-host DirectML. DirectML memory admission uses runtime capacity when available, otherwise bounded canonical Windows adapter evidence; unknown capacity fails safely to fallback rather than loading an unbounded model.
+v14.6.2 retains the v14.6.0 separation of durable user preference from derived capability state. The installer records Windows hardware into a derived snapshot, WSL probes its own live devices, and the canonical backend engine classifies DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU independently. A missing Linux-native GPU does not automatically invalidate WSL-host DirectML. DirectML memory admission uses runtime capacity when available, otherwise bounded canonical Windows adapter evidence; unknown capacity fails safely to fallback rather than loading an unbounded model.
 
 See [GPU-BACKENDS.md](GPU-BACKENDS.md) for the capability model and [RESOURCE-POLICY.md](RESOURCE-POLICY.md) for memory admission.
 

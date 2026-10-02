@@ -1,8 +1,11 @@
 # Native Windows Ollama integration
 
-> **v14.6.1 current behavior:** native Windows Ollama remains an optional, user-owned backend boundary. The canonical backend engine records it independently from DirectML, CUDA, ROCm, Vulkan, managed WSL/Docker Ollama, and CPU; LatticeVale may verify relay/runtime health but does not install, replace, or retune the Windows Ollama service or Windows GPU driver. Derived backend/resource state may be regenerated during repair without rewriting the user's durable native-Windows preference.
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
-> **v14.6.1 networking/resource boundary:** native Windows Ollama is outside the managed WSL/Docker container budget and GPU-memory policy. LatticeVale validates only the selected relay/reachability contract and keeps firewall/networking changes scoped and explicit. A failed native-Windows route can fall back only according to the saved backend policy; it does not silently take ownership of the Windows service.
+
+> **v14.6.2 current behavior:** native Windows Ollama remains an optional, user-owned backend boundary. The canonical backend engine records it independently from DirectML, CUDA, ROCm, Vulkan, managed WSL/Docker Ollama, and CPU; LatticeVale may verify relay/runtime health but does not install, replace, or retune the Windows Ollama service or Windows GPU driver. Derived backend/resource state may be regenerated during repair without rewriting the user's durable native-Windows preference.
+
+> **Inherited v14.6.1 networking/resource boundary:** native Windows Ollama is outside the managed WSL/Docker container budget and GPU-memory policy. LatticeVale validates only the selected relay/reachability contract and keeps firewall/networking changes scoped and explicit. A failed native-Windows route can fall back only according to the saved backend policy; it does not silently take ownership of the Windows service.
 
 ## Historical v14.5.47 GPU recommendation non-ownership
 

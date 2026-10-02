@@ -74,7 +74,7 @@ assert 'MATRIX_RECOVERY_KEY MATRIX_RECOVERY_KEY_OUTPUT_FILE' in rebuild
 assert '[[ ! -e .matrix-identity-rebuild-pending ]] || return 1' in cfg
 
 # Normal recovery/reset paths must not delete Synapse persistent data.
-advanced_menu=ps[ps.index("'Advanced recovery - reset checkpoints or explicitly rebuild installer-owned identities'"):ps.index("'Update / repair installer-managed software - force this bundle''s declared component versions/channels")]
+advanced_menu=ps[ps.index("'Advanced recovery - reset checkpoints or explicitly rebuild installer-owned identities'"):ps.index("'Update / repair installer-managed software - force latest supported stable upstream channels/sources now")]
 assert 'docker volume rm' not in advanced_menu.lower()
 assert 'data/synapse' not in advanced_menu.lower()
 

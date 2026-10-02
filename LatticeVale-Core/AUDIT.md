@@ -1,4 +1,10 @@
-# LatticeVale v14.6.1 audit
+# LatticeVale v14.6.2 audit
+
+## v14.6.2 managed-upstream delta audit
+
+The current v14.6.2 release retains the qualified v14.6.1 canonical architecture and adds latest-supported managed-upstream resolution: Option 6 forces the resolver, due/revision-triggered Option 1 uses the same resolver, stateful majors and the DirectML ABI remain compatibility-bounded, explicit overrides remain user-owned, and exact resolved image/source identity is recorded for diagnostics and rollback.
+Managed-refresh revision **5** is the current compatibility trigger, and the deterministic contract is **145 fixtures**. QMD uses its upstream `--host` support at the stable npm channel; the retired v2.5.3 listener source patch is removed from current release content.
+
 
 > **Policy-13 audit gate:** verify `useGpuAcceleration` and `directmlFallbackPolicy` survive Resume / repair; verify DirectML `none` never creates/retains a forced-Ollama marker; verify `torch.no_grad()` is used instead of `torch.inference_mode()`; and verify the sum of all enabled Docker CPU quotas never exceeds `CPU_DOCKER_ENVELOPE_MILLI`. The canonical regression sweep covers 3,328 CPU/backend/service-topology combinations plus irregular RAM envelopes.
 
@@ -242,11 +248,11 @@ Current WSL distinguishes the distro/instance idle timeout (`[general] instanceI
 
 The user preference and failure evidence require service persistence without secretly restoring full stack startup at Windows sign-in. Fresh auto-start therefore defaults to No. The Tailscale relay receives an at-logon trigger and `-EnsureDistroRunning` only when full stack auto-start is selected. Otherwise it is registered triggerless/passive. The relay checks `wsl --list --running --quiet` before any in-distro IP probe, so its passive refresh path cannot wake a stopped distro. `manage.sh start/stop/restart` coordinates the triggerless relay through `schtasks.exe`.
 
-## Online cross-checks retained
+## Historical online cross-checks retained for provenance
 
 - Docker's current Ubuntu Engine instructions still support Ubuntu 22.04, 24.04, and 26.04 and the same official package set used by LatticeVale.
-- Hermes Agent `v2026.8.16` / v0.20.2 is the latest stable Hermes release at final audit time, so clean installs are pinned to `nousresearch/hermes-agent:v2026.8.16`.
-- Synapse v1.158.0 remains the latest stable release while v1.159.0rc1 is pre-release, so the Synapse stable pin is unchanged.
+- At the historical audit time, Hermes Agent `v2026.8.16` / v0.20.2 was the latest stable Hermes release and clean installs used that fixed image. v14.6.2 no longer treats that historical pin as the current update authority.
+- At the historical audit time, Synapse v1.158.0 was the latest stable release while v1.159.0rc1 was prerelease. v14.6.2 now follows the managed stable channel during a due/forced refresh instead of preserving that historical fixed tag.
 - Tailscale Serve's documented reverse-proxy model targets a service on the Windows host (for example `127.0.0.1`), consistent with retaining the proven Windows-native localhost relay.
 
 ## Validation scope

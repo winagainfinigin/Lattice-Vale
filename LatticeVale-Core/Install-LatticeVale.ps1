@@ -20,7 +20,7 @@ function Start-LatticeValeRemoteAccessLog {
         New-Item -ItemType Directory -Path $base -Force | Out-Null
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $script:RemoteAccessLogPath = Join-Path $base "remote-access-$stamp.log"
-        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.1 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.2 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
         return $script:RemoteAccessLogPath
     } catch {
         $script:RemoteAccessLogPath = ''
@@ -6716,9 +6716,9 @@ $requiredBundleFiles = @(
     'linux\cleanup-storage.sh',
     'stack\compose.yaml',
     'stack\Dockerfile.qmd',
-    'stack\patch-qmd-bind.py',
     'stack\configure-stack.sh',
     'stack\manage.sh',
+    'stack\managed-upstreams.py',
     'stack\state-audit.py',
     'stack\latticevale_readonly.py',
     'stack\repair-plan.py',
@@ -6789,7 +6789,7 @@ $rebuildMatrixIdentity = $false
 # v13.16 repair maintenance is additive and only applies to an existing installer-managed stack.
 # Fresh installs keep the normal clean-install path; repair adds safe drift/storage maintenance.
 $repairMaintenance = $false
-# Explicit Update / repair forces the current bundle's managed software refresh now instead of waiting for the periodic repair window.
+# Explicit Update / repair forces the latest-supported managed software refresh now instead of waiting for the periodic repair window.
 $forceManagedUpdate = $false
 # v14.5.43: Resume / repair can automatically perform a cumulative migration when
 # the saved installer metadata predates this full release. Same-version repair stays local-first.
@@ -6829,7 +6829,7 @@ switch ($stackState) {
             'Verify installation only - read-only audit; make no changes',
             'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',
             'Advanced recovery - reset checkpoints or explicitly rebuild installer-owned identities',
-            'Update / repair installer-managed software - force this bundle''s declared component versions/channels and managed package/image/source layer now, then run normal repair',
+            'Update / repair installer-managed software - force latest supported stable upstream channels/sources now, preserve compatible stateful majors and explicit overrides, then run normal repair',
             'Cleanup / reclaim disk space - choose safe cleanup categories without changing the current LatticeVale runtime/data configuration',
             'Diagnostics / compatibility test - read-only Windows + WSL + GPU/backend + stack verification; make no changes'
         )
@@ -6915,8 +6915,8 @@ switch ($stackState) {
                 $installMode = 'update'
                 $forceManagedUpdate = $true
                 Write-Host "`nCONTROLLED UPDATE / REPAIR" -ForegroundColor Cyan
-                Write-Info 'This mode preserves saved component choices and persistent application data, creates a pre-update managed-stack backup, then forces this LatticeVale bundle''s managed package/image/source refresh instead of waiting for the periodic refresh window.'
-                Write-Info 'It applies installer-managed component references only to versions/channels declared by this bundle. It does not chase arbitrary upstream latest/main versions, overwrite explicit user-owned image/source overrides, or update separately owned native Windows Ollama.'
+                Write-Info 'This mode preserves saved component choices and persistent application data, creates a pre-update managed-stack backup, then resolves and forces the latest supported stable managed package/image/source refresh instead of waiting for the periodic refresh window.'
+                Write-Info 'It resolves installer-owned application references from supported stable upstream channels at update time, keeps stateful database majors and the DirectML/PyTorch ABI inside LatticeVale compatibility bounds, preserves explicit user-owned image/source overrides, and does not update separately owned native Windows Ollama.'
             }
             7 {
                 $installMode = 'cleanup'
@@ -6996,7 +6996,7 @@ switch ($stackState) {
             }
             Write-Host "`nCUMULATIVE MANAGED-STACK MIGRATION" -ForegroundColor Cyan
             Write-Info "$modeName will first migrate the proven managed stack from $($repairOriginInfo.OriginVersion) / schema $($repairOriginInfo.OriginSchema) directly to v$bundleVersion / schema $($repairOriginInfo.CurrentSchema), then continue with the selected mode's normal semantics."
-            Write-Info 'Before installer-managed software/source refresh, LatticeVale will create the same verified rollback backup used by controlled Update / repair. Persistent application state, identities, credentials, and explicit user-owned overrides remain preservation-first.'
+            Write-Info 'Before latest-supported installer-managed software/source refresh, LatticeVale will create the same verified rollback backup used by controlled Update / repair. Persistent application state, identities, credentials, and explicit user-owned overrides remain preservation-first.'
         }
 
         if (-not $selectedDistro.ManagedRepairEligible -and $installMode -in $mutatingManagedModes) {
@@ -7036,11 +7036,11 @@ if ($repairMaintenance -and (Test-LatticeValeBrokenShortcutLauncher $DistroName 
 
 if ($repairMaintenance) {
     if ($universalRepairMigration) {
-        Write-Info 'Universal repair migration enabled: this older managed installation will receive the current bundle-owned scripts, cumulative checkpoint migrations, current managed package/image/source pins, and a fresh resource-policy calculation. Persistent application data and explicit user-owned overrides are preserved.'
+        Write-Info 'Universal repair migration enabled: this older managed installation will receive the current bundle-owned scripts, cumulative checkpoint migrations, a latest-supported managed software/source refresh, and a fresh resource-policy calculation. Stateful compatibility boundaries, persistent application data, and explicit user-owned overrides are preserved.'
     } elseif ($forceManagedUpdate) {
-        Write-Info 'Managed update enabled: this run forces the installer-managed package/image/source layer to the versions and channels declared by this LatticeVale bundle, then runs normal live repair verification. Persistent application data and explicit user-owned overrides are preserved.'
+        Write-Info 'Managed update enabled: this run forces latest-supported stable installer-managed application channels/sources now, while preserving compatible stateful majors and explicit overrides, then runs normal live repair verification. Persistent application data is preserved.'
     } else {
-        Write-Info "Repair maintenance enabled: Resume / repair can update installer-managed prerequisites, Docker packages, images/builds, and audited source pins when the $((Get-LatticeValeCompatibility).ManagedRepairRefreshDays)-day managed refresh is due (or when the refresh policy changes). Between refresh windows it remains local-first and is not a blanket update. Persistent application data and explicit custom overrides are preserved."
+        Write-Info "Repair maintenance enabled: Resume / repair can refresh installer-managed prerequisites, Docker packages, application images/builds, and supported stable sources when the $((Get-LatticeValeCompatibility).ManagedRepairRefreshDays)-day managed refresh is due (or when the refresh policy changes). Between refresh windows it remains local-first and is not a blanket update. Stateful compatibility boundaries, persistent application data, and explicit custom overrides are preserved."
     }
 }
 
@@ -8407,7 +8407,7 @@ if (-not $mkdirProbe.Success) {
 try {
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'compatibility.conf') "$stageLinux/compatibility.conf" '0600'
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'linux\bootstrap.sh') "$stageLinux/linux/bootstrap.sh" '0600'
-    foreach ($file in @('compose.yaml','Dockerfile.qmd','patch-qmd-bind.py','configure-stack.sh','manage.sh','state-audit.py','latticevale_readonly.py','latticevale_arch.py','hardware-capabilities.py','backend-capabilities.py','runtime-policy.py','diagnostics.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
+    foreach ($file in @('compose.yaml','Dockerfile.qmd','configure-stack.sh','manage.sh','managed-upstreams.py','state-audit.py','latticevale_readonly.py','latticevale_arch.py','hardware-capabilities.py','backend-capabilities.py','runtime-policy.py','diagnostics.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
         Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot "stack\$file") "$stageLinux/stack/$file" '0600'
     }
     $optionsJson = $options | ConvertTo-Json -Depth 8 -Compress

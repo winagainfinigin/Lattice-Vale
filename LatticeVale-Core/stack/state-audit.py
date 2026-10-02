@@ -450,7 +450,7 @@ def main() -> int:
     if version_tuple(detected_version) >= (14, 6):
         core_files.extend(["compatibility.conf", "latticevale_arch.py", "hardware-capabilities.py", "backend-capabilities.py", "runtime-policy.py", "diagnostics.py"])
     if selected("qmd"):
-        core_files.extend(["Dockerfile.qmd", "patch-qmd-bind.py", "qmd-index-cycle.sh"])
+        core_files.extend(["Dockerfile.qmd", "qmd-index-cycle.sh"])
     missing = [x for x in core_files if not (root / x).is_file()]
     legacy_schema = isinstance(options_schema, int) and options_schema < 13
     def version_major(value):

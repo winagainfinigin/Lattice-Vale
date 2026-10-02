@@ -1,4 +1,11 @@
 # Contributing
+
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
+## v14.6.2 managed-upstream contribution rule
+
+Do not reintroduce bundle-fixed application pins as the current update authority. Changes to stable channels, ownership markers, compatibility-major bounds, Honcho stable-tag resolution, or DirectML ABI envelopes must update `stack/managed-upstreams.py`, current documentation, exact-artifact recording, and dedicated regression coverage together. A new database major or DirectML ABI generation requires an explicit migration/compatibility qualification rather than changing a rolling tag.
+
 ## v14.6.0 architecture ownership rule
 
 Do not duplicate install-options schema ceilings, host-memory reserve formulas, backend-selection ranking, or hardware/backend fingerprint logic outside the canonical architecture layer. Compatibility/orchestration wrappers may call `latticevale_arch.py`/the companion CLIs but must not reimplement their calculations. New generated architecture JSON must be atomic, schema-versioned, fingerprinted where appropriate, and immediately validated. Tests should assert behavior/invariants rather than private implementation strings.

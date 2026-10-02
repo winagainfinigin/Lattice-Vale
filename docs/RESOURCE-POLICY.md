@@ -1,4 +1,7 @@
-# LatticeVale 14.6.1 Canonical Resource Policy v13
+# LatticeVale 14.6.2 Canonical Resource Policy v13
+
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
 
 ## Policy v13 conserved CPU envelope
 

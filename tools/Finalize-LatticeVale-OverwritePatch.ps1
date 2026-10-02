@@ -1,10 +1,13 @@
 #Requires -Version 5.1
 [CmdletBinding()]
 param(
-    [Parameter()][string]$Root = (Split-Path -Parent $PSScriptRoot)
+    [Parameter()][string]$Root = ''
 )
 
 $ErrorActionPreference = 'Stop'
+if ([string]::IsNullOrWhiteSpace($Root)) {
+    $Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+}
 $rootFull = [IO.Path]::GetFullPath($Root)
 $deleteList = Join-Path $rootFull 'installer\PATCH-DELETE.txt'
 if (-not (Test-Path -LiteralPath $deleteList -PathType Leaf)) {

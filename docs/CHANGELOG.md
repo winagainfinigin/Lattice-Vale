@@ -1,6 +1,21 @@
 # Changelog
 
-### v14.6.1 documentation/release-contract synchronization
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
+
+## 14.6.2 - 2026-10-01
+
+- Changed Option 6 from bundle-pin convergence to forced **latest-supported stable upstream** convergence after the existing verified pre-update safety backup.
+- Due/revision-triggered Option 1 managed refreshes now use the same resolver; same-version/local-first behavior remains unchanged between refresh windows.
+- Hermes, Synapse, SearXNG, Ollama, and QMD track stable upstream channels; installer-owned Honcho tracks the newest stable semver tag rather than repository HEAD.
+- PostgreSQL/pgvector/Redis/Valkey remain compatibility-major bounded and the PyTorch/DirectML/Transformers set remains an ABI-qualified envelope.
+- NVIDIA Container Toolkit now follows NVIDIA's official stable APT channel during due/forced refresh rather than a LatticeVale-fixed toolkit package version.
+- Added exact managed-upstream resolution recording in `data/latticevale/managed-upstreams.json` and preserved explicit user overrides through automatic ownership markers.
+- Managed-refresh policy revision advanced to 5.
+- QMD stable/current releases are started with the upstream `--host 0.0.0.0` CLI; the obsolete v2.5.3 listener source patch is removed.
+- The deterministic release contract advances from 144 to **145 fixtures** with a dedicated v14.6.2 latest-supported-upstream regression.
+
+## v14.6.1 documentation/release-contract synchronization
 - Synchronizes current-facing documentation with the qualified v14.6.1 state: 144 deterministic fixtures, v14.6.0 as the declared parent baseline, v14.6.1 as the current release, and the preservation-first eight-option migration/repair contract.
 - Retains historical v14.6.0/v14.5.x release notes as historical lineage rather than rewriting their original fixture counts or architecture-attribution text.
 - Regenerates `installer/SOURCE-SHA256SUMS.txt` after the final documentation changes so GitHub/PowerShell manifest verification matches the published source bytes.

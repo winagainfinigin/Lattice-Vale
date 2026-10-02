@@ -1,4 +1,6 @@
-LATTICEVALE v14.6.1 — INSTRUCTIONS
+LATTICEVALE v14.6.2 — INSTRUCTIONS
+
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 V14.6.0 SCHEMA-23 / POLICY-13 COMPLETION: local-AI setup asks whether to use GPU acceleration and preserves CPU-only operation when selected. DirectML text fallback is explicitly native-Windows Ollama, managed WSL/Docker Ollama, or none/fail-closed; Honcho embeddings may still use Ollama independently. Policy v13 conserves one WSL-visible CPU envelope: about 10% system headroom, about 25% DirectML host reserve when DirectML is selected, and the remaining about 65% shared by enabled Docker services (about 90% Docker without DirectML). DirectML generation uses torch.no_grad(), and no-fallback mode removes/refuses forced-Ollama markers.
 V14.6.0 CANONICAL ARCHITECTURE: durable installer choices are separated from derived Windows/WSL hardware, backend capability/health/selection, and runtime policy. DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU are classified independently; generated architecture state is schema-versioned, fingerprinted, atomically written, and canonically validated. Resume / repair migrates recognized managed 14.x installations preservation-first.
@@ -10,13 +12,13 @@ V14.5.44 DIRECTML PREFLIGHT HOTFIX: DirectML selection now uses a dedicated dire
 
 RESOURCE POLICY DIAGNOSTIC: after a successful v14.6.0 install/repair with adaptive limits enabled, `~/hermes-stack/resource-policy-report.txt` is the secret-free human-readable explanation of canonical policy v13. It records RAM/CPU class, managed-Ollama acceleration/offload verification, GPU topology/VRAM coordination, context/model floor, generated CPU/RAM limits, and hardware/policy fingerprints. `./manage.sh audit` independently recomputes the fingerprints and verifies live Docker ceilings.
 
-EXISTING INSTALLS / CUMULATIVE REPAIR MIGRATION: run the full v14.6.1 installer directly. Resume / repair installation remains the recommended general recovery path. For any older recognized installer-managed stack, v14.6.1 inherits and extends the v14.5.43 migration engine: it proves ownership, detects historical version/schema state, creates a verified rollback backup, installs the current installer-owned management layer, replays required cumulative migrations, refreshes current managed pins, and regenerates canonical hardware/backend state plus resource policy v13. No intermediate LatticeVale version is required. Unrecognized/corrupt stacks and repair downgrades fail closed. Same-version repair remains local-first. If an older proven stack requires migration, any mutating managed-stack choice (Options 1, 2, 4, 5, or 6) performs that same preservation-first cumulative migration before continuing with its own role; Options 3, 7, and 8 remain non-mutating.
+EXISTING INSTALLS / CUMULATIVE REPAIR MIGRATION: run the full v14.6.2 installer directly. Resume / repair installation remains the recommended general recovery path. For any older recognized installer-managed stack, v14.6.2 inherits and extends the v14.5.43 migration engine: it proves ownership, detects historical version/schema state, creates a verified rollback backup, installs the current installer-owned management layer, replays required cumulative migrations, resolves current latest-supported managed upstreams, and regenerates canonical hardware/backend state plus resource policy v13. No intermediate LatticeVale version is required. Unrecognized/corrupt stacks and repair downgrades fail closed. Same-version repair remains local-first. If an older proven stack requires migration, any mutating managed-stack choice (Options 1, 2, 4, 5, or 6) performs that same preservation-first cumulative migration before continuing with its own role; Options 3, 7, and 8 remain non-mutating.
 
 V14.5.42 HARDWARE RESOURCE POLICY UPDATE: Managed WSL/Docker Ollama now uses resource policy v11 with compact/balanced/large RAM profiles, CPU profiles, per-GPU NVIDIA/AMD VRAM topology, GPU-aware context, shared DirectML/Ollama VRAM coordination, and runtime GPU-offload verification. Auto-selected GPU acceleration that actually runs on CPU is re-budgeted safely; explicitly forced GPU acceleration fails closed when offload cannot be proven. Native Windows Ollama remains user-owned.
 
 V14.5.4 DIRECTML / LOW-MEMORY UPDATE: Local AI setup can explicitly choose stable Ollama or the experimental PyTorch DirectML text gateway. DirectML is opt-in; existing installs stay on Ollama unless changed. When selected, Hermes and Honcho text use the shared WSL-host gateway, Ollama remains fallback, and Honcho embeddings stay on Ollama. DirectML setup is isolated and failure-safe; unsupported model/operator execution falls back to Ollama.
 
-CURRENT RELEASE: v14.6.1 is the version to install first. New installs should use the full v14.6.1 release directly. Existing recognized installs should launch the full v14.6.1 release and choose Resume / repair so canonical hardware/backend state and resource policy v13 are regenerated while persistent state is preserved. Option 7 remains the explicit cleanup path. The v14.5.4 DirectML VRAM guard, v14.5.2 cleanup behavior, v14.5.1 OOM/live-limit convergence, and v14.5.0 read-only planner are retained.
+CURRENT RELEASE: v14.6.2 is the version to install first. New installs should use the full v14.6.2 release directly. Existing recognized installs should launch the full v14.6.2 release and choose Resume / repair so canonical hardware/backend state and resource policy v13 are regenerated while persistent state is preserved. Option 7 remains the explicit cleanup path. The v14.5.4 DirectML VRAM guard, v14.5.2 cleanup behavior, v14.5.1 OOM/live-limit convergence, and v14.5.0 read-only planner are retained.
 
 V14.5.0 READ-ONLY PLAN / ARCHITECTURE: `./manage.sh repair --plan` and `./manage.sh plan` inspect existing checkpoint revisions plus live/offline state without modifying the stack. `./manage.sh audit-free` reports whether the current default Hermes path is installer-declared local/free and whether the selected local-AI path is fully WSL-native (managed Ollama). `compose.override.yaml` remains user-owned and opaque to the planner. Windows remains bootstrap/host-integration; core operation stays in WSL.
 
@@ -161,7 +163,7 @@ When a managed stack is detected the installer offers:
      4) Return to read-only verification and exit
 
 6. Update / repair installer-managed software
-   Use a newer LatticeVale bundle to immediately apply that bundle's tested/declared installer-managed package/image/source versions. A verified bundle-owned pre-update safety backup must succeed before the forced refresh starts; it does not depend on the currently installed manage.sh and runs only that backup transaction as WSL root so container-owned persistent files can be preserved safely.
+   Force the newest supported stable installer-managed package/image/source channels now, independent of the LatticeVale bundle's release-time application versions. A verified bundle-owned pre-update safety backup must succeed before the forced refresh starts; it does not depend on the currently installed manage.sh and runs only that backup transaction as WSL root so container-owned persistent files can be preserved safely.
 
 7. Cleanup / reclaim disk space
    Isolated, confirmation-gated storage maintenance for a recognized managed stack. You may remove only verified LatticeVale Option 6 backups for the current stack, stale installer staging, APT download cache, Docker dangling images, Docker dangling default-builder cache, and/or TRIM unused root-filesystem blocks. Cleanup exits without running normal repair stages and does not delete live containers, networks, volumes, tagged images, configured models, persistent application data, credentials, vault/workspace data, or the WSL VHDX.
@@ -178,7 +180,7 @@ If you are unsure and simply need to recover a managed installation, choose opti
 
 Practical image/container rule:
 - Option 1 may recreate/reconcile affected containers when configuration, resource policy, migrations, or health require it. It may also refresh installer-owned images/packages/source when the 30-day gate, managed-refresh revision, or missing legacy refresh state requires that refresh. It does not force a pull/rebuild merely because the LatticeVale bundle version changed.
-- Option 6 is the explicit choice when your goal is to force the current bundle-aligned installer-managed package/image/source refresh now. Persistent application data and explicit user-owned overrides remain preservation-first.
+- Option 6 is the explicit choice when your goal is to force latest-supported stable installer-managed package/image/source refresh now. Persistent application data and explicit user-owned overrides remain preservation-first.
 
 ================================================================================
 6. AFTER INSTALLATION — VERIFY HEALTH
@@ -234,7 +236,7 @@ Preferred controlled software update:
 Advanced upstream refresh:
   ./manage.sh update
 
-The advanced command is not equivalent to the bundle-pinned installer updater and may follow configured upstream references differently.
+The advanced command uses the same latest-supported resolver as the installer updater, while remaining a WSL-side maintenance path rather than the Windows installer workflow.
 
 If Windows Start/Shut Down shortcuts were enabled, test each once after install. The v14.4.84 managed shutdown shortcut stops this stack and leaves its selected WSL distro running; it issues neither targeted `wsl --terminate` nor global `wsl --shutdown`.
 
@@ -256,7 +258,7 @@ Use installer option 4 when you want the installer to rerun provider/profile set
 8A. RAM / ADAPTIVE RESOURCE POLICY
 ================================================================================
 
-If you selected adaptive CPU/RAM ceilings, current v14.6.1 uses canonical resource policy v13. The audit measures CPUs actually available to the WSL process using the same effective semantics as `nproc`, while RAM fingerprint comparison uses the current WSL-visible allocation. These are per-stack ceilings/tuning defaults; they do not write or replace host-wide WSL memory policy.
+If you selected adaptive CPU/RAM ceilings, current v14.6.2 uses canonical resource policy v13. The audit measures CPUs actually available to the WSL process using the same effective semantics as `nproc`, while RAM fingerprint comparison uses the current WSL-visible allocation. These are per-stack ceilings/tuning defaults; they do not write or replace host-wide WSL memory policy.
 
 Policy v13 has no fixed host-RAM band table and no machine/model-specific tuning branch. The canonical architecture library derives host reserve, DirectML WSL-host reserve, total container budget, CPU quotas, service-memory water filling, model/context/concurrency limits, GPU coordination, and allocator/PostgreSQL/Synapse tuning from live WSL CPU/RAM plus enabled services, actual model information, selected backend, and measured GPU/UMA capability. Generation, verification, diagnostics, repair planning, and state audit consume the same canonical calculations.
 
@@ -297,7 +299,7 @@ LatticeVale can provision Synapse, the default bot, and selected named-profile b
 
 If a named profile remains pending after installation, use the exact matrix-profile-finish procedure in section 6. Do not rebuild an identity simply because activation is pending.
 
-If exposing Matrix through Windows Tailscale, verify the Tailscale client is signed in and that your tailnet ACLs/grants permit only the access you intend. During current v14.6.1 setup/repair, complete the one-time second-device validation when prompted: open the generated private Tailscale HTTPS URL on the phone or other peer you will actually use remotely (cellular is preferred for the strongest external-path check) and enter the displayed token back into the installer. PASS requires that current-run second-device proof; skipping it reports PARTIAL, while DNS, transport, TLS, Serve, relay, or Matrix failures report FAIL with the corresponding category.
+If exposing Matrix through Windows Tailscale, verify the Tailscale client is signed in and that your tailnet ACLs/grants permit only the access you intend. During current v14.6.2 setup/repair, complete the one-time second-device validation when prompted: open the generated private Tailscale HTTPS URL on the phone or other peer you will actually use remotely (cellular is preferred for the strongest external-path check) and enter the displayed token back into the installer. PASS requires that current-run second-device proof; skipping it reports PARTIAL, while DNS, transport, TLS, Serve, relay, or Matrix failures report FAIL with the corresponding category.
 
 ================================================================================
 11. OLLAMA / LOCAL AI

@@ -11,7 +11,7 @@ x-service-defaults: &service-defaults
 services:
   hermes:
     <<: *service-defaults
-    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:v2026.8.16}
+    image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}
     container_name: hermes-agent
     command: ["gateway", "run"]
     env_file:
@@ -59,7 +59,7 @@ services:
   synapse:
     <<: *service-defaults
     profiles: ["matrix"]
-    image: ${SYNAPSE_IMAGE:-matrixdotorg/synapse:v1.158.0}
+    image: ${SYNAPSE_IMAGE:-matrixdotorg/synapse:latest}
     container_name: hermes-synapse
     environment:
       SYNAPSE_CONFIG_PATH: /data/homeserver.yaml
@@ -101,7 +101,7 @@ services:
   searxng:
     <<: *service-defaults
     profiles: ["search"]
-    image: ${SEARXNG_IMAGE:-searxng/searxng:2026.8.17-374939b88}
+    image: ${SEARXNG_IMAGE:-searxng/searxng:latest}
     container_name: hermes-searxng
     environment:
       SEARXNG_BASE_URL: http://localhost:${SEARXNG_HOST_PORT:-8888}/
@@ -127,7 +127,7 @@ services:
       context: .
       dockerfile: Dockerfile.qmd
       args:
-        QMD_VERSION: ${QMD_VERSION:-2.5.3}
+        QMD_VERSION: ${QMD_VERSION:-latest}
     image: hermes-qmd:local
     container_name: hermes-qmd
     command: ["sh", "-lc", "mkdir -p \"$$HOME\" && exec qmd mcp --http --port 8181"]
@@ -184,7 +184,7 @@ services:
   ollama:
     <<: *service-defaults
     profiles: ["local-ai"]
-    image: ${OLLAMA_IMAGE:-ollama/ollama:0.32.14}
+    image: ${OLLAMA_IMAGE:-ollama/ollama:latest}
     container_name: hermes-ollama
     environment:
       OLLAMA_HOST: 0.0.0.0:11434

@@ -15,7 +15,7 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
         'stack/configure-stack.sh', 'stack/compose.yaml',
         'stack/latticevale_arch.py', 'stack/hardware-capabilities.py',
         'stack/backend-capabilities.py', 'stack/runtime-policy.py',
-        'stack/diagnostics.py', 'stack/checkpoint-metadata.json',
+        'stack/diagnostics.py', 'stack/managed-upstreams.py', 'stack/checkpoint-metadata.json',
     ):
         src=ROOT/source_rel
         (stack/src.name).write_bytes(src.read_bytes())

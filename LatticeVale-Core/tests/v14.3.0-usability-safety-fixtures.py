@@ -9,10 +9,10 @@ conf=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 readme=(RELEASE/'docs/README.md').read_text(encoding='utf-8')
 security=(RELEASE/'docs/SECURITY.md').read_text(encoding='utf-8')
 arch=(ROOT/'stack/latticevale_arch.py').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}
+assert (ROOT/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}
 assert 'schema = $compat.InstallOptionsSchema' in ps
 assert "questionnaireMode = $questionnaireMode" in ps
-if (ROOT/'VERSION.txt').read_text().strip() in {'14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}:
+if (ROOT/'VERSION.txt').read_text().strip() in {'14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}:
     assert 'Choose setup questionnaire:' not in ps
     assert 'Quick setup — recommended defaults' not in ps
     assert "questionnaireMode = 'explicit'" in ps
@@ -29,14 +29,15 @@ assert 'latticevale_arch.py validate-options install-options.json --compat compa
 assert 'questionnaireMode must be quick, custom, or explicit' in arch
 # NVIDIA toolkit must never be silently downgraded by this release.
 assert '--allow-downgrades' not in boot
-assert 'dpkg --compare-versions' in boot
-assert 'preserving it and verifying the runtime instead of downgrading' in boot
-assert 'will not downgrade the newer packages automatically' in boot
+assert 'https://nvidia.github.io/libnvidia-container/' in boot
+for pkg in ('nvidia-container-toolkit','nvidia-container-toolkit-base','libnvidia-container-tools','libnvidia-container1'):
+    assert pkg in boot
+assert 'does not request package downgrades' in boot
 # Offline pin visibility: status/verify may show age but must not network-check freshness.
-assert "LATTICEVALE_PIN_DATE='2026-08-17'" in manage
-assert 'Configured image pins' in manage and 'no network check' in manage
-assert 'Note: pin age is visibility only' in manage
-for image in ('nousresearch/hermes-agent:v2026.8.16','matrixdotorg/synapse:v1.158.0','searxng/searxng:2026.8.17-374939b88','ollama/ollama:0.32.14'):
+assert "LATTICEVALE_PIN_DATE='2026-10-01'" in manage
+assert 'Configured managed upstream channels' in manage and 'no network check' in manage
+assert 'Note: channel age is visibility only' in manage
+for image in ('nousresearch/hermes-agent:latest','matrixdotorg/synapse:latest','searxng/searxng:latest','ollama/ollama:latest'):
     assert image in manage
 # GPU fit is advisory and actual loaded-model processor evidence comes from ollama ps.
 assert '--query-gpu=memory.total' in manage
@@ -53,7 +54,7 @@ assert 'consider encrypting it before copying it' in manage
 assert 'age-encryption.org' not in manage and 'gpg --encrypt' not in manage
 # User-facing docs describe all additions and retain jq as a real prerequisite rather than weakening production for sandbox tests.
 assert (('Quick setup' in readme and 'Custom setup' in readme) or ('explicit' in readme.lower() and 'fresh install' in readme.lower()))
-assert 'pin age' in readme.lower()
+assert ('channel age' in readme.lower()) or ('pin age' in readme.lower())
 assert 'VRAM' in readme and 'ollama ps' in readme
 assert 'backup' in security.lower() and 'encrypt' in security.lower()
 assert 'jq' in (ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')

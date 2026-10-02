@@ -1,4 +1,10 @@
-## v14.6.1 canonical architecture source policy
+## v14.6.2 latest-supported upstream source policy
+
+LatticeVale no longer treats its own release bundle as the permanent application-version authority. When a managed refresh is due or Option 6 is selected, installer-owned Hermes, Synapse, SearXNG, Ollama, and QMD resolve through stable upstream channels; installer-owned Honcho resolves the newest stable semantic-version tag from the official `plastic-labs/honcho` origin. Stateful database/cache services remain on compatible major channels (PostgreSQL 16, pgvector/PG15, Redis 8, Valkey 8), and the WSL DirectML Python environment remains a tested PyTorch/torch-directml/Transformers compatibility envelope rather than floating each ABI-sensitive package independently. Explicit user-owned image/source overrides are preserved. After successful pull/build/reconciliation, LatticeVale records exact image IDs/digests, Honcho commit/tag/origin, selected channels, and the DirectML requirements hash in `data/latticevale/managed-upstreams.json`.
+
+QMD current stable releases expose a native `--host` option, so v14.6.2 removes the historical source-rewriting listener patch used for QMD 2.5.3 and starts QMD with its upstream CLI interface instead.
+
+## v14.6.2 canonical architecture source policy
 
 - **No new redistributed GPU/runtime binary:** the canonical hardware/backend/resource architecture is first-party Python/PowerShell/Bash and uses standard OS/runtime interfaces already required by LatticeVale.
 - **Capability evidence remains upstream-owned:** Microsoft documents PyTorch with DirectML inside WSL2 (`https://learn.microsoft.com/windows/ai/directml/pytorch-wsl`) on supported Windows 11/DirectX 12 systems; LatticeVale uses that WSL DirectX/`torch-directml` path rather than assuming AMD DirectML must run natively on Windows. CUDA uses the existing NVIDIA WSL/container path; ROCm uses existing AMD Linux devices/runtime; Vulkan uses the existing WSL DRM/Vulkan/Ollama path; CPU remains the portable fallback. LatticeVale does not install or replace Windows/vendor display drivers.
@@ -138,18 +144,18 @@ Compose references are pulled online from their upstream registries when a clean
 
 | Compose image | Registry/upstream reference |
 |---|---|
-| `nousresearch/hermes-agent:v2026.8.16` | `https://hub.docker.com/r/nousresearch/hermes-agent` / `https://github.com/NousResearch/hermes-agent` |
-| `matrixdotorg/synapse:v1.158.0` | `https://hub.docker.com/r/matrixdotorg/synapse` / `https://github.com/element-hq/synapse` |
+| `nousresearch/hermes-agent:latest` (stable rolling) | `https://hub.docker.com/r/nousresearch/hermes-agent` / `https://github.com/NousResearch/hermes-agent` |
+| `matrixdotorg/synapse:latest` (stable rolling) | `https://hub.docker.com/r/matrixdotorg/synapse` / `https://github.com/element-hq/synapse` |
 | `postgres:16-alpine` | `https://hub.docker.com/_/postgres` |
 | `valkey/valkey:8-alpine` | `https://hub.docker.com/r/valkey/valkey` / `https://github.com/valkey-io/valkey` |
-| `searxng/searxng:2026.8.17-374939b88` | `https://hub.docker.com/r/searxng/searxng` / `https://github.com/searxng/searxng` |
-| `ollama/ollama:0.32.14` | `https://hub.docker.com/r/ollama/ollama` / `https://github.com/ollama/ollama` |
-| `ollama/ollama:0.32.14-rocm` (AMD/ROCm mode) | `https://hub.docker.com/r/ollama/ollama` / `https://github.com/ollama/ollama` |
+| `searxng/searxng:latest` (stable rolling) | `https://hub.docker.com/r/searxng/searxng` / `https://github.com/searxng/searxng` |
+| `ollama/ollama:latest` (stable rolling) | `https://hub.docker.com/r/ollama/ollama` / `https://github.com/ollama/ollama` |
+| `ollama/ollama:rocm` (AMD/ROCm stable rolling) | `https://hub.docker.com/r/ollama/ollama` / `https://github.com/ollama/ollama` |
 | `pgvector/pgvector:pg15` | `https://hub.docker.com/r/pgvector/pgvector` / `https://github.com/pgvector/pgvector` |
 | `redis:8-alpine` | `https://hub.docker.com/_/redis` |
 | QMD build base `node:24-bookworm-slim` | `https://hub.docker.com/_/node` |
 
-LatticeVale's distributed defaults do not use floating `latest` tags for Ollama or SearXNG. Resume / repair preserves explicit image/source overrides and refreshes installer-owned package/image/source state only when the 30-day gate is due, the managed-refresh policy revision changes, valid legacy state is missing, or explicit Update / repair forces it. A bundle-version change alone stays local-first. The Windows **Update / repair installer-managed software** choice forces the current bundle-aligned managed refresh after a required backup. `./manage.sh update` remains a separate advanced upstream-refresh workflow and is not the bundle-pinned updater.
+v14.6.2 deliberately uses stable rolling channels for installer-owned application components. Resume / repair preserves explicit image/source overrides and resolves those channels only when the 30-day gate is due, the managed-refresh policy revision changes, valid legacy state is missing, or explicit Update / repair forces it. A bundle-version change alone stays local-first. Option 6 and `./manage.sh update` use the same latest-supported resolver. Stateful storage majors and the DirectML ABI remain compatibility-bounded rather than blindly floated. Exact pulled image IDs/digests and source commits/tags are recorded after reconciliation.
 
 ## Optional NVIDIA GPU runtime
 
@@ -158,11 +164,11 @@ When NVIDIA acceleration is selected (or Auto detects WSL NVIDIA support and the
 - `https://nvidia.github.io/libnvidia-container/gpgkey`
 - `https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list`
 
-LatticeVale pins the complete NVIDIA Container Toolkit 1.20.0 Debian package set (`nvidia-container-toolkit`, `nvidia-container-toolkit-base`, `libnvidia-container-tools`, and `libnvidia-container1`, each `1.20.0-1`) from that official repository for the v14.3.2 release (unchanged from v14.3.0). If a complete installed toolkit is already newer than that pin, LatticeVale preserves it and verifies the runtime instead of downgrading. If package state is mixed (some newer than the pin while other toolkit components are missing/older), installation fails closed rather than forcing a downgrade. The installer runs NVIDIA's documented `nvidia-ctk runtime configure --runtime=docker`, backs up an existing Docker daemon configuration before changing it, verifies the NVIDIA runtime afterward, and restores the prior daemon configuration if verification fails. It does not install a Linux NVIDIA display driver inside WSL.
+During a due/forced managed refresh, LatticeVale installs/upgrades the complete NVIDIA Container Toolkit package set (`nvidia-container-toolkit`, `nvidia-container-toolkit-base`, `libnvidia-container-tools`, and `libnvidia-container1`) from NVIDIA's official **stable** repository. It does not use `--allow-downgrades`; outside a managed refresh an already working toolkit is reused. The installer runs NVIDIA's documented `nvidia-ctk runtime configure --runtime=docker`, backs up an existing Docker daemon configuration before changing it, verifies the NVIDIA runtime afterward, and restores the prior daemon configuration if verification fails. It does not install a Linux NVIDIA display driver inside WSL.
 
 ## Source-built / package-installed components
 
-Honcho is fetched from the official Plastic Labs GitHub repository (`https://github.com/plastic-labs/honcho.git`) and checked out at the LatticeVale-tested commit `444897975c95393b0d48024470ece03c025d3aa4`. Ordinary repair reuses the existing checkout. During a due periodic managed refresh—or an explicit Windows Update / repair run—LatticeVale advances it to the commit audited by the current bundle only when the checkout's origin and recorded `LATTICEVALE_HONCHO_SOURCE_AUTO` marker prove that the source is installer-owned; custom/ambiguous legacy checkouts are preserved. QMD is built from published package `@tobilu/qmd@2.5.3`, with upstream source at `https://github.com/tobi/qmd`.
+Honcho is fetched from the official Plastic Labs GitHub repository (`https://github.com/plastic-labs/honcho.git`). During a due/forced managed refresh, a proven installer-owned checkout advances to the newest stable semantic-version tag; development/default-branch HEAD is not selected. Custom/ambiguous checkouts are preserved. QMD is built from published package `@tobilu/qmd@latest` at refresh/build time, with upstream source at `https://github.com/tobi/qmd`.
 
 ## Local AI models
 
@@ -200,9 +206,11 @@ Public release auditing rejects compiled installers/binaries/bytecode and opaque
 
 LatticeVale's MIT license permits downstream modification and redistribution of LatticeVale source/documentation. A customized repository should keep its changed source inspectable, regenerate `installer/SOURCE-SHA256SUMS.txt`, identify itself as modified, and separately respect the licenses/terms of every fetched or incorporated third-party component.
 
-## Pinned image policy
+## Latest-supported upstream policy
 
-LatticeVale release defaults use explicit upstream versioned image tags to reduce unreviewed drift. Versioned registry tags improve repeatability but are **not equivalent to immutable image digests** and may theoretically be republished upstream. Between refresh windows, repair does not advance pins merely because upstream has something newer. During the 30-day managed refresh or an explicit Windows Update / repair run, a LatticeVale release may advance only the bundle-declared defaults that are proven installer-owned by ownership markers; explicit `.env` overrides remain user-owned. Fixed tags advance to a different version only when the LatticeVale bundle itself declares a different tag; pulling a fixed tag is not treated as permission to follow arbitrary upstream releases. `installer/SOURCE-SHA256SUMS.txt` authenticates the complete shipped LatticeVale release tree except the manifest itself—it does not authenticate third-party registry contents or downloads fetched later at install/update time. NVIDIA Container Toolkit, when selected for supported NVIDIA GPU acceleration, is installed from NVIDIA's official `nvidia.github.io/libnvidia-container` APT repository.
+v14.6.2 resolves installer-owned application software from official stable upstream channels when a managed refresh is due or forced. Floating channel names are not treated as reproducibility evidence: after resolution LatticeVale records exact local image IDs/repository digests plus source commits/tags in `data/latticevale/managed-upstreams.json`. Explicit `.env`/source overrides remain user-owned.
+
+Stateful/ABI-sensitive components are constrained to a supported compatibility line: PostgreSQL/pgvector/Redis/Valkey majors do not jump without an explicit tested data migration, and PyTorch/`torch-directml`/Transformers remain a qualified set. NVIDIA Container Toolkit is refreshed from NVIDIA's official stable APT channel without `--allow-downgrades`. `installer/SOURCE-SHA256SUMS.txt` authenticates LatticeVale's shipped source tree, not third-party artifacts fetched later.
 
 ## Uninstaller
 

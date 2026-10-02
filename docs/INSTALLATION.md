@@ -1,6 +1,9 @@
-# LatticeVale 14.6.1 Installation
+# LatticeVale 14.6.2 Installation
 
-## v14.6.1 Tailscale remote-access completion
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
+
+## Inherited v14.6.1 Tailscale remote-access completion
 
 When Windows Tailscale remote access is selected, installation is not considered fully healthy merely because the same PC can open its own `.ts.net` URL. The installer verifies the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and the selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
 
@@ -9,13 +12,13 @@ For a `PASS`, complete the temporary second-device challenge when prompted. Open
 The installer does not rewrite tailnet-wide Admin Console DNS policy. If another device reports DNS unavailable, repair the tailnet/client DNS configuration and rerun Resume / repair.
 
 
-## v14.6.1 existing-install convergence
+## v14.6.2 existing-install convergence
 
 For a recognized older installer-managed stack, cumulative migration is not tied only to Option 1. Mutating Options **1, 2, 4, 5, and 6** first perform the required preservation-first migration, then continue with their own purpose. Option **3 (Verify)** and Option **8 (Diagnostics / compatibility)** remain read-only, while Option **7 (Cleanup / reclaim)** remains an isolated bounded maintenance path. **Resume / repair** is still the recommended general recovery choice.
 
 Same-version Resume / repair also treats stale canonical runtime-policy state, transient DirectML gateway readiness, and missing ephemeral Hermes s6 gateway slots as recoverable installer-owned drift when the underlying preserved configuration is intact.
 
-## v14.6.1 current schema-23 local-AI choices (inherited from v14.6.0)
+## v14.6.2 current schema-23 local-AI choices (inherited from v14.6.0)
 
 Local-AI setup now records whether GPU acceleration is wanted before backend selection. CPU-only is fully supported. DirectML users explicitly choose native-Windows Ollama fallback, managed WSL/Docker Ollama fallback, or no text fallback. These choices are durable and are preserved during Resume / repair. Honcho embeddings can use Ollama independently of the DirectML text-fallback choice.
 
@@ -31,7 +34,7 @@ The installer preserves these boundaries:
 - explicit confirmation before installation-changing actions;
 - user-owned `compose.override.yaml` is applied last and remains opaque to the installer planner.
 
-## v14.6.1 generated-state architecture (inherited from v14.6.0)
+## v14.6.2 generated-state architecture (inherited from v14.6.0; hardened in v14.6.1)
 
 Durable user intent remains in `install-options.json`. Machine-derived state is generated separately under `data/latticevale/`:
 

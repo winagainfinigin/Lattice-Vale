@@ -7,7 +7,7 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]; REPO=ROOT.parent
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.47','14.6.0','14.6.1'}, version
+assert version in {'14.5.47','14.6.0','14.6.1','14.6.2'}, version
 sys.path.insert(0,str(ROOT/'stack'))
 from latticevale_arch import (  # noqa:E402
     classify_backends, fingerprint, host_memory_budget, parse_compatibility, validate_install_options

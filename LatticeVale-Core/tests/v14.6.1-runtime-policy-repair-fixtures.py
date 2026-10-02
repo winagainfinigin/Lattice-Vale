@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""v14.6.1 same-version runtime-policy/DirectML repair regression coverage."""
+"""v14.6.2 same-version runtime-policy/DirectML repair regression coverage."""
 from pathlib import Path
 import hashlib
 import importlib.util
@@ -15,7 +15,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version == '14.6.1', version
+assert version == '14.6.2', version
 sys.path.insert(0, str(ROOT / 'stack'))
 from latticevale_arch import (  # noqa:E402
     directml_context_recommendation,
@@ -266,4 +266,4 @@ server.shutdown()
 server.server_close()
 assert elapsed < 0.5, elapsed
 
-print('v14.6.1 runtime-policy/DirectML repair fixtures: PASS')
+print('v14.6.2 runtime-policy/DirectML repair fixtures: PASS')

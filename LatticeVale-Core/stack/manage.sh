@@ -28,7 +28,7 @@ Usage: ./manage.sh COMMAND [ARG]
   kanban                  Show Kanban board/tasks (when enabled)
   reindex                 Run a QMD vault update/embed now (when enabled)
   backup                  Create a local backup under ./backups
-  update                  Advanced upstream refresh of current configured refs; NOT the bundle-pinned installer updater
+  update                  Force latest-supported upstream refresh of installer-managed refs, then verify
   dashboard-info          Print the dashboard URL (never prints its password)
   matrix-info             Print non-secret Matrix connection information
   matrix-profile-finish PROFILE
@@ -88,7 +88,7 @@ windows_host_ip() {
 }
 native_ollama_base_url() { local host; host="$(windows_host_ip)"; [[ -n "$host" ]] || return 1; printf 'http://%s:%s' "$host" "$WINDOWS_OLLAMA_BRIDGE_PORT"; }
 
-LATTICEVALE_PIN_DATE='2026-08-17'
+LATTICEVALE_PIN_DATE='2026-10-01'
 env_value() {
   local key="$1" default="${2:-}" value='' line
   if [[ -r .env ]]; then
@@ -115,20 +115,20 @@ show_pin_summary() {
   local age image
   age="$(pin_age_days)"
   echo
-  echo "Configured image pins (LatticeVale pin date $LATTICEVALE_PIN_DATE; age: ${age} day(s); no network check):"
-  printf '  %-12s %s\n' Hermes "$(env_value HERMES_IMAGE 'nousresearch/hermes-agent:v2026.8.16')"
+  echo "Configured managed upstream channels (policy date $LATTICEVALE_PIN_DATE; age: ${age} day(s); no network check):"
+  printf '  %-12s %s\n' Hermes "$(env_value HERMES_IMAGE 'nousresearch/hermes-agent:latest')"
   printf '  %-12s %s\n' Postgres "$(env_value POSTGRES_IMAGE 'postgres:16-alpine')"
-  if [[ "$(opt_bool matrix)" == true ]]; then printf '  %-12s %s\n' Synapse "$(env_value SYNAPSE_IMAGE 'matrixdotorg/synapse:v1.158.0')"; fi
+  if [[ "$(opt_bool matrix)" == true ]]; then printf '  %-12s %s\n' Synapse "$(env_value SYNAPSE_IMAGE 'matrixdotorg/synapse:latest')"; fi
   if [[ "$(opt_bool searxng)" == true ]]; then
     printf '  %-12s %s\n' Valkey "$(env_value VALKEY_IMAGE 'valkey/valkey:8-alpine')"
-    printf '  %-12s %s\n' SearXNG "$(env_value SEARXNG_IMAGE 'searxng/searxng:2026.8.17-374939b88')"
+    printf '  %-12s %s\n' SearXNG "$(env_value SEARXNG_IMAGE 'searxng/searxng:latest')"
   fi
-  if managed_ollama_enabled; then printf '  %-12s %s\n' Ollama "$(env_value OLLAMA_IMAGE 'ollama/ollama:0.32.14')"; elif windows_native_ollama_enabled; then printf '  %-12s %s\n' Ollama 'native Windows runtime (user-managed)'; fi
+  if managed_ollama_enabled; then printf '  %-12s %s\n' Ollama "$(env_value OLLAMA_IMAGE 'ollama/ollama:latest')"; elif windows_native_ollama_enabled; then printf '  %-12s %s\n' Ollama 'native Windows runtime (user-managed)'; fi
   if [[ "$(opt_bool honcho)" == true ]]; then
     printf '  %-12s %s\n' pgvector "$(env_value PGVECTOR_IMAGE 'pgvector/pgvector:pg15')"
     printf '  %-12s %s\n' Redis "$(env_value REDIS_IMAGE 'redis:8-alpine')"
   fi
-  echo '  Note: pin age is visibility only; it does not mean a newer upstream release exists.'
+  echo '  Note: channel age is visibility only; exact pulled digests/commits are recorded after refresh.'
 }
 
 gpu_vram_mib() {
@@ -1222,8 +1222,8 @@ case "$cmd" in
   repair-info)
     echo 'Rerun Install-LatticeVale.ps1 from the Windows bundle.'
     echo 'Resume / repair preserves completed work and reruns failed/incomplete/stale stages; it refreshes installer-owned components when the periodic gate is due or the managed-refresh policy revision changes. A bundle-version change alone stays local-first.'
-    echo "Choose Update / repair installer-managed software when you want to force the current bundle's declared component versions/channels immediately, including after a version-only bundle change that does not advance the managed-refresh policy revision."
-    echo './manage.sh update is a separate advanced upstream-refresh command: it pulls the currently configured image refs and may advance Honcho to repository HEAD, so it is not equivalent to the tested bundle updater.' ;;
+    echo "Choose Update / repair installer-managed software when you want to force the latest supported stable upstream channels/sources immediately, including after a version-only bundle change that does not advance the managed-refresh policy revision."
+    echo './manage.sh update uses the same latest-supported managed-upstream resolver, preserves explicit overrides, keeps stateful majors compatibility-bounded, and records exact resolved artifacts before verification.' ;;
   start)
     ensure_docker_for_user
     refresh_adaptive_resource_policy
@@ -1272,6 +1272,10 @@ case "$cmd" in
   backup) backup ;;
   update)
     backup
+    update_accel="$(sed -n 's/^LATTICEVALE_OLLAMA_ACCELERATION=//p' .env | head -n1)"
+    case "$update_accel" in cpu|nvidia|amd|vulkan|windows-native) ;; *) update_accel=cpu ;; esac
+    python3 ./managed-upstreams.py reconcile --stack . --refresh --ollama-acceleration "$update_accel"
+    unset update_accel
     timeout --foreground --kill-after=5s 60s docker compose config --quiet
     mapfile -t update_services < <(selected_service_names)
     if ((${#update_services[@]})); then
@@ -1279,10 +1283,8 @@ case "$cmd" in
     fi
     [[ "$(opt_bool qmd)" == true ]] && timeout --foreground --kill-after=15s 3600s docker compose build --pull qmd
     if [[ "$(opt_bool honcho)" == true ]]; then
-      # Honcho currently has no reliable GitHub Releases feed. An explicit update is
-      # permission to advance to the repository's current default-branch commit.
-      timeout --foreground --kill-after=10s 600s git -C vendor/honcho fetch --depth 1 origin HEAD
-      git -C vendor/honcho checkout --force --detach FETCH_HEAD
+      # managed-upstreams.py already advanced an installer-owned checkout to the
+      # newest stable semantic-version tag. Custom source remains user-owned.
       timeout --foreground --kill-after=15s 3600s docker compose build --pull honcho-api
     fi
     refresh_adaptive_resource_policy
@@ -1304,6 +1306,7 @@ case "$cmd" in
         control_directml_gateway test || { echo 'DirectML update self-test failed and no fallback response was available.' >&2; exit 1; }
       fi
     fi
+    python3 ./managed-upstreams.py record --stack . --installer-version "$(opt_text installerVersion)"
     status ;;
   dashboard-info)
     if [[ "$(opt_bool dashboard)" == true ]]; then

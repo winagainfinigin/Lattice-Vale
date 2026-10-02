@@ -17,6 +17,9 @@ for rel in expected:
 assert "[IO.Path]::IsPathRooted($rel)" in helper
 assert "PATCH-DELETE path escapes repository root" in helper
 assert "Remove-Item -LiteralPath $candidate -Force -Recurse" in helper
+assert "[Parameter()][string]$Root = ''" in helper
+assert "$Root = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path" in helper
+assert "Split-Path -Parent $PSScriptRoot" not in helper, 'parameter-default PSScriptRoot evaluation can be empty under powershell.exe -File'
 assert "Obsolete source file remains from an older overwrite patch" in manifest
 assert "Finalize-LatticeVale-OverwritePatch.ps1" in manifest
 

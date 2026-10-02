@@ -1,9 +1,12 @@
 # Windows integration test matrix
 
-> **v14.6.1 true remote Tailscale case:** select Matrix + Windows Tailscale, verify the Windows client is Running with Shields Up disabled, a valid 100.x address, MagicDNS FQDN, and HTTPS capability; verify the Windows-native relay before Serve; verify exact IPv4/IPv6 Tailscale listeners and `/versions`, exact client well-known, and `/login` through the final hostname while connecting directly to the 100.x address. Then open the temporary challenge from a second Tailscale peer on both Wi-Fi and cellular where available. Only an exact current-run token may produce `PASS`; skip must produce `PARTIAL`; DNS/transport/TLS/Serve failure must produce `FAIL` with the corresponding diagnostic category. A prior saved PASS must not satisfy the current run.
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
-> **Current release: v14.6.1.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+> **Inherited v14.6.1 true remote Tailscale case:** select Matrix + Windows Tailscale, verify the Windows client is Running with Shields Up disabled, a valid 100.x address, MagicDNS FQDN, and HTTPS capability; verify the Windows-native relay before Serve; verify exact IPv4/IPv6 Tailscale listeners and `/versions`, exact client well-known, and `/login` through the final hostname while connecting directly to the 100.x address. Then open the temporary challenge from a second Tailscale peer on both Wi-Fi and cellular where available. Only an exact current-run token may produce `PASS`; skip must produce `PARTIAL`; DNS/transport/TLS/Serve failure must produce `FAIL` with the corresponding diagnostic category. A prior saved PASS must not satisfy the current run.
+
+
+> **Current release: v14.6.2.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
 
 ## v14.6.0 confidence levels and architecture cases
 
@@ -187,3 +190,7 @@ Sanitize and retain `logs/native-ollama-relay.log`, `%LOCALAPPDATA%\LatticeVale\
 > **v14.5.1 policy-v9 hardware/topology matrix:** test 1/2/4/8/16+ WSL-visible CPUs and multiple RAM/service-selection shapes. CPU quotas must scale from `nproc` and live `HostConfig.NanoCpus` must match effective Compose. Full-stack low-RAM shapes that cannot meet defined minima must be rejected rather than proportionally compressed, while lighter service selections must remain valid when their own minima fit.
 
 > **v14.5.1 public option-topology case:** exercise 0-8 additional profiles, Matrix-enabled/disabled profiles, Kanban concurrency 1-8, managed CPU/GPU/native-Windows Ollama, optional Matrix/search/QMD/Honcho selections, adaptive limits enabled/disabled, and Windows/root startup-helper paths. The common default+one-secondary/<=3-worker topology must retain the proven 1024 MiB Hermes baseline; additional persistent Matrix gateways add 192 MiB each beyond the first and Kanban slots above 3 add 96 MiB each, capped at a 4096 MiB Hermes topology floor. The startup helper must evaluate current CPU/RAM/topology when it runs, not embed install-time values.
+
+## v14.6.2 managed-update live qualification
+
+On a representative existing Windows/WSL installation, Option 6 should prove backup-before-mutation ordering, network resolution of stable upstream channels, successful pull/build/recreate, preservation of explicit overrides and persistent data, exact `managed-upstreams.json` recording, and post-update `manage.sh verify`. Re-run with Option 1 before the refresh window is due to prove local-first behavior, then with a forced revision/aged marker to prove the same latest-supported resolver runs when due.

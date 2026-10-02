@@ -1,8 +1,11 @@
 # Third-party notices
 
-> **Current release: v14.6.1.** This file distinguishes first-party LatticeVale source from separately obtained upstream runtimes, images, models, drivers, and services. v14.6.1 retains the v14.6.0 canonical architecture and adds only first-party installer/repair, validation, regression, and documentation hardening; it adds no bundled opaque third-party artifact.
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
-v14.6.1 adds no redistributed third-party binary, model, GPU driver, container image archive, or hosted service. It inherits the v14.6.0 canonical hardware/backend/resource architecture and consumes the same separately obtained WSL, DirectML, CUDA, ROCm, Vulkan, Docker/Ollama, and native-Windows interfaces already documented below. Historical v13 documentation remains repository-only under the release-content policy and does not alter third-party licensing.
+
+> **Current release: v14.6.2.** This file distinguishes first-party LatticeVale source from separately obtained upstream runtimes, images, models, drivers, and services. v14.6.2 retains the v14.6.0 canonical architecture and adds first-party latest-supported upstream resolution, validation, regression, and documentation hardening; it adds no bundled opaque third-party artifact.
+
+Historical v14.6.1 added no redistributed third-party binary, model, GPU driver, container image archive, or hosted service. It inherits the v14.6.0 canonical hardware/backend/resource architecture and consumes the same separately obtained WSL, DirectML, CUDA, ROCm, Vulkan, Docker/Ollama, and native-Windows interfaces already documented below. Historical v13 documentation remains repository-only under the release-content policy and does not alter third-party licensing.
 
 v14.5.47 adds no redistributed third-party binary, model, GPU driver, or Vulkan runtime. It reuses the existing WSL DirectX bridge/torch-directml path and may pass an already-present WSL `/dev/dri` device to the standard pinned Ollama image with Vulkan enabled. NVIDIA Container Toolkit and AMD ROCm behavior remain as previously documented. Windows/vendor display drivers remain separately obtained and licensed.
 
@@ -35,3 +38,7 @@ Names are used descriptively to identify compatibility/integration targets. See 
 ## Network-use note for Honcho
 
 Honcho upstream is licensed under **GNU AGPL-3.0**. LatticeVale does not modify or relicense Honcho; it fetches the audited upstream source commit and builds it locally. If you modify Honcho and make that modified version available for users to interact with over a network, AGPL-3.0 Section 13 may require offering those users the Corresponding Source of that modified version. Purely private/personal operation and unmodified upstream use can have different obligations. This is a project notice, not legal advice; review the upstream Honcho LICENSE and obtain legal advice for public/commercial deployments.
+
+## v14.6.2 version-channel note
+
+LatticeVale may resolve selected installer-owned application components through latest-supported stable upstream channels at update time. This changes version selection, not licensing: each resolved third-party component remains governed by its upstream license and notices. Exact local image/source identity is recorded after refresh for auditability.

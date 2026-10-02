@@ -6,7 +6,7 @@ import re
 CORE = Path(__file__).resolve().parents[1]
 ROOT = CORE.parent
 version=(CORE / "VERSION.txt").read_text(encoding="ascii").strip()
-assert version in {"14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1'}
+assert version in {"14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}
 
 headers = {
     ROOT / "README.md": f"# LatticeVale v{version}",
@@ -23,7 +23,7 @@ required = {
     ROOT / "README.md": ["v14.5.2 — cleanup / reclaim disk space maintenance release", "Option 7", "v14.5.1", "resource policy **v9**", "Current install release"],
     CORE / "README.md": ["v14.5.2 adds the install-preserving Option 7", "v14.5.1 adds resource policy v9"],
     CORE / "AUDIT.md": ["v14.5.2 Option 7 cleanup safety audit", "v14.5.1 adaptive resource-policy / OOM audit"],
-    ROOT / "docs/FEATURES.md": ["Cleanup / reclaim disk space", f"Current managed software/source pins documented by v{version}", "docker builder prune -f", "fstrim -v /"],
+    ROOT / "docs/FEATURES.md": ["Cleanup / reclaim disk space", f"Current managed software/source policy (v{version})", "docker builder prune -f", "fstrim -v /"],
     ROOT / "docs/CHANGELOG.md": ["## 14.5.2 - 2026-08-29", "Option 7", "## 14.5.1 - 2026-08-29"],
     ROOT / "docs/PATCH-NOTES.md": [f"# Current v{version} patch notes", "## v14.5.2 — cleanup / reclaim disk space maintenance release", "## v14.5.1 — adaptive resource policy v9 / model-aware Ollama + adaptive Honcho timeout"],
     ROOT / "docs/RELEASE.md": [f"v{version} current release", "v14.5.4-vram-lowmem-fixtures.py", "v14.5.2-option7-cleanup-fixtures.py"],

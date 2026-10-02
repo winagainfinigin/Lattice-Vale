@@ -1,4 +1,11 @@
-## v14.6.1 derived-state and privilege boundary
+## v14.6.2 managed-upstream security boundary
+
+Latest-supported refresh does not broaden LatticeVale's ownership of persistent data or secrets. Only installer-owned software/image/source references are advanced automatically; explicit custom refs remain user-owned. Option 6 still fails closed if the verified pre-update safety backup fails. Stateful database/cache majors and the DirectML ABI do not float across incompatible boundaries, and exact pulled/built artifact identity is recorded for audit/rollback. QMD now uses its upstream `--host` CLI instead of source rewriting.
+
+## Inherited v14.6.1 derived-state and privilege boundary
+
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
 
 Canonical architecture JSON is derived state, written atomically and validated before trust. Durable user intent remains separate. GPU probing does not grant permission to install/replace vendor drivers, and explicit adapter preference is not silently redirected. Diagnostic commands are read-only except that explicit `diagnose-gpu`/`diagnose-backends` refresh their installer-owned derived capability documents; they do not mutate application data or credentials. Existing least-privilege/root-scope and Docker-daemon environment sanitization requirements remain inherited.
 

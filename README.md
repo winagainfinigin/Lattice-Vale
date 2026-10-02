@@ -1,8 +1,17 @@
-# LatticeVale v14.6.1
+# LatticeVale v14.6.2
 
-> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.1 release**. **Resume / repair installation** remains the recommended general recovery path, while every mutating managed-stack choice (Options 1, 2, 4, 5, and 6) now performs the same preservation-first cumulative migration first when an older schema requires it. Options 3, 7, and 8 remain non-mutating. v14.6.1 inherits the v14.6.0 canonical hardware/backend/resource architecture and adds Matrix/Tailscale client-discovery validation plus true second-device remote-access validation. No intermediate release is required.
+> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.2 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
 
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
+
+
+## v14.6.2 — latest-supported managed software updates
+
+Option 6 now forces an online latest-supported refresh of LatticeVale-owned software instead of reapplying versions frozen into the LatticeVale release. Option 1 uses the same resolver whenever its normal 30-day/revision/legacy refresh gate is due. Hermes, Synapse, SearXNG, Ollama, QMD, and other stateless application channels track their stable upstream channels; installer-owned Honcho advances to the newest stable semantic-version tag rather than repository HEAD. Docker/prerequisite packages and NVIDIA Container Toolkit refresh from their official stable repositories.
+
+Compatibility-sensitive state is intentionally bounded: Synapse PostgreSQL remains on major 16, Honcho pgvector/PostgreSQL remains on pg15, Redis/Valkey remain on major 8, and PyTorch + `torch-directml` remain a qualified compatibility envelope until a newer compatible pair is validated. Explicit user image/source overrides are preserved. Each successful reconciliation records exact image IDs/digests, Honcho commit/tag, selected channels, and the DirectML requirements hash in `data/latticevale/managed-upstreams.json`.
+
+The v14.6.2 deterministic release contract is **145 fixtures** across six shards, adding a dedicated latest-supported upstream/ownership/compatibility fixture while retaining the 144-fixture v14.6.1 historical contract.
 
 
 ## v14.6.1 — same-version runtime-policy / DirectML repair convergence hotfix
@@ -413,7 +422,7 @@ The lower repair threshold is used only after LatticeVale has confirmed an exist
 
 ## Forced managed update
 
-**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer. Before refresh it creates a verified **bundle-owned** safety backup, so a stale or broken installed `manage.sh` cannot prevent the updater from repairing that same managed layer. The backup includes persistent configuration/data and running PostgreSQL dumps, briefly stops only the currently-running LatticeVale containers for a consistent filesystem snapshot, then restores them before refresh.
+**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer to the **latest supported stable upstream** software available at that time. Before refresh it creates a verified **bundle-owned** safety backup, so a stale or broken installed `manage.sh` cannot prevent the updater from repairing that same managed layer. The backup includes persistent configuration/data and running PostgreSQL dumps, briefly stops only the currently-running LatticeVale containers for a consistent filesystem snapshot, then restores them before refresh. Application channels advance to current stable upstream releases; stateful database/cache majors and the PyTorch/DirectML ABI remain compatibility-bounded, explicit user overrides remain authoritative, and exact resolved image/source identities are recorded after reconciliation.
 
 Depending on the enabled components, this can include:
 
@@ -586,7 +595,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.5.46** | Prior install release | GPU-aware backend recommendation plus selected-path prerequisite reuse/provisioning; all v14.5.42-v14.5.45 safety and repair behavior retained |
 | **v14.5.47** | Prior install release | DirectML adapter/VRAM recovery, fingerprinted fallback retry, read-only GPU diagnostics, and verified managed-Ollama Vulkan fallback |
 | **v14.6.0** | Prior install release | Canonical hardware/backend/resource architecture, adaptive cross-vendor qualification, structured diagnostics, schema-21/schema-22 migration to schema 23, durable GPU opt-out, and conserved CPU allocation |
-| **v14.6.1** | **Current install release** | Preservation-first eight-option migration continuity, same-version canonical runtime-policy repair, bounded/nonblocking DirectML readiness, exact Hermes s6 gateway-slot recovery, and hardened Matrix/Tailscale remote validation |
+| **v14.6.1** | Prior install release | Preservation-first eight-option migration continuity, same-version canonical runtime-policy repair, bounded/nonblocking DirectML readiness, exact Hermes s6 gateway-slot recovery, and hardened Matrix/Tailscale remote validation |
+| **v14.6.2** | **Current install release** | Latest-supported managed upstream resolution for Options 1/6, stable Honcho tag tracking, compatible stateful-major bounds, exact resolved-artifact recording, and inherited preservation-first repair |
 
 ### v14.4.1
 

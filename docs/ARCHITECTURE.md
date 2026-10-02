@@ -1,4 +1,7 @@
-# LatticeVale 14.6.1 Architecture
+# LatticeVale 14.6.2 Architecture
+
+> **v14.6.2 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
 
 ## Schema 23 / policy 13 ownership
 
@@ -56,4 +59,4 @@ Generated architecture documents include schema, architecture version, generatio
 
 ## Compatibility
 
-v14.6.1 inherits the v14.6.0 canonical architecture and migrates recognized managed 14.x installations preservation-first. For older recognized stacks, cumulative migration precedes mutating Options 1, 2, 4, 5, and 6; Options 3 and 8 remain read-only, while Option 7 remains isolated cleanup. Durable historical option names remain understood for migration. Future schemas fail closed. User/application data, persistent identities, and explicit overrides remain preservation-first.
+v14.6.2 inherits the v14.6.0 canonical architecture, retains the v14.6.1 repair hardening, and migrates recognized managed 14.x installations preservation-first. For older recognized stacks, cumulative migration precedes mutating Options 1, 2, 4, 5, and 6; Options 3 and 8 remain read-only, while Option 7 remains isolated cleanup. Durable historical option names remain understood for migration. Future schemas fail closed. User/application data, persistent identities, and explicit overrides remain preservation-first.

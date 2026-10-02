@@ -25,7 +25,7 @@ menu = [
     'Verify installation only - read-only audit; make no changes',
     'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',
     'Advanced recovery - reset checkpoints or explicitly rebuild installer-owned identities',
-    "Update / repair installer-managed software - force this bundle''s declared component versions/channels and managed package/image/source layer now, then run normal repair",
+    "Update / repair installer-managed software - force latest supported stable upstream channels/sources now, preserve compatible stateful majors and explicit overrides, then run normal repair",
     'Cleanup / reclaim disk space - choose safe cleanup categories without changing the current LatticeVale runtime/data configuration',
     'Diagnostics / compatibility test - read-only Windows + WSL + GPU/backend + stack verification; make no changes',
 ]
@@ -90,7 +90,7 @@ assert 'docker volume rm' not in advanced.lower()
 assert 'data/synapse' not in advanced.lower()
 assert 'Advanced Matrix identity rebuild requires the shared Matrix service to be enabled' in advanced
 
-# Option 6 baseline: force this bundle's managed software layer only after the independent
+# Option 6 baseline: force the latest-supported managed software layer only after the independent
 # verified safety backup, then continue through normal repair semantics.
 opt6 = menu_ps[menu_ps.index("            6 {\n                $installMode = 'update'"):menu_ps.index('            7 {', menu_ps.index("            6 {\n                $installMode = 'update'"))]
 assert '$forceManagedUpdate = $true' in opt6
@@ -125,7 +125,7 @@ assert 'windows-hardware.json' in ps
 assert "$repairMaintenance = ($stackState -eq 'managed' -and $installMode -in @('resume','change','reconfigure','advanced','update'))" in ps
 assert "$reusePriorChoices = ($installMode -in @('resume','change','reconfigure','advanced','update')) -and $null -ne $existingOptions" in ps
 
-# v14.6.1 feature contract must remain intact while the baseline menu is preserved.
+# v14.6.2 feature contract must remain intact while the baseline menu is preserved.
 for required in (
     'INSTALL_OPTIONS_SCHEMA=23',
     'RUNTIME_POLICY_SCHEMA=13',
@@ -149,7 +149,7 @@ assert '## 5.8 Diagnostics / compatibility test' in features
 for n in range(1,9):
     assert f'{n}. ' in instructions, f'Instructions.txt missing documented Option {n}'
 
-print('v14.6.1 EIGHT-OPTION BASELINE REGRESSION: PASS')
+print('v14.6.2 EIGHT-OPTION BASELINE REGRESSION: PASS')
 print('- Options 1-7 preserve v14.5.2 behavioral roles and ordering')
 print('- Option 8 preserves the v14.6.0 read-only diagnostics role')
 print('- older proven stacks migrate before every mutating option, never before 3/7/8')
