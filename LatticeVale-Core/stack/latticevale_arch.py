@@ -166,7 +166,7 @@ def validate_install_options(data: Any, current_schema: int) -> dict[str, Any]:
     bool_keys = (
         "dashboard", "multiAgent", "kanban", "matrix", "tailscale", "installWindowsTailscale",
         "tailscaleDashboard", "tailscaleMatrix", "searxng", "qmd", "honcho", "hermesLocalAI",
-        "obsidian", "unattendedUpdates", "autoStart", "windowsShortcuts", "keepWslServicesRunning",
+        "obsidian", "autoStart", "windowsShortcuts", "keepWslServicesRunning",
         "containerResourceLimits", "resetCheckpoints", "forceProviderSetup", "forceProfileSetup",
         "rebuildMatrixIdentity", "repairMaintenance", "forceManagedUpdate", "universalRepairMigration",
         "useGpuAcceleration",

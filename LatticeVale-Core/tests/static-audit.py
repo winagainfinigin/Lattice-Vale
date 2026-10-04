@@ -229,10 +229,11 @@ check('diagnose-backends' in manage and 'diagnose-policy' in manage and 'Diagnos
 # Existing optional-service behavior retained
 for phrase in ('Install Hermes Dashboard?','Create multiple Hermes profiles?','Enable Hermes Kanban?','Install Matrix/Synapse?',
                'Use Windows Tailscale for private remote access?','Install SearXNG + Valkey?','Install QMD?','Install fully self-hosted Honcho memory?',
-               'Install/configure Obsidian for Windows?','Enable unattended Ubuntu security updates?',
+               'Install/configure Obsidian for Windows?',
                'Start the stack automatically at Windows logon?'):
     check(phrase in ps1, f'missing user-facing option: {phrase}')
 check('Install Ubuntu Pro for WSL?' not in ps1 and 'Canonical.UbuntuProforWSL' not in ps1 and 'ubuntuPro' not in ps1,'Ubuntu Pro must not remain a current LatticeVale installer/config option')
+check('unattendedUpdates' not in ps1 and 'Enable unattended Ubuntu security updates?' not in ps1 and 'install -y --no-install-recommends unattended-upgrades' not in bootstrap and 'systemctl enable --now unattended-upgrades' not in bootstrap,'unattended-upgrades must not remain a current LatticeVale installer/runtime option')
 check('[POLICY_VERSION]=13' in configure and './configure-stack.sh --refresh-resource-policy' in manage and 'RUNTIME_POLICY_SCHEMA' in state_audit,'adaptive resource policy v13 convergence/audit markers missing')
 check('directml-gateway.py' in ps1 and 'directml-gateway.sh' in ps1 and 'directml-requirements.txt' in ps1,'DirectML bundle files must be installer-required')
 check('DIRECTML_HOST_RESERVE_MIB' in configure and 'runtime-policy.py host-budget' in configure and 'directml_reserve_mib=$((mem_mib/4))' not in configure,'DirectML host RAM reserve must come from canonical resource-policy API outside Docker budget')
@@ -282,7 +283,7 @@ check('LatticeVale-WslNativeRelay.ps1' in ps1,'Windows-native WSL relay helper m
 check("transport='windows-native-tcp-relay'" in ps1,'native relay transport metadata missing')
 check('new TcpListener(IPAddress.Loopback, listenPort)' in relay,'native Windows loopback TCP listener missing')
 check("Invoke-WslDistroCommand $DistroName 'root' '/usr/local/sbin/hermes-stack-start'" in relay,'native relay must start/recover the installer-owned Hermes stack')
-check('listener.Start(128); // synchronous bind' in relay,'native relay must surface loopback bind failures synchronously')
+check('listener.Start(backlog); // synchronous bind' in relay and 'int backlog = Math.Max(128, Math.Min(maxConnections * 2, 2048));' in relay,'native relay must surface loopback bind failures synchronously with a bounded per-service backlog')
 check('-RestartCount 5' in ps1 and '-RestartInterval (New-TimeSpan -Minutes 1)' in ps1,'native relay task restart-on-failure policy missing')
 check('interface portproxy add' not in relay.lower() and 'netsh.exe' not in relay.lower(),'v13.16.3 relay must not depend on netsh portproxy')
 check('Migration cleanup only: v13.12.x used netsh portproxy' in ps1,'legacy portproxy cleanup boundary missing')

@@ -214,7 +214,6 @@ Before the Honcho/local-AI questions, the installer now states the Ollama owners
 - Ollama backend ownership (managed WSL/Docker or verified existing native Windows Ollama when available)
 - Ollama text/embedding model choices and managed acceleration policy
 - optional adaptive per-container CPU/RAM ceilings
-- unattended updates
 - WSL service lifetime policy
 - optional Windows logon startup
 - optional per-install Windows **Start / Shut Down desktop shortcuts**

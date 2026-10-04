@@ -346,8 +346,8 @@ public static class HermesWslRelay
     public static volatile string TargetAddress = "127.0.0.1";
     public static readonly ConcurrentDictionary<int, int> PortMap = new ConcurrentDictionary<int, int>();
     private static readonly ConcurrentDictionary<int, TcpListener> Listeners = new ConcurrentDictionary<int, TcpListener>();
+    private static readonly ConcurrentDictionary<int, SemaphoreSlim> Gates = new ConcurrentDictionary<int, SemaphoreSlim>();
     private static readonly ConcurrentQueue<string> Events = new ConcurrentQueue<string>();
-    private static readonly SemaphoreSlim Gate = new SemaphoreSlim(64, 64);
     private const int ConnectTimeoutMs = 5000;
     private const int SessionTimeoutMs = 7200000;
 
@@ -365,21 +365,49 @@ public static class HermesWslRelay
         return result.ToArray();
     }
 
-    public static void Start(int listenPort, int targetPort)
+    public static void Start(int listenPort, int targetPort, int maxConnections)
     {
+        if (maxConnections < 1 || maxConnections > 4096)
+            throw new ArgumentOutOfRangeException("maxConnections");
         if (!PortMap.TryAdd(listenPort, targetPort)) return;
+
+        var gate = new SemaphoreSlim(maxConnections, maxConnections);
+        if (!Gates.TryAdd(listenPort, gate))
+        {
+            int removedTarget;
+            gate.Dispose();
+            PortMap.TryRemove(listenPort, out removedTarget);
+            throw new InvalidOperationException("Duplicate relay gate port " + listenPort);
+        }
+
         var listener = new TcpListener(IPAddress.Loopback, listenPort);
         listener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, false);
-        listener.Start(128); // synchronous bind: port conflicts surface to PowerShell
+        int backlog = Math.Max(128, Math.Min(maxConnections * 2, 2048));
+        try
+        {
+            listener.Start(backlog); // synchronous bind: port conflicts surface to PowerShell
+        }
+        catch
+        {
+            SemaphoreSlim failedGate;
+            int removedTarget;
+            if (Gates.TryRemove(listenPort, out failedGate) && failedGate != null) failedGate.Dispose();
+            PortMap.TryRemove(listenPort, out removedTarget);
+            throw;
+        }
         if (!Listeners.TryAdd(listenPort, listener))
         {
+            SemaphoreSlim failedGate;
+            int removedTarget;
             listener.Stop();
+            if (Gates.TryRemove(listenPort, out failedGate) && failedGate != null) failedGate.Dispose();
+            PortMap.TryRemove(listenPort, out removedTarget);
             throw new InvalidOperationException("Duplicate relay listener port " + listenPort);
         }
-        Task.Run(() => AcceptLoop(listener, targetPort));
+        Task.Run(() => AcceptLoop(listener, targetPort, listenPort, maxConnections, gate));
     }
 
-    private static async Task AcceptLoop(TcpListener listener, int targetPort)
+    private static async Task AcceptLoop(TcpListener listener, int targetPort, int listenPort, int maxConnections, SemaphoreSlim gate)
     {
         while (true)
         {
@@ -388,17 +416,17 @@ public static class HermesWslRelay
             catch (ObjectDisposedException) { break; }
             catch (SocketException) { break; }
             catch (Exception ex) { Event("accept failed: " + ex.GetType().Name + ": " + ex.Message); await Task.Delay(250).ConfigureAwait(false); continue; }
-            if (!Gate.Wait(0))
+            if (!gate.Wait(0))
             {
-                Event("connection rejected: relay concurrency limit reached");
+                Event("connection rejected on relay port " + listenPort + ": per-service concurrency limit " + maxConnections + " reached");
                 try { client.Close(); } catch { }
                 continue;
             }
-            var ignored = HandleClient(client, targetPort);
+            var ignored = HandleClient(client, targetPort, listenPort, gate);
         }
     }
 
-    private static async Task HandleClient(TcpClient client, int targetPort)
+    private static async Task HandleClient(TcpClient client, int targetPort, int listenPort, SemaphoreSlim gate)
     {
         try
         {
@@ -418,15 +446,15 @@ public static class HermesWslRelay
                     var ba = b.CopyToAsync(a);
                     var session = Task.Delay(SessionTimeoutMs);
                     var first = await Task.WhenAny(ab, ba, session).ConfigureAwait(false);
-                    if (first == session) Event("connection closed: session timeout reached");
+                    if (first == session) Event("connection closed on relay port " + listenPort + ": session timeout reached");
                     try { client.Client.Shutdown(SocketShutdown.Both); } catch { }
                     try { upstream.Client.Shutdown(SocketShutdown.Both); } catch { }
                     try { await Task.WhenAll(ab, ba).ConfigureAwait(false); } catch (Exception ex) { Event("copy completed with " + ex.GetType().Name); }
                 }
             }
         }
-        catch (Exception ex) { Event("connection failed: " + ex.GetType().Name + ": " + ex.Message); }
-        finally { Gate.Release(); }
+        catch (Exception ex) { Event("connection failed on relay port " + listenPort + ": " + ex.GetType().Name + ": " + ex.Message); }
+        finally { gate.Release(); }
     }
 }
 '@
@@ -468,7 +496,17 @@ if ($SelfTest) {
 }
 
 foreach ($service in $services) {
-    [HermesWslRelay]::Start([int]$service.bridgePort, [int]$service.backendPort)
+    # Schema <=4 relay configs did not persist per-service connection limits. Keep
+    # them compatible while giving Matrix the higher multi-client capacity immediately.
+    $maxConnections = if ([string]$service.label -eq 'Matrix') { 512 } else { 64 }
+    if ($service.PSObject.Properties.Name -contains 'maxConnections') {
+        $configuredMax = 0
+        if ([int]::TryParse([string]$service.maxConnections, [ref]$configuredMax) -and $configuredMax -ge 1 -and $configuredMax -le 4096) {
+            $maxConnections = $configuredMax
+        }
+    }
+    [HermesWslRelay]::Start([int]$service.bridgePort, [int]$service.backendPort, $maxConnections)
+    Write-RelayLog ("Relay listener {0} on 127.0.0.1:{1} -> {2} allows up to {3} concurrent sessions." -f [string]$service.label,[int]$service.bridgePort,[int]$service.backendPort,$maxConnections)
 }
 
 $initialStateTarget = if (-not [string]::IsNullOrWhiteSpace($chosenIp)) { $chosenIp } else { $seedTarget }

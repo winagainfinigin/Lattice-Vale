@@ -29,6 +29,11 @@ assert 'docker exec -it -u hermes hermes-agent hermes -p "$name" model' in cfg
 assert 'export DOCKER_HOST=unix:///var/run/docker.sock' in boot
 assert 'cat > /etc/apt/apt.conf.d/20auto-upgrades' not in boot
 assert 'cmp -s "$legacy_periodic" "$legacy_expected"' in boot
+# Unattended-upgrades is no longer an install option or managed runtime feature.
+assert 'unattendedUpdates' not in ps
+assert 'Enable unattended Ubuntu security updates?' not in ps
+assert 'install -y --no-install-recommends unattended-upgrades' not in boot
+assert 'systemctl enable --now unattended-upgrades' not in boot
 assert 'com.docker.compose.project.working_dir' in cfg
 assert 'Refusing to reuse an ambiguous pre-existing network.' in cfg
 print('FRESH INSTALL HARDENING: PASS')
