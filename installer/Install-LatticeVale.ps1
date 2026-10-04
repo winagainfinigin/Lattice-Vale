@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $Verifier -PathType Leaf)) { throw "Release ver
 if (-not (Test-Path -LiteralPath $CoreInstaller -PathType Leaf)) { throw "Core installer not found: $CoreInstaller" }
 if (-not (Test-Path -LiteralPath $VersionFile -PathType Leaf)) { throw "Version file not found: $VersionFile" }
 $ReleaseVersion = (Get-Content -LiteralPath $VersionFile -Raw).Trim()
-$ReleaseDisplayVersion = if ($ReleaseVersion -eq '14.6.2') { '14.6.2 Hotfix' } else { $ReleaseVersion }
+$ReleaseDisplayVersion = $ReleaseVersion
 Write-Host "LatticeVale v$ReleaseDisplayVersion" -ForegroundColor Cyan
 Write-Host "Core installer: $CoreInstaller"
 Write-Host 'The installer source is plain text and can be inspected before execution.'

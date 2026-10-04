@@ -20,7 +20,7 @@ function Start-LatticeValeRemoteAccessLog {
         New-Item -ItemType Directory -Path $base -Force | Out-Null
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $script:RemoteAccessLogPath = Join-Path $base "remote-access-$stamp.log"
-        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.2 Hotfix remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.3 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
         return $script:RemoteAccessLogPath
     } catch {
         $script:RemoteAccessLogPath = ''
@@ -5505,8 +5505,12 @@ function Write-LatticeValeBridgeConfig(
     [int]$MatrixBackendPort,
     [int]$MatrixBridgePort,
     [string]$SeedWslIp = '',
-    [string]$NetworkingMode = ''
+    [string]$NetworkingMode = '',
+    [int]$MatrixMaxConnections = 512
 ) {
+    if ($MatrixMaxConnections -lt 1 -or $MatrixMaxConnections -gt 4096) {
+        throw 'Matrix relay maximum connections must be an integer from 1 to 4096.'
+    }
     $paths = Get-LatticeValeBridgePaths $Name
     New-Item -ItemType Directory -Path $paths.Directory -Force | Out-Null
 
@@ -5552,7 +5556,7 @@ function Write-LatticeValeBridgeConfig(
         # Matrix clients keep long-poll /sync requests open and may establish several
         # concurrent media/event streams per device. Give Matrix its own larger pool
         # so multiple remote tailnet clients can coexist without sharing Dashboard's gate.
-        $services += [ordered]@{ label='Matrix'; enabled=$true; backendPort=$MatrixBackendPort; bridgePort=$MatrixBridgePort; probePath='/_matrix/client/versions'; maxConnections=512 }
+        $services += [ordered]@{ label='Matrix'; enabled=$true; backendPort=$MatrixBackendPort; bridgePort=$MatrixBridgePort; probePath='/_matrix/client/versions'; maxConnections=$MatrixMaxConnections }
     }
     $normalizedMode = ([string]$NetworkingMode).Trim().ToLowerInvariant()
     $targetMode = if ($normalizedMode -eq 'mirrored') { 'mirrored-localhost' } else { 'wsl-ip' }
@@ -6747,7 +6751,7 @@ $bundleVersion = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION.txt
 if ($bundleVersion -notmatch '^[A-Za-z0-9._-]{1,64}$') {
     throw "VERSION.txt contains an invalid installer version identifier: '$bundleVersion'"
 }
-$bundleDisplayVersion = if ($bundleVersion -eq '14.6.2') { '14.6.2 Hotfix' } else { $bundleVersion }
+$bundleDisplayVersion = $bundleVersion
 Write-Info "Installer bundle version: $bundleDisplayVersion"
 
 $wslInfo = Get-WslCapabilities
@@ -7128,6 +7132,17 @@ if ($reusePriorChoices) {
     $tailscaleDashboardPort = (Get-OptionTcpPort $existingOptions 'tailscaleDashboardPort' 9443)
     $tailscaleMatrix = [bool](Get-OptionValue $existingOptions 'tailscaleMatrix' $false)
     $tailscaleMatrixPort = (Get-OptionTcpPort $existingOptions 'tailscaleMatrixPort' 443)
+    $tailscaleMatrixMaxConnections = 512
+    $savedMatrixMaxConnections = Get-OptionValue $existingOptions 'tailscaleMatrixMaxConnections' 512
+    $parsedMatrixMaxConnections = 0
+    if ([int]::TryParse([string]$savedMatrixMaxConnections, [ref]$parsedMatrixMaxConnections) -and $parsedMatrixMaxConnections -ge 1 -and $parsedMatrixMaxConnections -le 4096) {
+        $tailscaleMatrixMaxConnections = $parsedMatrixMaxConnections
+    } elseif ($null -ne $existingOptions.PSObject.Properties['tailscaleMatrixMaxConnections']) {
+        Write-Warning 'Saved Matrix relay maximum-connections value is invalid; preserving service intent while normalizing the relay limit to 512.'
+    }
+    if ($null -eq $existingOptions.PSObject.Properties['tailscaleMatrixMaxConnections']) {
+        Write-Info 'Migrating installer options to schema 24: Matrix remote relay maximum connections defaults to 512 until changed explicitly.'
+    }
     # v13.14 and earlier used 8448 as LatticeVale's Matrix default. Repair/resume
     # migrates that old installer default to standard HTTPS 443; custom ports are preserved.
     if ($tailscaleMatrix -and $tailscaleMatrixPort -eq 8448) {
@@ -7396,6 +7411,8 @@ if ($reusePriorChoices) {
                 if ($tailscaleMatrix) {
                     $disallow = if ($tailscaleDashboard -and $tailscaleDashboardPort -gt 0) { @($tailscaleDashboardPort) } else { @() }
                     $tailscaleMatrixPort = Read-TcpPort 'Matrix Tailscale HTTPS port' $tailscaleMatrixPort $disallow
+                    Write-Info 'One Element/Matrix client can hold several simultaneous HTTP, /sync, event, and media sessions. This setting is a relay connection ceiling, not a device count.'
+                    $tailscaleMatrixMaxConnections = Read-Integer 'Maximum simultaneous remote Matrix relay connections' $tailscaleMatrixMaxConnections 1 4096
                 }
             } else { $tailscaleMatrix = $false }
             if ($tailscale -and -not ($tailscaleDashboard -or $tailscaleMatrix)) { $tailscale = $false; $installWindowsTailscale = $false }
@@ -7650,7 +7667,7 @@ if ($reusePriorChoices) {
             } else { Write-Info "Detected Tailscale for Windows (state: $($tsSelectionStatus.BackendState))." }
         } else { Write-Info 'Tailscale for Windows was not detected. Installing the Windows client remains optional.' }
         $tailscale = Read-Choice 'Use Windows Tailscale for private remote access?' 'Uses this PC as the Tailscale node and proxies selected WSL localhost services.' 'All selected LatticeVale services remain local-only.' ([bool](Get-OptionValue $old 'tailscale' $false))
-        $installWindowsTailscale = $false; $tailscaleDashboard = $false; $tailscaleMatrix = $false; $tailscaleDashboardPort = 0; $tailscaleMatrixPort = 0; $dashboardBridgePort = 19119; $matrixBridgePort = 18008
+        $installWindowsTailscale = $false; $tailscaleDashboard = $false; $tailscaleMatrix = $false; $tailscaleDashboardPort = 0; $tailscaleMatrixPort = 0; $tailscaleMatrixMaxConnections = 512; $dashboardBridgePort = 19119; $matrixBridgePort = 18008
         if ($tailscale -and -not $tailscaleExeAtSelection) {
             $installWindowsTailscale = Read-Choice 'Install Tailscale for Windows if needed?' 'Installs the official Windows client; it remains separate from WSL.' 'Tailscale remote access is skipped; LatticeVale installation continues.' ([bool](Get-OptionValue $old 'installWindowsTailscale' $true))
             if (-not $installWindowsTailscale) { $tailscale = $false }
@@ -7669,6 +7686,14 @@ if ($reusePriorChoices) {
                 if ($defaultMatrixPort -eq 8448) { $defaultMatrixPort = 443 }
                 $disallow = if ($tailscaleDashboardPort -gt 0) { @($tailscaleDashboardPort) } else { @() }
                 $tailscaleMatrixPort = Read-TcpPort 'Matrix Tailscale HTTPS port' $defaultMatrixPort $disallow
+                $defaultMatrixMaxConnections = 512
+                $savedMatrixMaxConnections = Get-OptionValue $old 'tailscaleMatrixMaxConnections' 512
+                $parsedMatrixMaxConnections = 0
+                if ([int]::TryParse([string]$savedMatrixMaxConnections, [ref]$parsedMatrixMaxConnections) -and $parsedMatrixMaxConnections -ge 1 -and $parsedMatrixMaxConnections -le 4096) {
+                    $defaultMatrixMaxConnections = $parsedMatrixMaxConnections
+                }
+                Write-Info 'One Element/Matrix client can hold several simultaneous HTTP, /sync, event, and media sessions. This setting is a relay connection ceiling, not a device count.'
+                $tailscaleMatrixMaxConnections = Read-Integer 'Maximum simultaneous remote Matrix relay connections' $defaultMatrixMaxConnections 1 4096
             }
         }
         if ($tailscale -and -not ($tailscaleDashboard -or $tailscaleMatrix)) { $tailscale = $false; $installWindowsTailscale = $false }
@@ -8186,6 +8211,7 @@ $options = [ordered]@{
     tailscaleDashboardPort = $tailscaleDashboardPort
     tailscaleMatrix = $tailscaleMatrix
     tailscaleMatrixPort = $tailscaleMatrixPort
+    tailscaleMatrixMaxConnections = $tailscaleMatrixMaxConnections
     dashboardBridgePort = $dashboardBridgePort
     matrixBridgePort = $matrixBridgePort
     searxng = $searxng
@@ -8255,6 +8281,7 @@ Write-Host "  WSL implementation: $(if ($wslInfo.Modern) { 'Store/MSIX' } else {
     "GPU acceleration: $useGpuAcceleration", "Hermes local AI: $hermesLocalAI$(if ($hermesLocalAI) { " (text backend=$localTextBackend)" } else { '' })", "DirectML text model: $(if (($honcho -or $hermesLocalAI) -and $localTextBackend -eq 'directml') { "$directmlTextModel (WSL-host port $directmlPort; GPU=$(if ($directmlAdapterName) { $directmlAdapterName } else { $directmlGpuVendor }); VRAM=$(if ($directmlVramMiB -ge 256) { "$directmlVramMiB MiB" } else { "unknown" }))" } else { 'n/a' })", "DirectML text fallback: $(if ($localTextBackend -eq 'directml') { $directmlFallbackPolicy } else { 'n/a' })", "Ollama text model: $(if ($localTextBackend -eq 'ollama' -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none')) { $localTextModel } else { 'n/a' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if (($localTextBackend -eq 'ollama') -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none') -or $honcho) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if (($localTextBackend -eq 'ollama') -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none') -or $honcho) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
     "Local ports: Hermes API=$hermesApiPort$(if ($dashboard) { ", Dashboard=$dashboardLocalPort" } else { '' })$(if ($matrix) { ", Matrix=$matrixLocalPort" } else { '' })$(if ($searxng) { ", SearXNG=$searxngLocalPort" } else { '' })$(if ($honcho) { ", Honcho=$honchoLocalPort" } else { '' })",
     "Windows bridge ports: $(if ($tailscaleDashboard) { "Dashboard=$dashboardBridgePort " } else { '' })$(if ($tailscaleMatrix) { "Matrix=$matrixBridgePort" } else { '' })",
+    "Matrix remote relay connection ceiling: $(if ($tailscaleMatrix) { $tailscaleMatrixMaxConnections } else { 'n/a' })",
     "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Repair maintenance: $repairMaintenance", "Universal repair migration: $universalRepairMigration", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
 ) | ForEach-Object { Write-Host "  $_" }
 Write-Info 'Recovery model: verify live state first, preserve completed work, then resume the earliest incomplete/broken stage. Matrix precedes Hermes setup; Windows add-ons/Tailscale/auto-start remain last.'
@@ -8641,7 +8668,7 @@ if ($tailscale) {
                         Write-Warning 'The installer could not pre-resolve a directly reachable WSL IPv4; the relay task will use its own bounded compatibility probes/recovery.'
                     }
                 }
-                $bridgePaths = Write-LatticeValeBridgeConfig $DistroName ($tailscaleDashboard -and -not $dashboardCleanupBlocked) $dashboardLocalPort $dashboardBridgePort ($tailscaleMatrix -and -not $matrixCleanupBlocked) $matrixLocalPort $matrixBridgePort $bridgeSeedIp $wslNetworkingModePolicy
+                $bridgePaths = Write-LatticeValeBridgeConfig $DistroName ($tailscaleDashboard -and -not $dashboardCleanupBlocked) $dashboardLocalPort $dashboardBridgePort ($tailscaleMatrix -and -not $matrixCleanupBlocked) $matrixLocalPort $matrixBridgePort $bridgeSeedIp $wslNetworkingModePolicy $tailscaleMatrixMaxConnections
                 # The Windows relay is cheap and does not keep WSL alive. Start it at Windows logon
                 # whenever remote exposure is selected so Tailscale always has a localhost listener.
                 # Only the separate stack auto-start option grants permission to wake/recover WSL.

@@ -16,8 +16,8 @@ policy = load_compat(core / 'compatibility.conf')
 
 # The compatibility floor and current options schema are explicit release policy.
 assert 'MIN_UNIVERSAL_REPAIR_MAJOR=0' in compat
-assert policy['INSTALL_OPTIONS_SCHEMA'] == '23'
-assert 'INSTALL_OPTIONS_SCHEMA=23' in compat
+assert policy['INSTALL_OPTIONS_SCHEMA'] == '24'
+assert 'INSTALL_OPTIONS_SCHEMA=24' in compat
 assert "MinUniversalRepairMajor = $universalRepairMajor" in ps
 assert "InstallOptionsSchema = $installOptionsSchema" in ps
 
@@ -72,7 +72,7 @@ for token in ('repairOriginVersion', 'repairOriginSchema', 'universalRepairMigra
     assert f'"{token}"' in readonly
 assert 'latticevale_arch.py validate-options install-options.json --compat compatibility.conf' in config
 # Corrected 14.5.47 schema-21 and original 14.6 schema-22 state are valid migration
-# inputs; current schema 23 is accepted; a future schema remains fail-closed.
+# inputs; current schema 24 is accepted; a future schema remains fail-closed.
 assert validate_install_options({'schema': 21, 'repairOriginSchema': 21}, 23)['schema'] == 21
 assert validate_install_options({'schema': 22, 'repairOriginSchema': 21}, 23)['schema'] == 22
 assert validate_install_options({'schema': 23, 'repairOriginSchema': 22}, 23)['schema'] == 23

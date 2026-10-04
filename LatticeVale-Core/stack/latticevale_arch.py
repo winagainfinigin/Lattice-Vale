@@ -254,6 +254,10 @@ def validate_install_options(data: Any, current_schema: int) -> dict[str, Any]:
     ):
         if key in data and (isinstance(data[key], bool) or not isinstance(data[key], int) or not 1 <= data[key] <= 65535):
             raise ValueError(f"{key} must be an integer TCP port from 1 to 65535")
+    if "tailscaleMatrixMaxConnections" in data:
+        value = data["tailscaleMatrixMaxConnections"]
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 4096:
+            raise ValueError("tailscaleMatrixMaxConnections must be an integer from 1 to 4096")
     text_keys = (
         "timezone", "installerVersion", "installerMode", "repairOriginVersion", "questionnaireMode",
         "obsidianVaultWindowsPath", "obsidianVaultWslPath", "windowsOllamaBridgeTaskName",

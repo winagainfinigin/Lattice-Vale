@@ -1,11 +1,13 @@
-# LatticeVale v14.6.2 audit
+# LatticeVale v14.6.3 audit
+
+> **v14.6.3:** installer-options schema 24 adds durable `tailscaleMatrixMaxConnections` for Windows Tailscale Matrix exposure. Fresh and reconfiguration flows prompt for 1-4096 simultaneous relay connections (suggested/default 512); schema-23 installs migrate to 512 unless changed. Dashboard remains on its independent 64-connection gate. Current unattended-upgrades feature references are removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
 ## v14.6.2 managed-upstream delta audit
 
-The current v14.6.2 Hotfix release retains the qualified v14.6.1 canonical architecture and adds latest-supported managed-upstream resolution: Option 6 forces the resolver, due/revision-triggered Option 1 uses the same resolver, stateful majors and the DirectML ABI remain compatibility-bounded, explicit overrides remain user-owned, and exact resolved image/source identity is recorded for diagnostics and rollback.
+The current v14.6.3 release retains the qualified v14.6.1 canonical architecture and adds latest-supported managed-upstream resolution: Option 6 forces the resolver, due/revision-triggered Option 1 uses the same resolver, stateful majors and the DirectML ABI remain compatibility-bounded, explicit overrides remain user-owned, and exact resolved image/source identity is recorded for diagnostics and rollback.
 Managed-refresh revision **5** is the current compatibility trigger, and the deterministic contract is **146 fixtures**. QMD uses its upstream `--host` support at the stable npm channel; the retired v2.5.3 listener source patch is removed from current release content.
 
 

@@ -1,15 +1,27 @@
 # Windows integration test matrix
 
+> **v14.6.3:** installer-options schema 24 adds durable `tailscaleMatrixMaxConnections` for Windows Tailscale Matrix exposure. Fresh and reconfiguration flows prompt for 1-4096 simultaneous relay connections (suggested/default 512); schema-23 installs migrate to 512 unless changed. Dashboard remains on its independent 64-connection gate.
+
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 > **Inherited v14.6.1 true remote Tailscale case:** select Matrix + Windows Tailscale, verify the Windows client is Running with Shields Up disabled, a valid 100.x address, MagicDNS FQDN, and HTTPS capability; verify the Windows-native relay before Serve; verify exact IPv4/IPv6 Tailscale listeners and `/versions`, exact client well-known, and `/login` through the final hostname while connecting directly to the 100.x address. Then open the temporary challenge from a second Tailscale peer on both Wi-Fi and cellular where available. Only an exact current-run token may produce `PASS`; skip must produce `PARTIAL`; DNS/transport/TLS/Serve failure must produce `FAIL` with the corresponding diagnostic category. A prior saved PASS must not satisfy the current run.
 
 
-> **Current release: v14.6.2 Hotfix.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+> **Current release: v14.6.3.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+
+## v14.6.3 configurable Matrix multi-client live qualification
+
+- On a fresh install with Matrix + Windows Tailscale selected, enter a non-default relay ceiling such as 768 or 1024 and verify `install-options.json` persists that exact value.
+- Run Resume / repair and Update / repair and verify the saved value remains unchanged unless the Windows/Tailscale component scope is explicitly reconfigured.
+- On the scoped Windows/Tailscale questionnaire, change the ceiling and verify the regenerated schema-5 relay config carries the new Matrix `maxConnections` value while Dashboard remains 64.
+- Connect at least two real Element/Matrix clients through separate permitted Tailscale peers at the same time. Leave `/sync` active, exchange messages, and exercise media/event requests concurrently; confirm there are no relay-limit rejections below the configured ceiling.
+- While those Matrix clients remain active, load and use the Dashboard through its Tailscale mapping and confirm it remains responsive, demonstrating that the Dashboard and Matrix semaphores are independent.
+- Inspect the Windows native-relay log and confirm the Matrix listener reports the configured ceiling. Repeat with the default 512 migration on an upgraded schema-23 install.
+- Record this as live Windows/WSL/Tailscale/Element evidence only when the exact release artifact was exercised. Static fixtures and PowerShell parsing do not count as this live qualification.
 
 ## v14.6.0 confidence levels and architecture cases
 
