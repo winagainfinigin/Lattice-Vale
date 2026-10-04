@@ -39,13 +39,14 @@ for name in ('hermes','synapse','searxng','ollama'):
 for name in ('synapse-db','searxng-valkey','honcho-db','honcho-redis'):
     assert compose['services'][name].get('networks') == ['backend']
 
-# APT automation uses an installer-owned file and only removes the legacy generic
-# file when it is byte-for-byte the content written by old Hermes installers.
+# Unattended-upgrades is no longer managed. Bootstrap retains only narrow
+# cleanup for exact legacy LatticeVale-owned policy and never reinstalls/enables it.
 assert 'cat > /etc/apt/apt.conf.d/20auto-upgrades' not in boot
-assert 'hermes_periodic=/etc/apt/apt.conf.d/52hermes-unattended-upgrades' in boot
+assert 'legacy_latticevale_periodic=/etc/apt/apt.conf.d/52hermes-unattended-upgrades' in boot
 assert 'cmp -s "$legacy_periodic" "$legacy_expected"' in boot
-assert 'rm -f "$hermes_periodic"' in boot
-assert 'systemctl disable --now unattended-upgrades' not in boot
+assert 'install -y --no-install-recommends unattended-upgrades' not in boot
+assert 'systemctl enable --now unattended-upgrades' not in boot
+assert 'systemctl disable --now unattended-upgrades' in boot
 
 # Timezone must exist in tzdata, not merely pass a character regex.
 assert '! -f "/usr/share/zoneinfo/$timezone"' in cfg
