@@ -166,7 +166,7 @@ def validate_install_options(data: Any, current_schema: int) -> dict[str, Any]:
     bool_keys = (
         "dashboard", "multiAgent", "kanban", "matrix", "tailscale", "installWindowsTailscale",
         "tailscaleDashboard", "tailscaleMatrix", "searxng", "qmd", "honcho", "hermesLocalAI",
-        "obsidian", "unattendedUpdates", "autoStart", "windowsShortcuts", "keepWslServicesRunning",
+        "obsidian", "autoStart", "windowsShortcuts", "keepWslServicesRunning",
         "containerResourceLimits", "resetCheckpoints", "forceProviderSetup", "forceProfileSetup",
         "rebuildMatrixIdentity", "repairMaintenance", "forceManagedUpdate", "universalRepairMigration",
         "useGpuAcceleration",
@@ -254,6 +254,9 @@ def validate_install_options(data: Any, current_schema: int) -> dict[str, Any]:
     ):
         if key in data and (isinstance(data[key], bool) or not isinstance(data[key], int) or not 1 <= data[key] <= 65535):
             raise ValueError(f"{key} must be an integer TCP port from 1 to 65535")
+    # Corrected v14.6.3 keeps schema 24 readable for interim builds that persisted
+    # tailscaleMatrixMaxConnections. The field is obsolete compatibility data: it is
+    # intentionally tolerated here, ignored by runtime behavior, and not written anew.
     text_keys = (
         "timezone", "installerVersion", "installerMode", "repairOriginVersion", "questionnaireMode",
         "obsidianVaultWindowsPath", "obsidianVaultWslPath", "windowsOllamaBridgeTaskName",

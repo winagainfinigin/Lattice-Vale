@@ -1,5 +1,15 @@
 # Changelog
 
+## 14.6.3 - 2026-10-04
+
+- Makes Windows Tailscale remote validation repeatable for multiple already-authorized tailnet devices in one installer run.
+- Generates a fresh one-time HTTPS challenge token per device, removes each temporary Serve mapping after the attempt, and leaves the real Dashboard/Matrix mappings unchanged.
+- Reports each device result independently and persists aggregate attempted/passed/failed/skipped counts plus the last validation timestamp.
+- Keeps installer-options schema **24** compatible with interim v14.6.3 state while treating `tailscaleMatrixMaxConnections` as obsolete compatibility data that is ignored and no longer written.
+- Restores Matrix/Dashboard relay concurrency to fixed independent internal gates rather than a user/device-count setting.
+- Removes the unattended-upgrades feature from current choices, summaries, durable options, and current feature documentation while retaining only ownership-proven cleanup of old LatticeVale APT policy.
+- Keeps the deterministic release contract at **146 fixtures** by extending the existing Windows-native Tailscale relay fixture with repeatable-device, aggregate-result, cleanup, compatibility, and gate-isolation assertions.
+
 ## 14.6.2 Hotfix — 2026-10-01
 
 - Fixes the original v14.6.2 Linux bootstrap staging typo: a duplicated `install -m 0644 ... \` prefix before the `compatibility.conf` copy caused GNU `install` to interpret the destination as a directory and abort repair/update staging.
@@ -9,7 +19,7 @@
 - Existing installations that already created a verified pre-update backup can apply the hotfix and rerun Resume / repair or Update / repair; no uninstall or data reset is required.
 
 
-> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ## 14.6.2 - 2026-10-01

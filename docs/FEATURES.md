@@ -1,9 +1,11 @@
-# LatticeVale v14.6.2 Hotfix — Complete Features and Install Options Reference
+# LatticeVale v14.6.3 — Complete Features and Install Options Reference
+
+> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Every device gets a fresh one-time HTTPS challenge, per-device results are shown immediately, and aggregate results are saved without changing the real Dashboard/Matrix Serve mappings. Installer-options schema 24 remains compatible with interim v14.6.3 state; the obsolete `tailscaleMatrixMaxConnections` value is ignored and no longer written. Current unattended-upgrades feature references remain removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-## v14.6.2 latest-supported update policy and inherited repair continuity
+## v14.6.3 repeatable remote-device validation and inherited update/repair continuity
 
 - Option 6 forces the newest supported stable upstream software now; due/revision-triggered Option 1 refresh uses the same resolver.
 - Application channels float to stable upstream (`latest`/stable package channel), while database majors and PyTorch/DirectML remain compatibility-bounded and explicit user overrides are preserved.
@@ -22,7 +24,7 @@
 - Conserved automatic CPU allocation: system/DirectML reservations are removed before enabled Docker services share one aggregate envelope.
 - DirectML generation uses `torch.no_grad()`; no-fallback mode cannot create or retain forced-Ollama fallback markers.
 
-> **Current managed software/source policy (v14.6.2):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
+> **Current managed software/source policy (v14.6.3):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
 
 > **v14.6.0 architecture:** canonical hardware/backend/resource state separates durable user intent from machine-derived capability. Current task docs: `QUICKSTART.md`, `INSTALLATION.md`, `REPAIR.md`, `GPU-BACKENDS.md`, `DIAGNOSTICS.md`, `RESOURCE-POLICY.md`, and `ARCHITECTURE.md`.
 
@@ -63,9 +65,9 @@
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.6.2 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.6.3 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.2 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.3 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -91,7 +93,6 @@ Core managed layers include:
 - optional Honcho persistent memory
 - optional managed WSL/Docker Ollama or integration with separately installed native Windows Ollama
 - optional adaptive per-container CPU/RAM ceilings
-- optional unattended Ubuntu security updates
 - optional supported WSL service-lifetime policy
 - optional Windows logon auto-start
 - optional per-install Windows Start / Shut Down shortcuts
@@ -598,16 +599,6 @@ Clean installs generate policy v13 before first container creation and verify th
 
 LatticeVale does not set global WSL `memory` or `autoMemoryReclaim` for this feature. Those are host/user-owned WSL policies. A user `compose.override.yaml` is applied last and remains authoritative; live-limit verification therefore checks the effective merged Compose value rather than blindly enforcing the generated base value.
 
-## 3.21 Unattended Ubuntu security updates
-
-**Prompt:** Enable unattended Ubuntu security updates?
-
-- Fresh suggestion: **Yes**
-- configures managed unattended eligible Ubuntu security updates
-- No leaves Ubuntu updates manual
-
-LatticeVale's own controlled updater is separate from general Ubuntu unattended security updates.
-
 ## 3.22 WSL service lifetime policy
 
 Available only when the installed Store/MSIX WSL version supports the managed policy (current code checks the supported WSL 2.5.4+ path).
@@ -874,7 +865,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source policy documented by v14.6.2
+# 8. Current managed software/source policy documented by v14.6.3
 
 Installer-owned application defaults use stable upstream channels at refresh time:
 

@@ -1,15 +1,27 @@
 # Windows integration test matrix
 
+> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Every device gets a fresh one-time HTTPS challenge, per-device results are shown immediately, and aggregate results are saved without changing the real Dashboard/Matrix Serve mappings. Installer-options schema 24 remains compatible with interim v14.6.3 state; the obsolete `tailscaleMatrixMaxConnections` value is ignored and no longer written. Current unattended-upgrades feature references remain removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
+
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 > **Inherited v14.6.1 true remote Tailscale case:** select Matrix + Windows Tailscale, verify the Windows client is Running with Shields Up disabled, a valid 100.x address, MagicDNS FQDN, and HTTPS capability; verify the Windows-native relay before Serve; verify exact IPv4/IPv6 Tailscale listeners and `/versions`, exact client well-known, and `/login` through the final hostname while connecting directly to the 100.x address. Then open the temporary challenge from a second Tailscale peer on both Wi-Fi and cellular where available. Only an exact current-run token may produce `PASS`; skip must produce `PARTIAL`; DNS/transport/TLS/Serve failure must produce `FAIL` with the corresponding diagnostic category. A prior saved PASS must not satisfy the current run.
 
 
-> **Current release: v14.6.2 Hotfix.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+> **Current release: v14.6.3.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+
+## v14.6.3 repeatable multi-device remote-validation qualification
+
+- On a fresh or repaired install with Matrix + Windows Tailscale selected, complete the temporary remote challenge from one already-authorized tailnet device and verify `Device 1: PASS`.
+- Choose `Validate another Tailscale device?` and complete a second and third challenge from different permitted devices; verify each attempt uses a new LV token and can pass independently.
+- Exercise pass-then-fail, fail-then-pass, and pass-then-skip sequences. Verify the final status is `PARTIAL` for mixed results, `FAIL` only when every attempted device fails, and `PASS` only when every attempted device passes.
+- Verify each temporary validation Serve mapping is removed before the next attempt and after the final attempt, while the real Matrix and Dashboard Serve mappings remain reachable throughout.
+- Verify `.tailscale-info` records the aggregate status, attempted/passed/failed/skipped counts, and last validation UTC timestamp without treating those fields as Tailscale authentication state.
+- Upgrade an interim schema-24 install containing `tailscaleMatrixMaxConnections=2`; confirm repair succeeds, the obsolete value is not written into the new `install-options.json`, and the Windows relay still uses the fixed Matrix internal gate.
+- Record live Windows/WSL/Tailscale evidence only when the exact release artifact was exercised. Static fixtures and PowerShell parsing do not count as remote-device proof.
 
 ## v14.6.0 confidence levels and architecture cases
 
@@ -155,6 +167,7 @@ For each applicable networking mode (at minimum NAT and mirrored on supported Wi
 - Tailscale selected with native Ollama under NAT.
 - Tailscale selected with native Ollama under mirrored networking.
 - Tailscale relay target changes after WSL restart/IP churn and recovers.
+- Matrix over Tailscale with multiple remote clients: keep at least two Element/Matrix clients syncing concurrently, exercise media/event traffic, and verify Dashboard traffic remains responsive. Matrix and Dashboard retain independent fixed internal relay gates so long-lived Matrix traffic cannot starve Dashboard traffic; these internal gates are not user/device-count settings.
 - `manage.sh stop` / Shutdown shortcut does not leave a bridge claiming healthy service when WSL is intentionally stopped.
 
 ## Startup / shutdown

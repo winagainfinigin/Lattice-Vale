@@ -4,7 +4,7 @@ import importlib.util
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "14.6.2"
+assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "14.6.3"
 compat = (ROOT / "compatibility.conf").read_text(encoding="utf-8")
 assert "MANAGED_REPAIR_REFRESH_REVISION=5" in compat
 

@@ -1,4 +1,12 @@
-# Current v14.6.2 Hotfix patch notes
+# Current v14.6.3 patch notes
+
+## v14.6.3 - repeatable multi-device Tailscale/Matrix validation
+
+The Windows Tailscale remote-validation step is now repeatable. After every device attempt, the installer can create a new one-time HTTPS challenge for another device already signed into the permitted tailnet. Each attempt gets a fresh token and independently cleaned temporary Serve endpoint; the real Dashboard and Matrix mappings stay active throughout. The installer records aggregate attempted, passed, failed, and skipped counts plus the last validation time.
+
+The accidental user-facing Matrix relay-session ceiling is removed. Schema 24 remains readable so interim v14.6.3 installations are not rejected, but any saved `tailscaleMatrixMaxConnections` value is ignored and no longer written. Matrix and Dashboard retain fixed independent internal relay gates. The unattended-upgrades feature remains removed from current behavior/documentation, with only ownership-proven legacy cleanup retained.
+
+---
 
 ## v14.6.2 Hotfix — bootstrap staging correction
 
@@ -10,7 +18,7 @@ If the original v14.6.2 installer already created a verified pre-update backup a
 
 ---
 
-> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ### v14.6.2 latest-supported managed upstreams

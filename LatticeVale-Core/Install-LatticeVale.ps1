@@ -20,7 +20,7 @@ function Start-LatticeValeRemoteAccessLog {
         New-Item -ItemType Directory -Path $base -Force | Out-Null
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $script:RemoteAccessLogPath = Join-Path $base "remote-access-$stamp.log"
-        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.2 Hotfix remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.3 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
         return $script:RemoteAccessLogPath
     } catch {
         $script:RemoteAccessLogPath = ''
@@ -5544,16 +5544,21 @@ function Write-LatticeValeBridgeConfig(
     }
     $services = @()
     if ($DashboardEnabled) {
-        $services += [ordered]@{ label='Dashboard'; enabled=$true; backendPort=$DashboardBackendPort; bridgePort=$DashboardBridgePort; probePath='/' }
+        # Dashboard requests are short-lived; retain a bounded pool that is independent
+        # from Matrix so long-lived Matrix /sync sessions can never starve it.
+        $services += [ordered]@{ label='Dashboard'; enabled=$true; backendPort=$DashboardBackendPort; bridgePort=$DashboardBridgePort; probePath='/'; maxConnections=64 }
     }
     if ($MatrixEnabled) {
-        $services += [ordered]@{ label='Matrix'; enabled=$true; backendPort=$MatrixBackendPort; bridgePort=$MatrixBridgePort; probePath='/_matrix/client/versions' }
+        # Matrix clients keep long-poll /sync requests open and may establish several
+        # concurrent media/event streams per device. Give Matrix its own larger pool
+        # so multiple remote tailnet clients can coexist without sharing Dashboard's gate.
+        $services += [ordered]@{ label='Matrix'; enabled=$true; backendPort=$MatrixBackendPort; bridgePort=$MatrixBridgePort; probePath='/_matrix/client/versions'; maxConnections=512 }
     }
     $normalizedMode = ([string]$NetworkingMode).Trim().ToLowerInvariant()
     $targetMode = if ($normalizedMode -eq 'mirrored') { 'mirrored-localhost' } else { 'wsl-ip' }
     $initialTarget = if ($targetMode -eq 'mirrored-localhost') { '127.0.0.1' } else { $lastIp }
     $config = [ordered]@{
-        schema=4
+        schema=5
         transport='windows-native-tcp-relay'
         distroName=$Name
         networkingMode=$normalizedMode
@@ -6128,7 +6133,12 @@ function Set-TailscaleInfoInWsl(
     [string]$WslNetworkingModeOwner = '',
     [string]$TailscaleIpv4 = '',
     [string]$WindowsDnsStatus = 'UNKNOWN',
-    [string]$RemoteValidationStatus = 'NOT_RUN'
+    [string]$RemoteValidationStatus = 'NOT_RUN',
+    [int]$RemoteValidationAttempted = 0,
+    [int]$RemoteValidationPassed = 0,
+    [int]$RemoteValidationFailed = 0,
+    [int]$RemoteValidationSkipped = 0,
+    [string]$RemoteValidationLastUtc = ''
 ) {
     $content = @(
         'MODE=windows-host',
@@ -6145,6 +6155,11 @@ function Set-TailscaleInfoInWsl(
         "TAILSCALE_IPV4=$TailscaleIpv4",
         "WINDOWS_DNS_STATUS=$WindowsDnsStatus",
         "REMOTE_VALIDATION_STATUS=$RemoteValidationStatus",
+        "REMOTE_VALIDATION_ATTEMPTED=$RemoteValidationAttempted",
+        "REMOTE_VALIDATION_PASSED=$RemoteValidationPassed",
+        "REMOTE_VALIDATION_FAILED=$RemoteValidationFailed",
+        "REMOTE_VALIDATION_SKIPPED=$RemoteValidationSkipped",
+        "REMOTE_VALIDATION_LAST_UTC=$RemoteValidationLastUtc",
         "BRIDGE_TASK_NAME=$BridgeTaskName",
         "BRIDGE_AUTOSTART=$($BridgeAutoStart.ToString().ToLowerInvariant())"
     ) -join "`n"
@@ -6457,72 +6472,108 @@ function Invoke-TailscaleRemotePeerValidation(
     [string]$DnsName,
     [string]$Ipv4
 ) {
-    $result = [ordered]@{ Status='PARTIAL'; Category='SKIPPED'; Detail='Remote-device validation was not completed.'; Port=0 }
-    if (-not (Read-Choice 'Validate Tailscale from a second device now?' 'LatticeVale creates a temporary private HTTPS text endpoint. Open it on another Tailscale device, preferably your phone on cellular, and type the code it displays back into this installer. This is the only way the installer can prove real remote DNS + tunnel + TLS + Serve reachability.' 'Remote access remains installed but is reported PARTIAL because only this PC was tested.' $true)) {
-        Write-RemoteAccessLog 'Remote-device validation skipped by user; status=PARTIAL.'
+    $result = [ordered]@{
+        Status='PARTIAL'; Category='NOT_RUN'; Detail='No remote devices were validated.'; Port=0
+        Attempted=0; Passed=0; Failed=0; Skipped=0; LastValidationUtc=''
+    }
+    if (-not (Read-Choice 'Validate Matrix/Tailscale access from another device now?' 'The other device must already be signed into the same permitted tailnet. LatticeVale creates a temporary private HTTPS challenge so it can prove real remote DNS + tunnel + TLS + Serve reachability without changing the real Matrix endpoint.' 'Remote access remains installed but is reported PARTIAL because only this PC was tested.' $true)) {
+        Write-RemoteAccessLog 'Remote-device validation skipped by user; status=PARTIAL/NOT_RUN.'
         return [pscustomobject]$result
     }
 
-    $port = Get-AvailableTailscaleRemoteValidationPort $TailscaleExe
-    if ($port -le 0) {
-        $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='No safe temporary Tailscale Serve port was available for remote validation.'
-        Write-RemoteAccessLog $result.Detail
-        return [pscustomobject]$result
-    }
-    $result.Port = $port
-    $token = 'LV-' + ([Guid]::NewGuid().ToString('N').Substring(0,12).ToUpperInvariant())
-    $serveStarted = $false
-    try {
-        $serve = Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg',"--https=$port","text:$token") 30
-        if (-not $serve.Success) {
-            $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='Temporary Tailscale Serve validation endpoint could not be created: ' + (Get-SafeDiagnosticExcerpt $serve.Text 420)
-            Write-RemoteAccessLog $result.Detail
-            return [pscustomobject]$result
-        }
-        $serveStarted = $true
-        $local = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $port '/'
-        if (-not $local.Success -or $local.Body.Trim() -ne $token) {
-            $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='Temporary validation endpoint failed its local direct-IP HTTPS self-test.'
-            Write-RemoteAccessLog $result.Detail
-            return [pscustomobject]$result
+    $deviceNumber = 0
+    $keepTesting = $true
+    while ($keepTesting) {
+        $deviceNumber++
+        $result.Attempted++
+        $result.LastValidationUtc = [DateTime]::UtcNow.ToString('o')
+        $attemptStatus = 'FAIL'
+        $attemptCategory = 'SERVE'
+        $attemptDetail = 'Remote-device validation did not complete.'
+        $attemptPort = Get-AvailableTailscaleRemoteValidationPort $TailscaleExe
+        $result.Port = $attemptPort
+        $serveStarted = $false
+
+        if ($attemptPort -le 0) {
+            $attemptDetail = 'No safe temporary Tailscale Serve port was available for remote validation.'
+        } else {
+            # Every device attempt gets a fresh token. A code from a prior device can never
+            # satisfy a later attempt, even when Windows reuses the same temporary Serve port.
+            $token = 'LV-' + ([Guid]::NewGuid().ToString('N').Substring(0,12).ToUpperInvariant())
+            try {
+                $serve = Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg',"--https=$attemptPort","text:$token") 30
+                if (-not $serve.Success) {
+                    $attemptDetail = 'Temporary Tailscale Serve validation endpoint could not be created: ' + (Get-SafeDiagnosticExcerpt $serve.Text 420)
+                } else {
+                    $serveStarted = $true
+                    $local = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $attemptPort '/'
+                    if (-not $local.Success -or $local.Body.Trim() -ne $token) {
+                        $attemptDetail = 'Temporary validation endpoint failed its local direct-IP HTTPS self-test.'
+                    } else {
+                        $url = Get-TailscaleHttpsUrl $DnsName $attemptPort
+                        Write-Host ''
+                        Write-Host "REAL REMOTE-DEVICE VALIDATION - DEVICE $deviceNumber" -ForegroundColor Cyan
+                        Write-Host 'On another device already signed into the same permitted Tailscale tailnet, open:' -ForegroundColor White
+                        Write-Host $url -ForegroundColor Green
+                        Write-Host 'The page will display a short LV- code. Type that exact code below.' -ForegroundColor White
+                        $entered = (Read-Host "Code shown on device $deviceNumber (press Enter if the page would not open)").Trim()
+                        if ($entered -ceq $token) {
+                            $attemptStatus='PASS'; $attemptCategory='REMOTE'; $attemptDetail="Device $deviceNumber successfully resolved and opened the temporary HTTPS Serve endpoint."
+                        } else {
+                            Write-Host 'Classify what this remote device showed:' -ForegroundColor Yellow
+                            $choice = Read-Menu "Device $deviceNumber validation result" @(
+                                'DNS unavailable / hostname not found',
+                                'Connection timed out / unreachable / refused',
+                                'TLS or certificate error',
+                                'Page opened but the validation code did not match',
+                                'I did not complete this device test'
+                            ) 1
+                            switch ($choice) {
+                                1 { $attemptStatus='FAIL'; $attemptCategory='DNS'; $attemptDetail="Device $deviceNumber reported DNS/name-resolution failure for the Tailscale HTTPS name." }
+                                2 { $attemptStatus='FAIL'; $attemptCategory='TRANSPORT'; $attemptDetail="Device $deviceNumber resolved the target but could not establish the remote connection." }
+                                3 { $attemptStatus='FAIL'; $attemptCategory='TLS'; $attemptDetail="Device $deviceNumber reported a TLS/certificate failure." }
+                                4 { $attemptStatus='FAIL'; $attemptCategory='SERVE'; $attemptDetail="Device $deviceNumber opened a page but did not receive the current LatticeVale validation token." }
+                                5 { $attemptStatus='PARTIAL'; $attemptCategory='SKIPPED'; $attemptDetail="Device $deviceNumber validation was not completed." }
+                            }
+                        }
+                    }
+                }
+            } finally {
+                if ($serveStarted) {
+                    [void](Invoke-NativeProcessCapture $TailscaleExe @('serve',"--https=$attemptPort",'off') 30)
+                    Write-RemoteAccessLog "Temporary remote-validation Serve mapping on HTTPS $attemptPort removed after device $deviceNumber."
+                }
+            }
         }
 
-        $url = Get-TailscaleHttpsUrl $DnsName $port
-        Write-Host ''
-        Write-Host 'REAL REMOTE-DEVICE VALIDATION' -ForegroundColor Cyan
-        Write-Host 'On a SECOND Tailscale device, preferably your phone with Wi-Fi OFF, open:' -ForegroundColor White
-        Write-Host $url -ForegroundColor Green
-        Write-Host 'The page will display a short LV- code. Type that exact code below.' -ForegroundColor White
-        $entered = (Read-Host 'Code shown on the remote device (press Enter if the page would not open)').Trim()
-        if ($entered -ceq $token) {
-            $result.Status='PASS'; $result.Category='REMOTE'; $result.Detail='A second Tailscale device successfully resolved and opened the temporary HTTPS Serve endpoint.'
-            Write-RemoteAccessLog $result.Detail
-            return [pscustomobject]$result
+        if ($attemptStatus -eq 'PASS') {
+            $result.Passed++
+            Write-Host "Device $deviceNumber`: PASS" -ForegroundColor Green
+        } elseif ($attemptStatus -eq 'FAIL') {
+            $result.Failed++
+            Write-Warning "Device $deviceNumber`: FAIL ($attemptCategory) - $attemptDetail"
+        } else {
+            $result.Skipped++
+            Write-Warning "Device $deviceNumber`: PARTIAL/SKIPPED - $attemptDetail"
         }
+        Write-RemoteAccessLog ("Remote-device validation attempt {0}: {1}/{2}; {3}" -f $deviceNumber,$attemptStatus,$attemptCategory,$attemptDetail)
 
-        Write-Host 'Classify what the remote device showed:' -ForegroundColor Yellow
-        $choice = Read-Menu 'Remote validation result' @(
-            'DNS unavailable / hostname not found',
-            'Connection timed out / unreachable / refused',
-            'TLS or certificate error',
-            'Page opened but the validation code did not match',
-            'I did not complete the remote-device test'
-        ) 1
-        switch ($choice) {
-            1 { $result.Status='FAIL'; $result.Category='DNS'; $result.Detail='Second device reported DNS/name-resolution failure for the Tailscale HTTPS name.' }
-            2 { $result.Status='FAIL'; $result.Category='TRANSPORT'; $result.Detail='Second device resolved the target but could not establish the remote connection.' }
-            3 { $result.Status='FAIL'; $result.Category='TLS'; $result.Detail='Second device reported a TLS/certificate failure.' }
-            4 { $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail='Second device opened a page but did not receive the temporary LatticeVale validation token.' }
-            5 { $result.Status='PARTIAL'; $result.Category='SKIPPED'; $result.Detail='Remote-device validation was not completed.' }
-        }
-        Write-RemoteAccessLog ("Remote-device validation: {0}/{1}; {2}" -f $result.Status,$result.Category,$result.Detail)
-        return [pscustomobject]$result
-    } finally {
-        if ($serveStarted) {
-            [void](Invoke-NativeProcessCapture $TailscaleExe @('serve',"--https=$port",'off') 30)
-            Write-RemoteAccessLog "Temporary remote-validation Serve mapping on HTTPS $port removed."
-        }
+        $keepTesting = Read-Choice 'Validate another Tailscale device?' 'Creates a new one-time challenge for another device that is already signed into the same permitted tailnet. The real Dashboard/Matrix Serve mappings stay active and unchanged.' 'Finish remote-device validation and continue installation.' $false
     }
+
+    if ($result.Attempted -le 0) {
+        $result.Status='PARTIAL'; $result.Category='NOT_RUN'; $result.Detail='No remote devices were validated.'
+    } elseif ($result.Passed -eq $result.Attempted) {
+        $result.Status='PASS'; $result.Category='REMOTE'; $result.Detail="$($result.Passed) of $($result.Attempted) remote devices passed the Tailscale HTTPS challenge."
+    } elseif ($result.Passed -gt 0) {
+        $result.Status='PARTIAL'; $result.Category='MIXED'; $result.Detail="$($result.Passed) of $($result.Attempted) remote devices passed; failed=$($result.Failed), skipped=$($result.Skipped)."
+    } elseif ($result.Failed -eq $result.Attempted) {
+        $result.Status='FAIL'; $result.Category='REMOTE'; $result.Detail="All $($result.Attempted) attempted remote devices failed validation."
+    } else {
+        $result.Status='PARTIAL'; $result.Category='MIXED'; $result.Detail="No remote device passed; failed=$($result.Failed), skipped=$($result.Skipped)."
+    }
+    Write-RemoteAccessLog ("Remote-device validation aggregate: status={0}; attempted={1}; passed={2}; failed={3}; skipped={4}; lastUtc={5}" -f $result.Status,$result.Attempted,$result.Passed,$result.Failed,$result.Skipped,$result.LastValidationUtc)
+    return [pscustomobject]$result
 }
 
 function Test-WingetPackageInstalled([string]$Id) {
@@ -6593,8 +6644,11 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
     }
     if ($tsInfo.ContainsKey('WINDOWS_DNS_STATUS')) { Write-Info "Windows Tailscale DNS validation: $($tsInfo['WINDOWS_DNS_STATUS'])" }
     else { Write-Info 'Windows Tailscale DNS validation: UNKNOWN (not recorded by this installation)' }
-    if ($tsInfo.ContainsKey('REMOTE_VALIDATION_STATUS')) { Write-Info "Second-device remote validation: $($tsInfo['REMOTE_VALIDATION_STATUS'])" }
-    else { Write-Info 'Second-device remote validation: NOT_RUN (not recorded by this installation)' }
+    if ($tsInfo.ContainsKey('REMOTE_VALIDATION_STATUS')) {
+        $attempted = if ($tsInfo.ContainsKey('REMOTE_VALIDATION_ATTEMPTED')) { $tsInfo['REMOTE_VALIDATION_ATTEMPTED'] } else { '?' }
+        $passed = if ($tsInfo.ContainsKey('REMOTE_VALIDATION_PASSED')) { $tsInfo['REMOTE_VALIDATION_PASSED'] } else { '?' }
+        Write-Info "Remote-device validation: $($tsInfo['REMOTE_VALIDATION_STATUS']) (passed=$passed / attempted=$attempted)"
+    } else { Write-Info 'Remote-device validation: NOT_RUN (not recorded by this installation)' }
 
     foreach ($mapping in @(
         @{ Label='Dashboard'; Selected=[bool](Get-OptionValue $Options 'tailscaleDashboard' $false); OptionPort=(Get-OptionTcpPort $Options 'tailscaleDashboardPort' 9443); Meta='DASHBOARD_HTTPS_PORT'; BridgeMeta='DASHBOARD_BRIDGE_PORT'; Bridge=(Get-OptionTcpPort $Options 'dashboardBridgePort' 19119) },
@@ -6742,7 +6796,7 @@ $bundleVersion = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'VERSION.txt
 if ($bundleVersion -notmatch '^[A-Za-z0-9._-]{1,64}$') {
     throw "VERSION.txt contains an invalid installer version identifier: '$bundleVersion'"
 }
-$bundleDisplayVersion = if ($bundleVersion -eq '14.6.2') { '14.6.2 Hotfix' } else { $bundleVersion }
+$bundleDisplayVersion = $bundleVersion
 Write-Info "Installer bundle version: $bundleDisplayVersion"
 
 $wslInfo = Get-WslCapabilities
@@ -7287,7 +7341,6 @@ if ($reusePriorChoices) {
         Write-Info "Windows Obsidian vault: $obsidianVaultWindowsPath"
         Write-Info "Hermes/QMD will mount it from WSL path: $obsidianVaultWslPath"
     }
-    $unattended = [bool](Get-OptionValue $existingOptions 'unattendedUpdates' $true)
     if ($wslLifetimeSupported) {
         $savedLifetimeChoice = $existingOptions.PSObject.Properties['keepWslServicesRunning']
         if ($null -ne $savedLifetimeChoice) {
@@ -7542,7 +7595,6 @@ if ($reusePriorChoices) {
         if ($changeScopes -contains 'runtime') {
             Write-Host "`n-- Runtime and Windows integration policy --" -ForegroundColor White
             $containerResourceLimits = Read-Choice 'Apply adaptive CPU/RAM ceilings to LatticeVale containers?' 'Recalculates one safe container-memory budget from the CPU/RAM currently visible to WSL, leaves extra WSL/Windows headroom, and applies conservative allocator/Synapse/PostgreSQL RAM tuning to enabled services. It auto-refreshes after a WSL restart when those limits change. User compose.override.yaml remains authoritative.' 'LatticeVale container ceilings are disabled.' $containerResourceLimits
-            $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Changes only the managed unattended-updates policy.' 'Ubuntu security updates remain manual.' $unattended
             if ($wslLifetimeSupported) {
                 $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Changes only LatticeVale ownership of the supported instance/VM idle-timeout keys required for persistent WSL server lifetime.' 'The existing LatticeVale WSL lifetime policy is disabled.' $keepWslServicesRunning
             }
@@ -7979,7 +8031,6 @@ if ($reusePriorChoices) {
             $resourceDefault = [bool](Get-OptionValue $old 'containerResourceLimits' $true)
         }
         $containerResourceLimits = Read-Choice 'Apply adaptive CPU/RAM ceilings to LatticeVale containers?' 'Measures the CPU/RAM actually visible inside WSL, reserves WSL/Docker/Windows headroom, divides the remaining memory budget across only enabled services, and applies conservative allocator/Synapse/PostgreSQL RAM tuning on smaller WSL VMs. It does not assume fallback hardware values and recalculates after a WSL restart if the allocation changes. Limits are ceilings, not reservations; compose.override.yaml remains authoritative.' 'Containers remain unrestricted by LatticeVale; Docker/WSL global limits and any user compose.override.yaml still apply.' $resourceDefault
-        $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Automatically installs eligible Ubuntu security updates inside WSL.' 'Updates must be applied manually.' ([bool](Get-OptionValue $old 'unattendedUpdates' $true))
         $keepWslServicesRunning = $false
         if ($wslLifetimeSupported) {
             $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Uses WSL''s supported [general] instanceIdleTimeout=-1 plus [wsl2] vmIdleTimeout=-1 policies. This is not a polling loop or Windows auto-start; your normal launcher still owns startup.' 'Leaves WSL''s instance-idle policy unchanged; on affected WSL builds the distro may terminate even while server services are intended to stay available.' ([bool](Get-OptionValue $old 'keepWslServicesRunning' $tailscaleMatrix))
@@ -8218,7 +8269,6 @@ $options = [ordered]@{
     obsidian = $obsidian
     obsidianVaultWindowsPath = $obsidianVaultWindowsPath
     obsidianVaultWslPath = $obsidianVaultWslPath
-    unattendedUpdates = $unattended
     keepWslServicesRunning = $keepWslServicesRunning
     autoStart = $autoStart
     windowsShortcuts = $windowsShortcuts
@@ -8254,7 +8304,7 @@ Write-Host "  WSL implementation: $(if ($wslInfo.Modern) { 'Store/MSIX' } else {
     "GPU acceleration: $useGpuAcceleration", "Hermes local AI: $hermesLocalAI$(if ($hermesLocalAI) { " (text backend=$localTextBackend)" } else { '' })", "DirectML text model: $(if (($honcho -or $hermesLocalAI) -and $localTextBackend -eq 'directml') { "$directmlTextModel (WSL-host port $directmlPort; GPU=$(if ($directmlAdapterName) { $directmlAdapterName } else { $directmlGpuVendor }); VRAM=$(if ($directmlVramMiB -ge 256) { "$directmlVramMiB MiB" } else { "unknown" }))" } else { 'n/a' })", "DirectML text fallback: $(if ($localTextBackend -eq 'directml') { $directmlFallbackPolicy } else { 'n/a' })", "Ollama text model: $(if ($localTextBackend -eq 'ollama' -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none')) { $localTextModel } else { 'n/a' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if (($localTextBackend -eq 'ollama') -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none') -or $honcho) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if (($localTextBackend -eq 'ollama') -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none') -or $honcho) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
     "Local ports: Hermes API=$hermesApiPort$(if ($dashboard) { ", Dashboard=$dashboardLocalPort" } else { '' })$(if ($matrix) { ", Matrix=$matrixLocalPort" } else { '' })$(if ($searxng) { ", SearXNG=$searxngLocalPort" } else { '' })$(if ($honcho) { ", Honcho=$honchoLocalPort" } else { '' })",
     "Windows bridge ports: $(if ($tailscaleDashboard) { "Dashboard=$dashboardBridgePort " } else { '' })$(if ($tailscaleMatrix) { "Matrix=$matrixBridgePort" } else { '' })",
-    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Unattended updates: $unattended", "Repair maintenance: $repairMaintenance", "Universal repair migration: $universalRepairMigration", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
+    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Repair maintenance: $repairMaintenance", "Universal repair migration: $universalRepairMigration", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
 ) | ForEach-Object { Write-Host "  $_" }
 Write-Info 'Recovery model: verify live state first, preserve completed work, then resume the earliest incomplete/broken stage. Matrix precedes Hermes setup; Windows add-ons/Tailscale/auto-start remain last.'
 if ($kanban) {
@@ -8550,7 +8600,7 @@ if ($previousTailscaleInfo.ContainsKey('MODE') -and $previousTailscaleInfo['MODE
 $oldDashboardBackendPort = if ($oldDashboardBridgePort -gt 0) { $oldDashboardBridgePort } else { $priorDashboardLocalPort }
 $oldMatrixBackendPort = if ($oldMatrixBridgePort -gt 0) { $oldMatrixBridgePort } else { $priorMatrixLocalPort }
 $bridgePaths = $null; $bridgeReady = $false; $bridgeTaskReady = $false; $bridgeWslIp = ''; $bridgeTargetAddress = ''
-$tailscaleRemoteValidation = [pscustomobject]@{ Status='NOT_RUN'; Category='NOT_RUN'; Detail='Remote validation not run.'; Port=0 }
+$tailscaleRemoteValidation = [pscustomobject]@{ Status='NOT_RUN'; Category='NOT_RUN'; Detail='Remote validation not run.'; Port=0; Attempted=0; Passed=0; Failed=0; Skipped=0; LastValidationUtc='' }
 $tailscaleDnsValidation = [pscustomobject]@{ Status='UNKNOWN'; SystemResolution=$false; MagicDnsResolution=$false; Detail='DNS validation not run.' }
 $tailscalePrerequisiteFailure = ''
 $tailscaleFailureCategory = 'NONE'
@@ -8775,7 +8825,7 @@ if ($tailscale) {
                 $infoDashBridge = if ($trackedDashboardPort -gt 0) { $dashboardBridgePort } else { 0 }
                 $infoMatrixBridge = if ($trackedMatrixPort -gt 0) { $matrixBridgePort } else { 0 }
                 $taskNameForInfo = if ($bridgePaths) { $bridgePaths.TaskName } else { '' }
-                Set-TailscaleInfoInWsl $DistroName $linuxUser $dnsName $trackedDashboardPort $trackedMatrixPort $infoDashBridge $infoMatrixBridge $bridgeWslIp $taskNameForInfo $true $bridgeTargetAddress $wslNetworkingModePolicy $wslNetworkingModeOwner $tsStatus.IPv4 $tailscaleDnsValidation.Status $tailscaleRemoteValidation.Status
+                Set-TailscaleInfoInWsl $DistroName $linuxUser $dnsName $trackedDashboardPort $trackedMatrixPort $infoDashBridge $infoMatrixBridge $bridgeWslIp $taskNameForInfo $true $bridgeTargetAddress $wslNetworkingModePolicy $wslNetworkingModeOwner $tsStatus.IPv4 $tailscaleDnsValidation.Status $tailscaleRemoteValidation.Status $tailscaleRemoteValidation.Attempted $tailscaleRemoteValidation.Passed $tailscaleRemoteValidation.Failed $tailscaleRemoteValidation.Skipped $tailscaleRemoteValidation.LastValidationUtc
                 if ($dnsName) {
                     if ($trackedDashboardPort -gt 0) { Write-Host "Tailscale Dashboard: $(Get-TailscaleHttpsUrl $dnsName $trackedDashboardPort)" -ForegroundColor Green }
                     if ($trackedMatrixPort -gt 0) { Write-Host "Tailscale Matrix: $(Get-TailscaleHttpsUrl $dnsName $trackedMatrixPort)" -ForegroundColor Green }
@@ -8828,7 +8878,12 @@ if ($tailscale) {
         $savedIpv4 = if ($previousTailscaleInfo.ContainsKey('TAILSCALE_IPV4')) { [string]$previousTailscaleInfo['TAILSCALE_IPV4'] } else { '' }
         $savedDnsStatus = if ($previousTailscaleInfo.ContainsKey('WINDOWS_DNS_STATUS')) { [string]$previousTailscaleInfo['WINDOWS_DNS_STATUS'] } else { 'UNKNOWN' }
         $savedRemoteStatus = if ($previousTailscaleInfo.ContainsKey('REMOTE_VALIDATION_STATUS')) { [string]$previousTailscaleInfo['REMOTE_VALIDATION_STATUS'] } else { 'NOT_RUN' }
-        Set-TailscaleInfoInWsl $DistroName $linuxUser $savedDns $trackedDashboardPort $trackedMatrixPort $oldDashboardBridgePort $oldMatrixBridgePort ([string]($previousTailscaleInfo['WSL_BRIDGE_IP'])) ([string]($previousTailscaleInfo['BRIDGE_TASK_NAME'])) $previousBridgeAutoStart $previousBridgeTarget $previousNetworkingMode $previousNetworkingOwner $savedIpv4 $savedDnsStatus $savedRemoteStatus
+        $savedRemoteAttempted = if ($previousTailscaleInfo.ContainsKey('REMOTE_VALIDATION_ATTEMPTED')) { [int]$previousTailscaleInfo['REMOTE_VALIDATION_ATTEMPTED'] } else { 0 }
+        $savedRemotePassed = if ($previousTailscaleInfo.ContainsKey('REMOTE_VALIDATION_PASSED')) { [int]$previousTailscaleInfo['REMOTE_VALIDATION_PASSED'] } else { 0 }
+        $savedRemoteFailed = if ($previousTailscaleInfo.ContainsKey('REMOTE_VALIDATION_FAILED')) { [int]$previousTailscaleInfo['REMOTE_VALIDATION_FAILED'] } else { 0 }
+        $savedRemoteSkipped = if ($previousTailscaleInfo.ContainsKey('REMOTE_VALIDATION_SKIPPED')) { [int]$previousTailscaleInfo['REMOTE_VALIDATION_SKIPPED'] } else { 0 }
+        $savedRemoteLastUtc = if ($previousTailscaleInfo.ContainsKey('REMOTE_VALIDATION_LAST_UTC')) { [string]$previousTailscaleInfo['REMOTE_VALIDATION_LAST_UTC'] } else { '' }
+        Set-TailscaleInfoInWsl $DistroName $linuxUser $savedDns $trackedDashboardPort $trackedMatrixPort $oldDashboardBridgePort $oldMatrixBridgePort ([string]($previousTailscaleInfo['WSL_BRIDGE_IP'])) ([string]($previousTailscaleInfo['BRIDGE_TASK_NAME'])) $previousBridgeAutoStart $previousBridgeTarget $previousNetworkingMode $previousNetworkingOwner $savedIpv4 $savedDnsStatus $savedRemoteStatus $savedRemoteAttempted $savedRemotePassed $savedRemoteFailed $savedRemoteSkipped $savedRemoteLastUtc
         Write-Warning 'One or more prior Tailscale mappings could not be safely removed; bridge metadata was retained for a later repair run.'
     }
 }
@@ -8863,13 +8918,13 @@ if ($tailscale) {
         $tailscaleDetail = if ($tailscalePrerequisiteFailure) { "[$tailscaleFailureCategory] Remote-access prerequisite failed: $tailscalePrerequisiteFailure" } elseif ($tailscaleFailureCategory -ne 'NONE') { "[$tailscaleFailureCategory] One or more requested Windows Tailscale Serve/relay mappings did not complete or validate." } else { 'One or more requested Windows Tailscale Serve/relay mappings did not complete or validate.' }
     } elseif ($remoteStatus -eq 'PASS') {
         $tailscaleState = 'PASS'
-        $tailscaleDetail = 'Windows Tailscale prerequisites, relay, Serve listeners, Matrix client path, and a second-device HTTPS challenge all passed.'
+        $tailscaleDetail = ('Windows Tailscale prerequisites, relay, Serve listeners, Matrix client path, and remote-device HTTPS challenges passed ({0}/{1}).' -f $tailscaleRemoteValidation.Passed,$tailscaleRemoteValidation.Attempted)
     } elseif ($remoteStatus -eq 'FAIL') {
         $tailscaleState = 'FAIL'
-        $tailscaleDetail = "[$($tailscaleRemoteValidation.Category)] Local Tailscale/Matrix validation passed, but the second-device remote validation failed: $($tailscaleRemoteValidation.Detail)"
+        $tailscaleDetail = "[$($tailscaleRemoteValidation.Category)] Local Tailscale/Matrix validation passed, but remote-device validation failed: $($tailscaleRemoteValidation.Detail)"
     } else {
         $tailscaleState = 'PARTIAL'
-        $tailscaleDetail = 'Local Tailscale/Matrix validation passed, but a second Tailscale device did not complete the remote validation challenge.'
+        $tailscaleDetail = ('Local Tailscale/Matrix validation passed, but remote-device validation is incomplete: {0}' -f $tailscaleRemoteValidation.Detail)
     }
 } elseif ($finalTailscaleInfo.Count -gt 0) {
     $tailscaleState = 'PARTIAL'

@@ -1,12 +1,20 @@
-# LatticeVale v14.6.2 Hotfix
+# LatticeVale v14.6.3
+
+> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Every device gets a fresh one-time HTTPS challenge, per-device results are shown immediately, and aggregate results are saved without changing the real Dashboard/Matrix Serve mappings. Installer-options schema 24 remains compatible with interim v14.6.3 state; the obsolete `tailscaleMatrixMaxConnections` value is ignored and no longer written. Current unattended-upgrades feature references remain removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.2 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
+> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.3 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
 
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
+
+## v14.6.3 - repeatable multi-device Tailscale/Matrix validation
+
+Windows Tailscale remote validation can now test more than one already-authorized tailnet device in the same installer run. Each device receives a newly generated one-time HTTPS challenge, its result is reported independently, and the installer asks whether to validate another device after every pass, failure, or skipped attempt. The temporary challenge is removed after each device while the real Dashboard and Matrix Serve mappings remain active.
+
+The final remote-access result records attempted, passed, failed, and skipped device counts plus the last validation time. A saved interim `tailscaleMatrixMaxConnections` field from an earlier v14.6.3 build is accepted for schema-24 compatibility but ignored and omitted from newly written options; Matrix relay concurrency returns to the fixed internal multi-client behavior inherited from v14.6.2. The unattended-upgrades option remains removed, with only ownership-proven legacy cleanup retained.
 
 ## v14.6.2 — latest-supported managed software updates
 
@@ -599,7 +607,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.5.47** | Prior install release | DirectML adapter/VRAM recovery, fingerprinted fallback retry, read-only GPU diagnostics, and verified managed-Ollama Vulkan fallback |
 | **v14.6.0** | Prior install release | Canonical hardware/backend/resource architecture, adaptive cross-vendor qualification, structured diagnostics, schema-21/schema-22 migration to schema 23, durable GPU opt-out, and conserved CPU allocation |
 | **v14.6.1** | Prior install release | Preservation-first eight-option migration continuity, same-version canonical runtime-policy repair, bounded/nonblocking DirectML readiness, exact Hermes s6 gateway-slot recovery, and hardened Matrix/Tailscale remote validation |
-| **v14.6.2 Hotfix** | **Current install release** | Latest-supported managed upstream resolution for Options 1/6, stable Honcho tag tracking, compatible stateful-major bounds, exact resolved-artifact recording, and inherited preservation-first repair |
+| **v14.6.2 Hotfix** | Prior install release | Latest-supported managed upstream resolution for Options 1/6, stable Honcho tag tracking, compatible stateful-major bounds, exact resolved-artifact recording, and inherited preservation-first repair |
+| **v14.6.3** | **Current install release** | Repeatable multi-device Tailscale/Matrix validation, schema-24 compatibility, fixed internal relay concurrency, and removal of the current unattended-upgrades feature |
 
 ### v14.4.1
 
