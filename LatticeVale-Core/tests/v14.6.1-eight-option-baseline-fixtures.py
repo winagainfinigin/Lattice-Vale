@@ -127,7 +127,7 @@ assert "$reusePriorChoices = ($installMode -in @('resume','change','reconfigure'
 
 # v14.6.2 feature contract must remain intact while the baseline menu is preserved.
 for required in (
-    'INSTALL_OPTIONS_SCHEMA=24',
+    'INSTALL_OPTIONS_SCHEMA=23',
     'RUNTIME_POLICY_SCHEMA=13',
     'HARDWARE_CAPABILITIES_SCHEMA=1',
     'BACKEND_CAPABILITIES_SCHEMA=1',

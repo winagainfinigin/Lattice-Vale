@@ -2,7 +2,7 @@ from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3'}, version
+assert version in {'14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}, version
 
 py=(ROOT/'stack/native-ollama-relay.py').read_text(encoding='utf-8')
 sh=(ROOT/'stack/native-ollama-relay.sh').read_text(encoding='utf-8')
@@ -40,10 +40,8 @@ assert '-Profile Any' in win  # retained only with exact local/remote address + 
 assert '-LocalAddress $GatewayIp -RemoteAddress $WslIp -LocalPort' in win
 
 # Existing Tailscale/WSL relay gets the same connection/task hardening.
-for marker in ('ConcurrentDictionary<int, SemaphoreSlim> Gates', 'new SemaphoreSlim(maxConnections, maxConnections)', 'DrainEvents()', 'Task.WhenAll(ab, ba)', 'SessionTimeoutMs = 7200000', 'per-service concurrency limit'):
+for marker in ('SemaphoreSlim(64, 64)', 'DrainEvents()', 'Task.WhenAll(ab, ba)', 'SessionTimeoutMs = 7200000', 'connection rejected: relay concurrency limit reached'):
     assert marker in tail, marker
-assert 'private static readonly SemaphoreSlim Gate' not in tail
-assert "$maxConnections = if ([string]$service.label -eq 'Matrix') { 512 } else { 64 }" in tail
 
 # Security/testing boundary is explicit rather than claiming static fixtures are E2E Windows tests.
 assert 'PowerShell `Add-Type` / AV-EDR visibility' in security

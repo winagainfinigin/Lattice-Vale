@@ -11,7 +11,7 @@ import tempfile
 sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
-assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() in {"14.5.42", "14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3'}
+assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() in {"14.5.42", "14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}
 cfg = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
 audit = (ROOT / "stack/state-audit.py").read_text(encoding="utf-8")
 compose = (ROOT / "stack/compose.yaml").read_text(encoding="utf-8")

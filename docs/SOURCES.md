@@ -1,6 +1,4 @@
-## v14.6.3 latest-supported upstream source policy
-
-> **v14.6.3:** installer-options schema 24 adds durable `tailscaleMatrixMaxConnections` for Windows Tailscale Matrix exposure. Fresh and reconfiguration flows prompt for 1-4096 simultaneous relay connections (suggested/default 512); schema-23 installs migrate to 512 unless changed. Dashboard remains on its independent 64-connection gate. Current unattended-upgrades feature references are removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
+## v14.6.2 Hotfix latest-supported upstream source policy
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 

@@ -3,7 +3,7 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ## Tailscale remote access reports PARTIAL or FAIL
@@ -43,13 +43,13 @@ CPU fallback remains valid when no GPU backend is usable.
 
 ## DirectML tensor probe passes but the model self-test has no HTTP response
 
-A passing tensor probe proves the WSL DirectX bridge, `torch_directml` import, selected adapter, and a simple device operation. It does **not** prove that every Transformers model/operator used during generation is supported. Current v14.6.3 retains the v14.6.0 protection for the pinned Qwen2/Qwen2.5 path from known DirectML causal-mask `masked_fill`/in-place-mask failures and fixes the fail-closed helper used when Ollama text fallback is disabled.
+A passing tensor probe proves the WSL DirectX bridge, `torch_directml` import, selected adapter, and a simple device operation. It does **not** prove that every Transformers model/operator used during generation is supported. Current v14.6.2 retains the v14.6.0 protection for the pinned Qwen2/Qwen2.5 path from known DirectML causal-mask `masked_fill`/in-place-mask failures and fixes the fail-closed helper used when Ollama text fallback is disabled.
 
 On Resume / repair, LatticeVale rebuilds/revalidates its isolated DirectML environment and retries the model self-test. If the HTTP request still terminates, the self-test now prints the bounded curl error and the last 120 lines of `logs/directml-gateway.log` before applying the configured fallback policy. With fallback `none`, this remains a hard fail-closed result; with a configured Ollama text fallback, LatticeVale may activate the bounded fallback marker and continue. Do not interpret a successful standalone system-Python tensor test as proof that the managed model-generation path is healthy.
 
 ## DirectML gateway uses Ollama fallback because memory capacity is unavailable
 
-If the gateway reports `DML_VRAM_CAPACITY_UNAVAILABLE`, do not install arbitrary WSL GPU packages or disable the safety check. Current 14.6.3 first tries the DirectML runtime's own capacity API, then the canonical PNP-correlated Windows memory inventory. Discrete dedicated memory and UMA/shared memory are handled differently. If neither produces a trustworthy bounded admission ceiling, DirectML intentionally falls back rather than loading an unbounded model.
+If the gateway reports `DML_VRAM_CAPACITY_UNAVAILABLE`, do not install arbitrary WSL GPU packages or disable the safety check. Current 14.6.2 first tries the DirectML runtime's own capacity API, then the canonical PNP-correlated Windows memory inventory. Discrete dedicated memory and UMA/shared memory are handled differently. If neither produces a trustworthy bounded admission ceiling, DirectML intentionally falls back rather than loading an unbounded model.
 
 Run Option 8 or `./directml-gateway.sh diagnose` and inspect the selected adapter, declared memory source/confidence, `/dev/dxg`, D3D12/DXCore bridge libraries, and tensor result. Windows/WSL projection or vendor-driver failure is a host prerequisite problem; successful projection with missing/mis-correlated canonical memory is a LatticeVale diagnostic/admission problem.
 

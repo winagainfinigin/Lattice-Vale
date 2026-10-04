@@ -36,7 +36,7 @@ from latticevale_arch import (  # noqa:E402
 )
 
 compat = parse_compatibility(ROOT / "compatibility.conf")
-assert compat["INSTALL_OPTIONS_SCHEMA"] == "24"
+assert compat["INSTALL_OPTIONS_SCHEMA"] == "23"
 assert compat["HARDWARE_CAPABILITIES_SCHEMA"] == "1"
 assert compat["BACKEND_CAPABILITIES_SCHEMA"] == "1"
 assert compat["BACKEND_HEALTH_SCHEMA"] == "1"

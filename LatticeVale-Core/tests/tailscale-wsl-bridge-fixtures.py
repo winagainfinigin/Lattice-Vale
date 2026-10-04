@@ -6,7 +6,7 @@ compose=(root/'stack/compose.yaml').read_text(encoding='utf-8')
 cfg=(root/'stack/configure-stack.sh').read_text(encoding='utf-8')
 helper=(root/'windows/LatticeVale-WslNativeRelay.ps1').read_text(encoding='utf-8')
 
-assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3'}
+assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'}
 assert 'tailscale/tailscale' not in compose
 assert '${DASHBOARD_HOST_BIND:-127.0.0.1}:${DASHBOARD_HOST_PORT:-9119}:9119' in compose
 assert '${MATRIX_HOST_BIND:-127.0.0.1}:${MATRIX_HOST_PORT:-8008}:8008' in compose
@@ -31,7 +31,7 @@ for text in (
 ):
     assert text in ps, text
 version=(root/'VERSION.txt').read_text().strip()
-assert ('shared-native-ollama-tailscale' in ps and 'user-existing-mirrored' in ps and 'Use mirrored WSL networking as the shared mode' not in ps) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3'} else (('shared-native-ollama-tailscale' in ps and 'mirrored-localhost' in ps) if version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40'} else ('networkingMode=nat' in ps))
+assert ('shared-native-ollama-tailscale' in ps and 'user-existing-mirrored' in ps and 'Use mirrored WSL networking as the shared mode' not in ps) if version in {'14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2'} else (('shared-native-ollama-tailscale' in ps and 'mirrored-localhost' in ps) if version in {'14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40'} else ('networkingMode=nat' in ps))
 for text in (
     'new TcpListener(IPAddress.Loopback, listenPort)',
     'TargetAddress',
@@ -40,7 +40,7 @@ for text in (
     "Invoke-WslDistroCommand $DistroName '' 'true' @() 30",
     "Invoke-WslDistroCommand $DistroName 'root' '/usr/local/sbin/hermes-stack-start' @() 900",
     '[ValidateRange(1, 900)]',
-    'var ignored = HandleClient(client, targetPort, listenPort, gate);',
+    'var ignored = HandleClient(client, targetPort);',
 ):
     assert text in helper, text
 # Primary v13.13+ transport may not create/set portproxy. Installer keeps only
@@ -50,26 +50,6 @@ assert 'interface portproxy set' not in helper.lower()
 assert 'netsh.exe' not in helper.lower()
 assert 'Migration cleanup only: v13.12.x used netsh portproxy' in ps
 assert 'tailscale serve reset' not in ps.lower()
-# Matrix remote access is multi-client: the Windows relay uses independent service
-# gates so long-lived Matrix /sync sessions cannot consume Dashboard capacity.
-assert "maxConnections=64" in ps
-assert "tailscaleMatrixMaxConnections" in ps
-assert "Maximum simultaneous remote Matrix relay connections" in ps
-assert "Read-Integer 'Maximum simultaneous remote Matrix relay connections'" in ps
-assert "maxConnections=$MatrixMaxConnections" in ps
-assert "$tailscaleMatrixMaxConnections 1 4096" in ps
-assert "tailscaleMatrixMaxConnections = $tailscaleMatrixMaxConnections" in ps
-assert "Get-OptionValue $existingOptions 'tailscaleMatrixMaxConnections' 512" in ps
-assert "Get-OptionValue $old 'tailscaleMatrixMaxConnections' 512" in ps
-assert "Write-LatticeValeBridgeConfig $DistroName" in ps and "$tailscaleMatrixMaxConnections" in ps
-assert "Matrix remote relay connection ceiling:" in ps
-assert "schema=5" in ps
-assert 'ConcurrentDictionary<int, SemaphoreSlim> Gates' in helper
-assert 'Start(int listenPort, int targetPort, int maxConnections)' in helper
-assert 'new SemaphoreSlim(maxConnections, maxConnections)' in helper
-assert 'private static readonly SemaphoreSlim Gate' not in helper
-assert "$maxConnections = if ([string]$service.label -eq 'Matrix') { 512 } else { 64 }" in helper
-assert 'per-service concurrency limit' in helper
 assert "@('set','--accept-dns=true')" not in ps
 assert "@('serve','status','--json')" in ps
 assert "@('serve','get-config','--all')" in ps
@@ -126,32 +106,4 @@ assert '(?:127\\.0\\.0\\.1|localhost)' in ps
 assert '(?:127\\\\.0\\\\.0\\\\.1|localhost)' not in ps
 # A Matrix failure must not be overwritten by the later bridge-metadata summary.
 assert "if ((-not $bridgeTracked -or -not $bridgeTaskTracked) -and $tailscaleFailureCategory -eq 'NONE')" in ps
-
-# v14.6.3 durable multi-client relay intent: schema 23 remains readable, while
-# schema 24 validates the new user-selected per-Matrix connection ceiling.
-import importlib.util
-_arch_spec = importlib.util.spec_from_file_location("latticevale_arch_relay_fixture", root/"stack/latticevale_arch.py")
-_arch = importlib.util.module_from_spec(_arch_spec)
-_arch_spec.loader.exec_module(_arch)
-_arch.validate_install_options({"schema": 23}, 24)
-for _good in (1, 128, 512, 4096):
-    _arch.validate_install_options({"schema": 24, "tailscaleMatrixMaxConnections": _good}, 24)
-for _bad in (0, 4097, True):
-    try:
-        _arch.validate_install_options({"schema": 24, "tailscaleMatrixMaxConnections": _bad}, 24)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError(f"invalid Matrix relay ceiling accepted: {_bad!r}")
-assert "Enable unattended Ubuntu security updates?" not in ps
-assert "unattendedUpdates =" not in ps
-features=(root.parent/"docs/FEATURES.md").read_text(encoding="utf-8")
-installer_description=(root.parent/"docs/Installer Description.txt").read_text(encoding="utf-8")
-assert "## 3.21 Unattended Ubuntu security updates" not in features
-assert "optional unattended Ubuntu security updates" not in features
-assert "optional unattended-updates integration" not in installer_description
-bootstrap=(root/"linux/bootstrap.sh").read_text(encoding="utf-8")
-assert "Unattended-upgrades integration was removed." in bootstrap
-assert "install -y --no-install-recommends unattended-upgrades" not in bootstrap
-
 print('TAILSCALE WINDOWS-NATIVE RELAY FIXTURES: PASS')

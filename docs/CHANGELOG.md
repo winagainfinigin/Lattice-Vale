@@ -1,14 +1,5 @@
 # Changelog
 
-## 14.6.3 - 2026-10-04
-
-- Advances durable installer options to schema **24** with `tailscaleMatrixMaxConnections`.
-- Fresh install and scoped Windows/Tailscale reconfiguration prompt for **1-4096** simultaneous Matrix relay connections, with **512** suggested/default.
-- Schema-23 managed installs migrate preservation-first to a 512 Matrix relay ceiling when the setting is absent; saved custom values survive Resume / repair and Update / repair.
-- Keeps Dashboard at an independent 64-connection gate and keeps legacy relay configs backward-compatible with a 512 Matrix default.
-- Removes the unattended-upgrades feature from current choices, summaries, durable options, and current feature documentation while retaining only ownership-proven cleanup of old LatticeVale APT policy.
-- Keeps the deterministic release contract at **146 fixtures** by extending the existing Windows-native Tailscale relay fixture with schema-24 range/migration, durable-intent, gate-isolation, and unattended-feature-removal assertions.
-
 ## 14.6.2 Hotfix — 2026-10-01
 
 - Fixes the original v14.6.2 Linux bootstrap staging typo: a duplicated `install -m 0644 ... \` prefix before the `compatibility.conf` copy caused GNU `install` to interpret the destination as a directory and abort repair/update staging.
@@ -18,7 +9,7 @@
 - Existing installations that already created a verified pre-update backup can apply the hotfix and rerun Resume / repair or Update / repair; no uninstall or data reset is required.
 
 
-> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ## 14.6.2 - 2026-10-01

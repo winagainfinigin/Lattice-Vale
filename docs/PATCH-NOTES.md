@@ -1,12 +1,4 @@
-# Current v14.6.3 patch notes
-
-## v14.6.3 - configurable Matrix remote relay capacity
-
-Schema 24 persists `tailscaleMatrixMaxConnections` as durable user intent. Matrix exposure through Windows Tailscale now prompts for a 1-4096 simultaneous connection ceiling, suggesting 512; schema-23 installations default the new field to 512 during preservation-first reconciliation. The existing Windows relay keeps independent per-service semaphores, so Matrix long-poll traffic and Dashboard traffic do not share a gate.
-
-The prior unattended-upgrades integration remains removed from runtime behavior, and v14.6.3 removes the remaining current feature/documentation references. Legacy cleanup remains deliberately narrow and ownership-proven. See `CHANGELOG.md` for the canonical release entry.
-
----
+# Current v14.6.2 Hotfix patch notes
 
 ## v14.6.2 Hotfix — bootstrap staging correction
 
@@ -18,7 +10,7 @@ If the original v14.6.2 installer already created a verified pre-update backup a
 
 ---
 
-> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.2 Hotfix current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ### v14.6.2 latest-supported managed upstreams

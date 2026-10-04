@@ -711,11 +711,12 @@ elif [[ -f "$directml_unit" ]] && grep -Fq "$stack_dir/directml-gateway.sh" "$di
   systemctl daemon-reload >/dev/null 2>&1 || true
 fi
 
-# Unattended-upgrades integration was removed. Clean up only policy/state that
-# older LatticeVale releases can prove they owned; leave Ubuntu/admin policy alone.
+unattended="$(jq -r '.unattendedUpdates // true' "$tmp_options")"
 legacy_periodic=/etc/apt/apt.conf.d/20auto-upgrades
-legacy_latticevale_periodic=/etc/apt/apt.conf.d/52hermes-unattended-upgrades
-legacy_unattended_owned=false
+hermes_periodic=/etc/apt/apt.conf.d/52hermes-unattended-upgrades
+# v13.10 migration: older builds wrote Ubuntu's generic 20auto-upgrades file.
+# Remove it only when its bytes exactly match the legacy installer-owned content;
+# never overwrite or remove an administrator's customized APT policy.
 legacy_expected="$(mktemp)"
 cat > "$legacy_expected" <<'CFG'
 APT::Periodic::Update-Package-Lists "1";
@@ -723,17 +724,37 @@ APT::Periodic::Unattended-Upgrade "1";
 CFG
 if [[ -f "$legacy_periodic" ]] && cmp -s "$legacy_periodic" "$legacy_expected"; then
   rm -f "$legacy_periodic"
-  legacy_unattended_owned=true
 fi
 rm -f "$legacy_expected"
-if [[ -f "$legacy_latticevale_periodic" ]] && grep -Fq 'Installer-owned policy' "$legacy_latticevale_periodic" 2>/dev/null; then
-  rm -f "$legacy_latticevale_periodic"
-  legacy_unattended_owned=true
-fi
-if [[ "$legacy_unattended_owned" == true ]] && [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
-  # Older LatticeVale releases explicitly enabled this unit. Undo that ownership
-  # without uninstalling the distro package or touching unrelated APT configuration.
-  systemctl disable --now unattended-upgrades >/dev/null 2>&1 || true
+
+if [[ "$unattended" == true ]]; then
+  if [[ "$repair_root_refresh_needed" == true ]] || ! dpkg-query -W -f='${Status}' unattended-upgrades 2>/dev/null | grep -qx 'install ok installed'; then
+    [[ "$repair_root_refresh_needed" == true ]] || apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+    apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends unattended-upgrades
+  fi
+  cat > "$hermes_periodic" <<'CFG'
+// Installer-owned policy. Do not put local administrator policy in this file.
+APT::Periodic::Update-Package-Lists "1";
+APT::Periodic::Unattended-Upgrade "1";
+Unattended-Upgrade::Automatic-Reboot "false";
+Unattended-Upgrade::Remove-Unused-Kernel-Packages "true";
+Unattended-Upgrade::Remove-New-Unused-Dependencies "true";
+CFG
+  chmod 0644 "$hermes_periodic"
+  if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
+    systemctl enable --now unattended-upgrades
+  else
+    if [[ "$repair_root_refresh_needed" == true ]] || ! dpkg-query -W -f='${Status}' cron 2>/dev/null | grep -qx 'install ok installed'; then
+      [[ "$repair_root_refresh_needed" == true ]] || apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+      apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends cron
+    fi
+    service cron start >/dev/null 2>&1 || true
+  fi
+else
+  # Removing the installer-owned periodic policy is sufficient to disable the
+  # Hermes-managed schedule. Do not disable Ubuntu's global service: another
+  # administrator/package policy may legitimately use it.
+  rm -f "$hermes_periodic"
 fi
 
 if [[ "$repair_root_refresh_needed" == true ]]; then
