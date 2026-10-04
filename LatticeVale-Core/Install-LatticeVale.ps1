@@ -7292,7 +7292,6 @@ if ($reusePriorChoices) {
         Write-Info "Windows Obsidian vault: $obsidianVaultWindowsPath"
         Write-Info "Hermes/QMD will mount it from WSL path: $obsidianVaultWslPath"
     }
-    $unattended = [bool](Get-OptionValue $existingOptions 'unattendedUpdates' $true)
     if ($wslLifetimeSupported) {
         $savedLifetimeChoice = $existingOptions.PSObject.Properties['keepWslServicesRunning']
         if ($null -ne $savedLifetimeChoice) {
@@ -7547,7 +7546,6 @@ if ($reusePriorChoices) {
         if ($changeScopes -contains 'runtime') {
             Write-Host "`n-- Runtime and Windows integration policy --" -ForegroundColor White
             $containerResourceLimits = Read-Choice 'Apply adaptive CPU/RAM ceilings to LatticeVale containers?' 'Recalculates one safe container-memory budget from the CPU/RAM currently visible to WSL, leaves extra WSL/Windows headroom, and applies conservative allocator/Synapse/PostgreSQL RAM tuning to enabled services. It auto-refreshes after a WSL restart when those limits change. User compose.override.yaml remains authoritative.' 'LatticeVale container ceilings are disabled.' $containerResourceLimits
-            $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Changes only the managed unattended-updates policy.' 'Ubuntu security updates remain manual.' $unattended
             if ($wslLifetimeSupported) {
                 $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Changes only LatticeVale ownership of the supported instance/VM idle-timeout keys required for persistent WSL server lifetime.' 'The existing LatticeVale WSL lifetime policy is disabled.' $keepWslServicesRunning
             }
@@ -7984,7 +7982,6 @@ if ($reusePriorChoices) {
             $resourceDefault = [bool](Get-OptionValue $old 'containerResourceLimits' $true)
         }
         $containerResourceLimits = Read-Choice 'Apply adaptive CPU/RAM ceilings to LatticeVale containers?' 'Measures the CPU/RAM actually visible inside WSL, reserves WSL/Docker/Windows headroom, divides the remaining memory budget across only enabled services, and applies conservative allocator/Synapse/PostgreSQL RAM tuning on smaller WSL VMs. It does not assume fallback hardware values and recalculates after a WSL restart if the allocation changes. Limits are ceilings, not reservations; compose.override.yaml remains authoritative.' 'Containers remain unrestricted by LatticeVale; Docker/WSL global limits and any user compose.override.yaml still apply.' $resourceDefault
-        $unattended = Read-Choice 'Enable unattended Ubuntu security updates?' 'Automatically installs eligible Ubuntu security updates inside WSL.' 'Updates must be applied manually.' ([bool](Get-OptionValue $old 'unattendedUpdates' $true))
         $keepWslServicesRunning = $false
         if ($wslLifetimeSupported) {
             $keepWslServicesRunning = Read-Choice 'Prevent WSL from auto-shutting down this running server instance?' 'Uses WSL''s supported [general] instanceIdleTimeout=-1 plus [wsl2] vmIdleTimeout=-1 policies. This is not a polling loop or Windows auto-start; your normal launcher still owns startup.' 'Leaves WSL''s instance-idle policy unchanged; on affected WSL builds the distro may terminate even while server services are intended to stay available.' ([bool](Get-OptionValue $old 'keepWslServicesRunning' $tailscaleMatrix))
@@ -8223,7 +8220,6 @@ $options = [ordered]@{
     obsidian = $obsidian
     obsidianVaultWindowsPath = $obsidianVaultWindowsPath
     obsidianVaultWslPath = $obsidianVaultWslPath
-    unattendedUpdates = $unattended
     keepWslServicesRunning = $keepWslServicesRunning
     autoStart = $autoStart
     windowsShortcuts = $windowsShortcuts
@@ -8259,7 +8255,7 @@ Write-Host "  WSL implementation: $(if ($wslInfo.Modern) { 'Store/MSIX' } else {
     "GPU acceleration: $useGpuAcceleration", "Hermes local AI: $hermesLocalAI$(if ($hermesLocalAI) { " (text backend=$localTextBackend)" } else { '' })", "DirectML text model: $(if (($honcho -or $hermesLocalAI) -and $localTextBackend -eq 'directml') { "$directmlTextModel (WSL-host port $directmlPort; GPU=$(if ($directmlAdapterName) { $directmlAdapterName } else { $directmlGpuVendor }); VRAM=$(if ($directmlVramMiB -ge 256) { "$directmlVramMiB MiB" } else { "unknown" }))" } else { 'n/a' })", "DirectML text fallback: $(if ($localTextBackend -eq 'directml') { $directmlFallbackPolicy } else { 'n/a' })", "Ollama text model: $(if ($localTextBackend -eq 'ollama' -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none')) { $localTextModel } else { 'n/a' })", "Honcho local embedding model: $(if ($honcho) { $localEmbeddingModel } else { 'n/a' })", "Ollama backend: $(if (($localTextBackend -eq 'ollama') -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none') -or $honcho) { if ($ollamaBackend -eq 'windows-native') { 'native Windows Ollama via WSL-only relay' } else { 'LatticeVale-managed WSL/Docker' } } else { 'n/a' })", "Ollama acceleration: $(if (($localTextBackend -eq 'ollama') -or ($localTextBackend -eq 'directml' -and $directmlFallbackPolicy -ne 'none') -or $honcho) { if ($ollamaBackend -eq 'windows-native') { 'owned by native Windows Ollama' } else { $ollamaAcceleration } } else { 'n/a' })", "Native Ollama relay transport: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaTransport } else { 'n/a' })", "Native Ollama WSL relay port: $(if ($ollamaBackend -eq 'windows-native') { $windowsOllamaBridgePort } else { 'n/a' })", "Adaptive container limits: $containerResourceLimits",
     "Local ports: Hermes API=$hermesApiPort$(if ($dashboard) { ", Dashboard=$dashboardLocalPort" } else { '' })$(if ($matrix) { ", Matrix=$matrixLocalPort" } else { '' })$(if ($searxng) { ", SearXNG=$searxngLocalPort" } else { '' })$(if ($honcho) { ", Honcho=$honchoLocalPort" } else { '' })",
     "Windows bridge ports: $(if ($tailscaleDashboard) { "Dashboard=$dashboardBridgePort " } else { '' })$(if ($tailscaleMatrix) { "Matrix=$matrixBridgePort" } else { '' })",
-    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Unattended updates: $unattended", "Repair maintenance: $repairMaintenance", "Universal repair migration: $universalRepairMigration", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
+    "Obsidian: $obsidian$(if ($obsidian) { " ($obsidianVaultWindowsPath)" } else { '' })", "Kanban worker limits: $(if ($kanban) { "$kanbanMaxInProgress total / $kanbanMaxInProgressPerProfile per profile" } else { 'n/a' })", "Repair maintenance: $repairMaintenance", "Universal repair migration: $universalRepairMigration", "Force managed software update now: $forceManagedUpdate", "Keep WSL services running: $keepWslServicesRunning", "Auto-start at Windows logon: $autoStart", "Windows Start/Shutdown shortcuts: $windowsShortcuts"
 ) | ForEach-Object { Write-Host "  $_" }
 Write-Info 'Recovery model: verify live state first, preserve completed work, then resume the earliest incomplete/broken stage. Matrix precedes Hermes setup; Windows add-ons/Tailscale/auto-start remain last.'
 if ($kanban) {
