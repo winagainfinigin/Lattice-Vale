@@ -5544,16 +5544,21 @@ function Write-LatticeValeBridgeConfig(
     }
     $services = @()
     if ($DashboardEnabled) {
-        $services += [ordered]@{ label='Dashboard'; enabled=$true; backendPort=$DashboardBackendPort; bridgePort=$DashboardBridgePort; probePath='/' }
+        # Dashboard requests are short-lived; retain a bounded pool that is independent
+        # from Matrix so long-lived Matrix /sync sessions can never starve it.
+        $services += [ordered]@{ label='Dashboard'; enabled=$true; backendPort=$DashboardBackendPort; bridgePort=$DashboardBridgePort; probePath='/'; maxConnections=64 }
     }
     if ($MatrixEnabled) {
-        $services += [ordered]@{ label='Matrix'; enabled=$true; backendPort=$MatrixBackendPort; bridgePort=$MatrixBridgePort; probePath='/_matrix/client/versions' }
+        # Matrix clients keep long-poll /sync requests open and may establish several
+        # concurrent media/event streams per device. Give Matrix its own larger pool
+        # so multiple remote tailnet clients can coexist without sharing Dashboard's gate.
+        $services += [ordered]@{ label='Matrix'; enabled=$true; backendPort=$MatrixBackendPort; bridgePort=$MatrixBridgePort; probePath='/_matrix/client/versions'; maxConnections=512 }
     }
     $normalizedMode = ([string]$NetworkingMode).Trim().ToLowerInvariant()
     $targetMode = if ($normalizedMode -eq 'mirrored') { 'mirrored-localhost' } else { 'wsl-ip' }
     $initialTarget = if ($targetMode -eq 'mirrored-localhost') { '127.0.0.1' } else { $lastIp }
     $config = [ordered]@{
-        schema=4
+        schema=5
         transport='windows-native-tcp-relay'
         distroName=$Name
         networkingMode=$normalizedMode
