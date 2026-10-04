@@ -155,6 +155,7 @@ For each applicable networking mode (at minimum NAT and mirrored on supported Wi
 - Tailscale selected with native Ollama under NAT.
 - Tailscale selected with native Ollama under mirrored networking.
 - Tailscale relay target changes after WSL restart/IP churn and recovers.
+- Matrix over Tailscale with multiple remote clients: keep at least two Element/Matrix clients syncing concurrently, exercise media/event traffic, and verify Dashboard traffic remains responsive. The Matrix relay has an independent 512-session pool; exceeding that pool must reject excess sessions cleanly without starving other relayed services.
 - `manage.sh stop` / Shutdown shortcut does not leave a bridge claiming healthy service when WSL is intentionally stopped.
 
 ## Startup / shutdown
