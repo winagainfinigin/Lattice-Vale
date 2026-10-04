@@ -40,8 +40,10 @@ assert '-Profile Any' in win  # retained only with exact local/remote address + 
 assert '-LocalAddress $GatewayIp -RemoteAddress $WslIp -LocalPort' in win
 
 # Existing Tailscale/WSL relay gets the same connection/task hardening.
-for marker in ('SemaphoreSlim(64, 64)', 'DrainEvents()', 'Task.WhenAll(ab, ba)', 'SessionTimeoutMs = 7200000', 'connection rejected: relay concurrency limit reached'):
+for marker in ('ConcurrentDictionary<int, SemaphoreSlim> Gates', 'new SemaphoreSlim(maxConnections, maxConnections)', 'DrainEvents()', 'Task.WhenAll(ab, ba)', 'SessionTimeoutMs = 7200000', 'per-service concurrency limit'):
     assert marker in tail, marker
+assert 'private static readonly SemaphoreSlim Gate' not in tail
+assert "$maxConnections = if ([string]$service.label -eq 'Matrix') { 512 } else { 64 }" in tail
 
 # Security/testing boundary is explicit rather than claiming static fixtures are E2E Windows tests.
 assert 'PowerShell `Add-Type` / AV-EDR visibility' in security
