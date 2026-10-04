@@ -37,7 +37,7 @@ assert "tailscaleMode = if ($tailscale) { 'windows-host' } else { 'disabled' }" 
 assert "targetMode = if ($normalizedMode -eq 'mirrored') { 'mirrored-localhost' } else { 'wsl-ip' }" in ps
 assert "initialTarget = if ($targetMode -eq 'mirrored-localhost') { '127.0.0.1' }" in ps
 assert 'lastTargetAddress=$initialTarget' in ps
-assert 'schema=4' in ps
+assert 'schema=5' in ps
 
 # Mirrored mode takes the stable localhost path; NAT remains dynamically discoverable.
 assert 'function Get-ActiveWslNetworkingMode' in relay
