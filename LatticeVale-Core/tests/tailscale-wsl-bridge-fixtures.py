@@ -40,7 +40,7 @@ for text in (
     "Invoke-WslDistroCommand $DistroName '' 'true' @() 30",
     "Invoke-WslDistroCommand $DistroName 'root' '/usr/local/sbin/hermes-stack-start' @() 900",
     '[ValidateRange(1, 900)]',
-    'var ignored = HandleClient(client, targetPort);',
+    'var ignored = HandleClient(client, targetPort, listenPort, gate);',
 ):
     assert text in helper, text
 # Primary v13.13+ transport may not create/set portproxy. Installer keeps only
@@ -50,6 +50,17 @@ assert 'interface portproxy set' not in helper.lower()
 assert 'netsh.exe' not in helper.lower()
 assert 'Migration cleanup only: v13.12.x used netsh portproxy' in ps
 assert 'tailscale serve reset' not in ps.lower()
+# Matrix remote access is multi-client: the Windows relay uses independent service
+# gates so long-lived Matrix /sync sessions cannot consume Dashboard capacity.
+assert "maxConnections=64" in ps
+assert "maxConnections=512" in ps
+assert "schema=5" in ps
+assert 'ConcurrentDictionary<int, SemaphoreSlim> Gates' in helper
+assert 'Start(int listenPort, int targetPort, int maxConnections)' in helper
+assert 'new SemaphoreSlim(maxConnections, maxConnections)' in helper
+assert 'private static readonly SemaphoreSlim Gate' not in helper
+assert "$maxConnections = if ([string]$service.label -eq 'Matrix') { 512 } else { 64 }" in helper
+assert 'per-service concurrency limit' in helper
 assert "@('set','--accept-dns=true')" not in ps
 assert "@('serve','status','--json')" in ps
 assert "@('serve','get-config','--all')" in ps
