@@ -22,6 +22,7 @@ import sys
 import tempfile
 import time
 from typing import Any, Iterable
+from urllib.parse import urlsplit
 
 sys.dont_write_bytecode = True
 
@@ -173,6 +174,21 @@ def validate_install_options(data: Any, current_schema: int) -> dict[str, Any]:
     )
     for key in bool_keys:
         _bool(data, key)
+    for key in ("matrixServerName", "tailscaleHostname"):
+        value = data.get(key)
+        if value is not None and (not isinstance(value, str) or len(value) > 253 or not re.fullmatch(r"[A-Za-z0-9._:-]*", value)):
+            raise ValueError(f"{key} must be a DNS-style host/domain string")
+    client_url = data.get("matrixClientHomeserverUrl")
+    if client_url is not None:
+        if not isinstance(client_url, str) or len(client_url) > 2048:
+            raise ValueError("matrixClientHomeserverUrl must be an absolute HTTP(S) URL")
+        parsed_client_url = urlsplit(client_url)
+        if parsed_client_url.scheme not in ("http", "https") or not parsed_client_url.hostname or parsed_client_url.username or parsed_client_url.password or parsed_client_url.query or parsed_client_url.fragment:
+            raise ValueError("matrixClientHomeserverUrl must be an absolute HTTP(S) URL without credentials, query, or fragment")
+        try:
+            parsed_client_url.port
+        except ValueError as exc:
+            raise ValueError("matrixClientHomeserverUrl has an invalid port") from exc
     schema = data.get("schema", current_schema)
     if isinstance(schema, bool) or not isinstance(schema, int) or not 1 <= schema <= current_schema:
         if isinstance(schema, int) and schema > current_schema:

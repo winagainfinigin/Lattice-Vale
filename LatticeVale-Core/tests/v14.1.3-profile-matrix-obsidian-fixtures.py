@@ -24,7 +24,8 @@ assert 'Complete-WorkerMatrixOptions $workers $matrix $false $true' in ps1  # co
 assert 'Complete-WorkerMatrixOptions $workers $matrix $true $true' in ps1   # fresh/change selection
 assert "localpart != name" in arch or "localpart'] != name" in arch
 assert "[[ \"$localpart\" == \"$name\" ]]" in cfg
-assert 'expected_user="@$localpart:hermes.local"' in cfg
+assert 'expected_user="@$localpart:$(matrix_identity_domain)"' in cfg
+assert 'cfg.get(\'server_name\')' in cfg
 assert '"windowsShortcuts"' in arch[arch.index('bool_keys ='):arch.index('for key in bool_keys')], 'persisted shortcut option must receive strict boolean validation'
 assert 'schema must be an integer from 1 through {current_schema}' in arch
 assert "Profile 'hermes' cannot receive an independent LatticeVale Matrix identity" in ps1, 'secondary Matrix identity must not collide with default @hermes account'

@@ -6,29 +6,30 @@ cfg=(root/'stack/configure-stack.sh').read_text(encoding='utf-8')
 audit=(root/'stack/state-audit.py').read_text(encoding='utf-8')
 readme=(root/'README.md').read_text(encoding='utf-8')
 
-# Clean/repair integration must normalize both supported config forms and env-level s6 opt-in.
+# Provision profiles in temporary standalone mode, then migrate managed topology.
 assert "cfg.pop('multiplex_profiles',None)" in cfg
-assert "gateway['multiplex_profiles']=False" in cfg
-assert 'remove_env_keys secrets/hermes-runtime.env GATEWAY_MULTIPLEX_PROFILES' in cfg
-assert 'remove_env_keys \"$f\" GATEWAY_MULTIPLEX_PROFILES' in cfg
-assert "gateway.get('multiplex_profiles') is not False" in cfg
-assert "cfg.get('multiplex_profiles') is True" in cfg
+assert "gateway.pop('multiplex_profiles',None)" in cfg
+assert "gateway['standalone']=True" in cfg
+assert 'hermes gateway migrate --multiplex' in cfg
+assert 'remove_legacy_gateway_multiplex_off secrets/hermes-runtime.env' in cfg
+assert 'remove_legacy_gateway_multiplex_off \"$f\"' in cfg
+assert "gateway.pop('multiplex_profiles',None)" in cfg
+assert "cfg.pop('multiplex_profiles',None)" in cfg
 
-# Clone sanitization must not inherit a multiplexer from the default profile.
+# Clone sanitization keeps provisioning standalone only until final migration.
 clone=cfg[cfg.index("PY_PROFILE_SAFE_CLONE"):cfg.index("PY_PROFILE_SAFE_CLONE", cfg.index("PY_PROFILE_SAFE_CLONE")+1)]
 assert "cfg.pop('multiplex_profiles',None)" in clone
-assert "gateway['multiplex_profiles']=False" in clone
-assert "not line.startswith('GATEWAY_MULTIPLEX_PROFILES=')" in clone
+assert "gateway['standalone']=True" in clone
+assert "line.startswith('GATEWAY_MULTIPLEX_PROFILES=') and line.split('=',1)[1].strip().lower() in {'false','no','off','0'}" in clone
 
 # Read-only audit must surface either YAML or runtime-env opt-in as a repair condition.
 assert 'yaml_multiplex_enabled' in audit
 assert 'GATEWAY_MULTIPLEX_PROFILES' in audit
 assert 'env_override_locations' in audit
 assert 'gatewayTopology' in audit
-assert 'standalone per-profile gateway topology; multiplexing disabled' in audit
+assert 'Hermes host gateway multiplexer is active' in audit
 
-# Documentation makes the policy explicit rather than silently changing user topology.
-assert 'one-process-per-profile' in readme.lower()
-assert 'gateway.multiplex_profiles' in readme
+# Current documentation states that managed profiles converge to shared multiplexing.
+assert 'multiplex' in readme.lower()
 assert 'v13.16.1' in (root.parent/'docs/CHANGELOG.md').read_text(encoding='utf-8')
 print('v13.16.1 profile-gateway-isolation fixtures: PASS')

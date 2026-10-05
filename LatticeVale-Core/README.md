@@ -230,10 +230,9 @@ This directory contains the complete inspectable installer implementation. The r
 - Consolidated release path-safety/source-manifest verification into repository-root `tools/ReleaseManifest.ps1`, shared by the launcher, verifier, and manifest generator.
 - Added explicit Honcho AGPL-3.0 network-use guidance to `../docs/THIRD-PARTY-NOTICES.md`.
 - Per-profile Matrix intent is stored inside each installer-selected worker/profile object.
-- Any valid user-selected profile name can receive a matching `@<profile>:hermes.local` identity and dedicated encrypted room.
+- Any valid user-selected profile name can receive a matching `@<profile>:<Synapse server_name>` identity and dedicated encrypted room. Fresh remote-capable installs select the authenticated Tailscale hostname before account creation; fresh local-only installs retain `hermes.local`.
 - Matrix provisioning is ordered after profile/model configuration; both cloned and independently selected profile models are verified before a profile gateway starts.
-- Secondary profiles use independent Matrix credentials/device/recovery state and independently supervised Docker/s6 gateways.
-- `gateway.multiplex_profiles` stays disabled for the LatticeVale-managed topology.
+- Secondary profiles use independent Matrix credentials/device/recovery state. They use temporary standalone gateways only during provisioning, then converge to Hermes's shared host gateway unless a preexisting standalone choice belongs to that profile.
 - The initial questionnaire asks for the Windows-local Obsidian vault path when Obsidian is selected.
 - Resume / repair migrates older worker definitions conservatively; it does not create new secondary Matrix identities without explicit user intent.
 - The human Matrix admin password is no longer stored as a long-lived profile-management secret.
@@ -382,7 +381,7 @@ cd ~/hermes-stack
 - **OpenCode Go:** when selected as a provider path, its model/provider setup remains profile-scoped rather than a Matrix-routing shortcut.
 - Internal Matrix homeserver URL: `http://synapse:8008`; default bot identity: `@hermes:hermes.local`.
 - `./manage.sh matrix-credentials` prints the retained default-bot credential summary; treat its output as sensitive.
-- Multi-profile gateways keep `gateway.multiplex_profiles: false` and use the upstream **one-process-per-profile** supervision model. Matrix-enabled profiles receive independent credentials and gateway processes.
+- Multi-profile gateways use Hermes's shared host multiplexer after installer provisioning; Matrix-enabled profiles keep independent credentials, devices, recovery state, and rooms. Profiles with a preexisting `gateway.standalone: true` choice remain standalone.
 
 ### Local ports and Docker namespace
 

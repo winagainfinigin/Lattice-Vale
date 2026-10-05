@@ -251,7 +251,7 @@ When Matrix and named profiles are enabled, each selected Matrix-enabled profile
 - its own room/user allowlists
 - its own independently supervised Hermes Docker/s6 gateway
 
-The default `@hermes:hermes.local` identity is preserved. If an older LatticeVale release created a managed room at another version, Resume / repair preserves that room and creates a replacement encrypted v10 room; it does not attempt an in-place downgrade. LatticeVale does not use an invented `matrix2` configuration namespace and keeps `gateway.multiplex_profiles: false` for the managed topology.
+Existing Matrix identities, including `@hermes:hermes.local`, are preserved. Fresh local-only installs use `hermes.local`; fresh remote-capable installs resolve the authenticated Tailscale hostname before creating accounts. Element's homeserver URL remains a separate client setting, and existing `.local` identities require manual URL entry for remote clients. If an older LatticeVale release created a managed room at another version, Resume / repair preserves that room and creates a replacement encrypted v10 room; it does not attempt an in-place downgrade. LatticeVale does not use an invented `matrix2` configuration namespace. Installer-managed Hermes profiles converge to the shared host gateway after provisioning while preserving explicit standalone choices.
 
 ## Obsidian/QMD
 

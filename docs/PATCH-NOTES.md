@@ -1,8 +1,14 @@
 # Current v14.6.3 patch notes
 
-## v14.6.3 - repeatable multi-device Tailscale/Matrix validation
+## v14.6.3 hotfix — Matrix identity and Hermes gateway convergence
 
-The Windows Tailscale remote-validation step is now repeatable. After every device attempt, the installer can create a new one-time HTTPS challenge for another device already signed into the permitted tailnet. Each attempt gets a fresh token and independently cleaned temporary Serve endpoint; the real Dashboard and Matrix mappings stay active throughout. The installer records aggregate attempted, passed, failed, and skipped counts plus the last validation time.
+Matrix identity domains, Element homeserver URLs, and Tailscale hostnames are persisted separately. Fresh remote-capable Matrix installs use a resolved Tailscale hostname before creating accounts; existing Synapse `server_name` values and Matrix state remain authoritative. Legacy `hermes.local` deployments keep their reachable Tailscale URL and receive `MANUAL_HOMESERVER_REQUIRED` guidance because `.local` IDs cannot use remote autodiscovery.
+
+Remote-device proof now adds a one-time challenge path to the configured Matrix HTTPS Serve listener, checks the permanent `/` backend before and after every attempt, and removes only its own challenge path. Installer-managed Hermes profiles use the upstream shared gateway multiplexer after profile provisioning. LatticeVale records temporary standalone flags and restores only those flags; a preexisting `gateway.standalone: true` choice remains standalone. Stack start and Resume / repair retry the migration for managed profiles. Schema 24 remains compatible. The deterministic contract advances to **147 fixtures**.
+
+## v14.6.3 — repeatable multi-device Tailscale/Matrix validation
+
+The Windows Tailscale remote-validation step is repeatable. After every device attempt, the installer can create a new one-time HTTPS challenge path for another device already signed into the permitted tailnet. Each attempt gets a fresh token and independently cleaned path on the existing Matrix listener. The installer records aggregate attempted, passed, failed, and skipped counts plus the last validation time.
 
 The accidental user-facing Matrix relay-session ceiling is removed. Schema 24 remains readable so interim v14.6.3 installations are not rejected, but any saved `tailscaleMatrixMaxConnections` value is ignored and no longer written. Matrix and Dashboard retain fixed independent internal relay gates. The unattended-upgrades feature remains removed from current behavior/documentation, with only ownership-proven legacy cleanup retained.
 

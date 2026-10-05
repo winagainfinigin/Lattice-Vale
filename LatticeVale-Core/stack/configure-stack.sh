@@ -20,6 +20,19 @@ python3 latticevale_arch.py validate-options install-options.json --compat compa
 
 opt_bool() { jq -r ".${1} // false" install-options.json; }
 opt_text() { jq -r ".${1} // empty" install-options.json; }
+matrix_identity_domain() {
+  if [[ -s data/synapse/homeserver.yaml ]]; then
+    python3 - data/synapse/homeserver.yaml <<'PY_MATRIX_IDENTITY'
+from pathlib import Path
+import sys,yaml
+cfg=yaml.safe_load(Path(sys.argv[1]).read_text(encoding='utf-8')) or {}
+value=cfg.get('server_name')
+if isinstance(value,str) and value.strip(): print(value.strip())
+PY_MATRIX_IDENTITY
+  else
+    jq -r '.matrixServerName // "hermes.local"' install-options.json
+  fi
+}
 opt_port() {
   local key="$1" default="$2" value
   value="$(jq -r --arg k "$key" --argjson d "$default" '.[$k] // $d' install-options.json)"
@@ -1716,6 +1729,14 @@ p.write_text('\n'.join(lines)+('\n' if lines else ''),encoding='utf-8')
 PY
 }
 
+remove_legacy_gateway_multiplex_off() {
+  local file="$1" value
+  value="$(read_env_file_value_optional "$file" GATEWAY_MULTIPLEX_PROFILES | tr '[:upper:]' '[:lower:]')"
+  case "$value" in
+    false|no|off|0) remove_env_keys "$file" GATEWAY_MULTIPLEX_PROFILES ;;
+  esac
+}
+
 
 apply_matrix_runtime_env() {
   # secrets/matrix-bot.env may also retain installer-only recovery material such
@@ -2941,7 +2962,7 @@ PY_VERIFY_PROFILE_MATRIX_MODEL
     room_id="$(read_env_file_value_optional "$secret" MATRIX_ALLOWED_ROOMS)"
     provisioning_state="$(read_env_file_value_optional "$secret" LATTICEVALE_PROVISIONING_STATE)"
     [[ -n "$provisioning_state" ]] || provisioning_state="$(read_env_file_value_optional "$secret" FOUNDRY_PROVISIONING_STATE)"
-    expected_user="@$localpart:hermes.local"
+    expected_user="@$localpart:$(matrix_identity_domain)"
     [[ "$provisioning_state" == complete || "$provisioning_state" == pending-manual ]] || return 1
     [[ -n "$token" && "$user_id" == "$expected_user" && "$room_id" == !*:* ]] || return 1
     [[ -z "$default_token" || "$token" != "$default_token" ]] || return 1
@@ -3055,9 +3076,9 @@ canonical_review=root_kb.get('review_dispatch') if isinstance(root_kb.get('revie
 for p in paths:
     if not p.exists(): raise SystemExit(1)
     cfg=yaml.safe_load(p.read_text()) or {}
-    if cfg.get('multiplex_profiles') is True: raise SystemExit(1)
+    if cfg.get('multiplex_profiles') is not None: raise SystemExit(1)
     gateway=cfg.get('gateway') or {}
-    if not isinstance(gateway,dict) or gateway.get('multiplex_profiles') is not False: raise SystemExit(1)
+    if not isinstance(gateway,dict) or gateway.get('multiplex_profiles') is not None: raise SystemExit(1)
     envp=p.parent/'.env'
     if envp.exists() and any(line.startswith('GATEWAY_MULTIPLEX_PROFILES=') for line in envp.read_text().splitlines()): raise SystemExit(1)
     tools=cfg.get('toolsets') or []
@@ -3618,10 +3639,10 @@ set_env data/hermes/.env API_SERVER_PORT 8642
 set_env data/hermes/.env API_SERVER_KEY "$api_server_key"
 remove_env_keys data/hermes/.env API_SERVER_CORS_ORIGINS
 remove_env_keys secrets/hermes-runtime.env API_SERVER_ENABLED API_SERVER_HOST API_SERVER_PORT API_SERVER_KEY API_SERVER_CORS_ORIGINS API_SERVER_MODEL_NAME
-# Do not allow the container environment to opt s6 into multiplex mode while
-# profile YAML is normalized to standalone gateways. This prevents a split-brain
-# topology and the associated per-profile restart loops.
-remove_env_keys secrets/hermes-runtime.env GATEWAY_MULTIPLEX_PROFILES
+# `false` is retired by current Hermes. Remove only that legacy value; preserve an
+# explicit `true` user override, which requests the same shared gateway topology.
+remove_legacy_gateway_multiplex_off data/hermes/.env
+remove_legacy_gateway_multiplex_off secrets/hermes-runtime.env
 unset api_server_key
 chmod 0600 data/hermes/.env secrets/hermes-runtime.env
 
@@ -3828,7 +3849,9 @@ if [[ "$(opt_bool matrix)" == true && ! -s data/synapse/homeserver.yaml ]]; then
   echo 'Generating self-hosted Matrix/Synapse configuration.'
   synapse_image="$(grep '^SYNAPSE_IMAGE=' .env | cut -d= -f2-)"
   timeout --foreground --kill-after=15s 3600s docker pull "$synapse_image"
-  docker run --rm -e SYNAPSE_SERVER_NAME=hermes.local -e SYNAPSE_REPORT_STATS=no \
+  matrix_server_name="$(jq -r '.matrixServerName // "hermes.local"' install-options.json)"
+  [[ "$matrix_server_name" =~ ^[A-Za-z0-9.-]+$ ]] || { echo 'Invalid Matrix server identity domain in install options.' >&2; return 1; }
+  docker run --rm -e SYNAPSE_SERVER_NAME="$matrix_server_name" -e SYNAPSE_REPORT_STATS=no \
     -e UID="$(id -u)" -e GID="$(id -g)" -v "$PWD/data/synapse:/data" "$synapse_image" generate
   synapse_db_password="$(grep '^SYNAPSE_POSTGRES_PASSWORD=' .env | cut -d= -f2-)"
   registration_secret="$(random_hex 32)"
@@ -4146,10 +4169,10 @@ if [[ "$(opt_bool matrix)" == true ]] && { [[ "$(opt_bool rebuildMatrixIdentity)
       echo "LatticeVale-managed Matrix room '$existing_room' uses room version $existing_room_version; this release pins managed rooms to version $LATTICEVALE_MATRIX_ROOM_VERSION."
       echo 'Matrix rooms cannot be downgraded in place. LatticeVale will preserve the old room and create a replacement v10 room using the existing bot identity.'
       [[ -t 0 ]] || { echo "One-time Matrix admin authentication is required to create the replacement v10 room. Rerun interactively; no Matrix state was changed." >&2; return 1; }
-      read -r -s -p "Matrix admin password for @$existing_admin:hermes.local: " existing_admin_password
+      read -r -s -p "Matrix admin password for @$existing_admin:$(matrix_identity_domain): " existing_admin_password
       echo
       [[ -n "$existing_admin_password" ]] || { echo 'No Matrix admin password supplied; existing Matrix state was left unchanged.' >&2; return 1; }
-      existing_admin_login="$(matrix_login_json "$existing_admin" "$existing_admin_password" 'LATTICEVALE_ADMIN' 'LatticeVale Admin')" || { echo "Could not authenticate existing Matrix admin '@$existing_admin:hermes.local'; existing Matrix state was left unchanged." >&2; unset existing_admin_password; return 1; }
+      existing_admin_login="$(matrix_login_json "$existing_admin" "$existing_admin_password" 'LATTICEVALE_ADMIN' 'LatticeVale Admin')" || { echo "Could not authenticate existing Matrix admin '@$existing_admin:$(matrix_identity_domain)'; existing Matrix state was left unchanged." >&2; unset existing_admin_password; return 1; }
       existing_admin_token="$(jq -er .access_token <<<"$existing_admin_login")"
       matrix_require_room_v10 "$existing_admin_token" || { unset existing_admin_password existing_admin_token; return 1; }
 
@@ -4241,7 +4264,7 @@ PY_MATRIX_TEMP_REG
     matrix_admin_default="$(read_env_file_value_optional .matrix-info MATRIX_ADMIN)"
     [[ -n "$matrix_admin_default" ]] || { echo 'Advanced Matrix bot/room rebuild requires the existing installer-recorded human Matrix admin identity; .matrix-info does not contain MATRIX_ADMIN, so refusing a broader identity replacement.' >&2; return 1; }
     matrix_admin_locked=true
-    echo "Advanced recovery will preserve human Matrix admin '@$matrix_admin_default:hermes.local' and every secondary profile identity/room. Only the installer-owned default bot/device/room will be replaced."
+    echo "Advanced recovery will preserve human Matrix admin '@$matrix_admin_default:$(matrix_identity_domain)' and every secondary profile identity/room. Only the installer-owned default bot/device/room will be replaced."
     echo 'The current Matrix credentials and crypto store remain active until replacement bootstrap credentials are safely persisted.'
   fi
   if [[ -s secrets/matrix-bot.env && ! -s "$matrix_bootstrap" ]]; then
@@ -4262,7 +4285,7 @@ PY_MATRIX_TEMP_REG
     default_admin="${matrix_admin_default:-${USER//[^a-zA-Z0-9._=-]/}}"; default_admin="${default_admin:-owner}"
     if [[ "$matrix_admin_locked" == true ]]; then
       matrix_admin="$default_admin"
-      echo "Advanced Matrix recovery is reusing existing human admin '@$matrix_admin:hermes.local'; its username will not be changed."
+      echo "Advanced Matrix recovery is reusing existing human admin '@$matrix_admin:$(matrix_identity_domain)'; its username will not be changed."
     else
       while true; do
         read -r -p "Matrix admin username [$default_admin]: " matrix_admin
@@ -4323,8 +4346,8 @@ EOF_MATRIX_BOOTSTRAP
   bot_token="$(jq -er .access_token <<<"$bot_login")"
   returned_bot_device_id="$(jq -er .device_id <<<"$bot_login")"
   [[ "$returned_bot_device_id" == "$bot_device_id" ]] || { echo "Matrix login returned unexpected bot device ID '$returned_bot_device_id' (expected '$bot_device_id')." >&2; return 1; }
-  admin_id="@$matrix_admin:hermes.local"
-  bot_id="@$matrix_bot:hermes.local"
+  admin_id="@$matrix_admin:$(matrix_identity_domain)"
+  bot_id="@$matrix_bot:$(matrix_identity_domain)"
   # v14 never persists the human Matrix admin password as a long-lived secret.
   # If secondary Matrix profiles are requested, retain it only in a one-time 0600
   # handoff file so the later profile stage can finish this same install/resume run.
@@ -4537,10 +4560,10 @@ for worker in "${requested_workers[@]}"; do
     # before writing provider credentials, and fail closed if it remains resident.
     quiesce_profile_gateway_for_credential_write "$name"
     if [[ "$clone" == true ]]; then
-      python3 - "data/hermes" "data/hermes/profiles/$name" <<'PY_PROFILE_SAFE_CLONE'
+      python3 - "data/hermes" "data/hermes/profiles/$name" "$name" .installer-temporary-standalone-profiles.json <<'PY_PROFILE_SAFE_CLONE'
 from pathlib import Path
-import shutil,sys,yaml
-src=Path(sys.argv[1]); dst=Path(sys.argv[2]); dst.mkdir(parents=True,exist_ok=True)
+import json,shutil,sys,yaml
+src=Path(sys.argv[1]); dst=Path(sys.argv[2]); name=sys.argv[3]; ownership=Path(sys.argv[4]); dst.mkdir(parents=True,exist_ok=True)
 
 # Match the useful provider/config portion of upstream --clone without ever copying
 # a live messaging/gateway credential into the newly-created profile.
@@ -4548,7 +4571,7 @@ prefixes=('TELEGRAM_','DISCORD_','SLACK_','MATRIX_','WHATSAPP_','SIGNAL_','EMAIL
 source_env=src/'.env'; dest_env=dst/'.env'
 if source_env.exists():
     kept=[line for line in source_env.read_text(encoding='utf-8').splitlines()
-          if not line.startswith(prefixes) and not line.startswith('GATEWAY_MULTIPLEX_PROFILES=')]
+          if not line.startswith(prefixes) and not (line.startswith('GATEWAY_MULTIPLEX_PROFILES=') and line.split('=',1)[1].strip().lower() in {'false','no','off','0'})]
     dest_env.write_text('\n'.join(kept)+('\n' if kept else ''),encoding='utf-8')
     dest_env.chmod(0o600)
 
@@ -4561,9 +4584,17 @@ cfg.pop('platforms',None)
 cfg.pop('multiplex_profiles',None)
 gateway=cfg.get('gateway')
 if not isinstance(gateway,dict): gateway={}
-gateway['multiplex_profiles']=False
+gateway.pop('multiplex_profiles',None)
+try: state=json.loads(ownership.read_text(encoding='utf-8')) if ownership.exists() else {}
+except Exception: raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
+if not isinstance(state,dict): raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
+if gateway.get('standalone') is not True and name not in state:
+    state[name]={'present': 'standalone' in gateway, 'value': gateway.get('standalone')}
+gateway['standalone']=True
 cfg['gateway']=gateway
 dest_cfg.write_text(yaml.safe_dump(cfg,sort_keys=False),encoding='utf-8')
+ownership.write_text(json.dumps(state,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+ownership.chmod(0o600)
 
 soul=src/'SOUL.md'
 if soul.exists(): shutil.copy2(soul,dst/'SOUL.md')
@@ -4629,7 +4660,7 @@ EOF_MATRIX_HANDOFF_HEADER
 
   admin_localpart="$(sed -n 's/^MATRIX_ADMIN=//p' .matrix-info | head -n1)"
   [[ -n "$admin_localpart" ]] || { echo 'Default Matrix admin identity is missing from .matrix-info.' >&2; return 1; }
-  admin_user="@$admin_localpart:hermes.local"
+  admin_user="@$admin_localpart:$(matrix_identity_domain)"
 
   # Existing installer-managed profile identities can be verified/reapplied without
   # authenticating the human admin. Admin credentials are needed only when at least
@@ -4730,7 +4761,7 @@ EOF_MATRIX_HANDOFF_HEADER
     penv="$pdir/.env"
     secret="secrets/matrix-profiles/$name.env"
     info=".matrix-profiles/$name.info"
-    expected_user="@$localpart:hermes.local"
+    expected_user="@$localpart:$(matrix_identity_domain)"
     [[ "$localpart" == "$name" ]] || { echo "Profile '$name' Matrix localpart must match its profile name." >&2; return 1; }
     [[ -d "$pdir" ]] || { echo "Profile '$name' does not exist; Matrix provisioning will not create an identity detached from a Hermes profile." >&2; return 1; }
     hermes_model_configured "$pdir/config.yaml" || { echo "Profile '$name' has no configured model; complete its model selection before Matrix is started." >&2; return 1; }
@@ -5167,12 +5198,15 @@ stage_matrix_profile_cross_signing() {
 
 stage_integrations() {
 # Apply stack integrations without replacing the provider/model choices made by the user.
-python3 - install-options.json data/hermes .installer-managed-profiles <<'PY'
+python3 - install-options.json data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY'
 from pathlib import Path
 import json,sys,yaml
-opts=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); root=Path(sys.argv[2]); managed=Path(sys.argv[3])
+opts=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8')); root=Path(sys.argv[2]); managed=Path(sys.argv[3]); temporary=Path(sys.argv[4])
 names=[x.strip() for x in managed.read_text(encoding='utf-8').splitlines() if x.strip()] if managed.exists() else []
 names=[n for n in names if (root/'profiles'/n).is_dir()]
+try: temporary_state=json.loads(temporary.read_text(encoding='utf-8')) if temporary.exists() else {}
+except Exception: raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
+if not isinstance(temporary_state,dict): raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
 # Preserve valid routing to any real Hermes profile, including user-created profiles
 # outside LatticeVale ownership. Only default + names are modified by this stage.
 all_profiles=[]
@@ -5201,7 +5235,11 @@ for name,p in profiles:
     cfg.pop('multiplex_profiles',None)
     gateway=cfg.get('gateway')
     if not isinstance(gateway,dict): gateway={}
-    gateway['multiplex_profiles']=False
+    gateway.pop('multiplex_profiles',None)
+    if name != 'default':
+        if gateway.get('standalone') is not True and name not in temporary_state:
+            temporary_state[name]={'present': 'standalone' in gateway, 'value': gateway.get('standalone')}
+        gateway['standalone']=True
     cfg['gateway']=gateway
     cfg.setdefault('terminal',{})['cwd']='/workspace'
     guard=cfg.setdefault('tool_loop_guardrails',{})
@@ -5348,6 +5386,11 @@ for name,p in profiles:
         if not cfg['memory']: cfg.pop('memory',None)
     p.parent.mkdir(parents=True,exist_ok=True)
     p.write_text(yaml.safe_dump(cfg,sort_keys=False),encoding='utf-8')
+if temporary_state:
+    temporary.write_text(json.dumps(temporary_state,indent=2,sort_keys=True)+'\n',encoding='utf-8')
+    temporary.chmod(0o600)
+else:
+    temporary.unlink(missing_ok=True)
 PY
 # Keep automatic Kanban behavior in a narrowly installer-owned SOUL block so custom
 # identity/personality text is preserved. Disabling Kanban removes only this block.
@@ -5611,7 +5654,7 @@ done < .installer-managed-profiles
 for f in "${profile_envs[@]}"; do
   touch "$f"; chmod 0600 "$f"
   set_env "$f" TERMINAL_CWD /workspace
-  remove_env_keys "$f" GATEWAY_MULTIPLEX_PROFILES
+  remove_legacy_gateway_multiplex_off "$f"
   if [[ "$(opt_bool searxng)" == true ]]; then set_env "$f" SEARXNG_URL http://searxng:8080; else remove_env_keys "$f" SEARXNG_URL; fi
   if [[ "$(opt_bool qmd)" == true ]]; then set_env "$f" OBSIDIAN_VAULT_PATH /vault; else remove_env_keys "$f" OBSIDIAN_VAULT_PATH; fi
 
@@ -5748,6 +5791,89 @@ fi
 wait_hermes_gateway_surfaces 'reconcile gateway restart' 60
 if [[ "$(opt_bool matrix)" == true ]]; then
   wait_matrix_backend_from_hermes 60
+fi
+# Restore only temporary standalone flags this installer recorded as its own. A
+# standalone=true value that existed before provisioning is deliberately untouched;
+# Hermes migration respects that user choice. The profile ownership list bounds the
+# restoration to profiles LatticeVale manages.
+if [[ -s .installer-managed-profiles && -s .installer-temporary-standalone-profiles.json ]]; then
+  python3 - data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY_RESTORE_TEMP_GATEWAYS'
+from pathlib import Path
+import json,sys,yaml
+root=Path(sys.argv[1]); managed={x.strip() for x in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines() if x.strip()}
+record=Path(sys.argv[3]); state=json.loads(record.read_text(encoding='utf-8'))
+if not isinstance(state,dict): raise SystemExit('Temporary gateway ownership record is invalid; preserving profile configuration.')
+for name,original in state.items():
+    if name not in managed or not isinstance(original,dict): continue
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file(): continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway')
+    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: continue
+    if original.get('present'): gateway['standalone']=original.get('value')
+    else: gateway.pop('standalone',None)
+    cfg['gateway']=gateway; path.write_text(yaml.safe_dump(cfg,sort_keys=False),encoding='utf-8')
+PY_RESTORE_TEMP_GATEWAYS
+  mapfile -t managed_profiles < <(grep -E '^[a-z0-9][a-z0-9_-]{0,31}$' .installer-managed-profiles | sort -u)
+  if ((${#managed_profiles[@]})); then
+    # Hermes migration is global within this profile home. Do not let it fold an
+    # active gateway owned by an unrelated profile into the shared host process.
+    mapfile -t unowned_multiplex_candidates < <(python3 - data/hermes .installer-managed-profiles <<'PY_UNOWNED_GATEWAY_CANDIDATES'
+from pathlib import Path
+import sys,yaml
+root=Path(sys.argv[1]); managed={x.strip() for x in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines() if x.strip()}
+profiles=root/'profiles'
+for path in sorted(profiles.glob('*/config.yaml')):
+    name=path.parent.name
+    if name in managed: continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
+PY_UNOWNED_GATEWAY_CANDIDATES
+)
+    for unowned_profile in "${unowned_multiplex_candidates[@]}"; do
+      unowned_gateway_state="$(profile_gateway_s6_state "$unowned_profile" 2>/dev/null || true)"
+      if [[ "$unowned_gateway_state" == up || "$unowned_gateway_state" == unknown ]]; then
+        echo "Cannot migrate LatticeVale profiles automatically while unowned profile '$unowned_profile' has gateway state '$unowned_gateway_state'. Its topology was left unchanged; review it, set gateway.standalone: true to opt out, or stop it before Resume / repair." >&2
+        return 1
+      fi
+    done
+    timeout --foreground --kill-after=5s 90s docker exec -u hermes hermes-agent hermes gateway migrate --multiplex -y || {
+      echo 'Hermes could not migrate installer-managed gateways to multiplex mode; profile data was preserved for Resume / repair.' >&2
+      return 1
+    }
+    gateway_status="$(timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes gateway status 2>&1)" || {
+      echo 'Hermes gateway migration returned success, but gateway status could not be read; Resume / repair will verify again.' >&2
+      return 1
+    }
+    mapfile -t multiplex_profiles < <(python3 - data/hermes .installer-managed-profiles <<'PY_EXPECT_MULTIPLEX_PROFILES'
+from pathlib import Path
+import sys,yaml
+root=Path(sys.argv[1]); managed=Path(sys.argv[2])
+for name in sorted({x.strip() for x in managed.read_text(encoding='utf-8').splitlines() if x.strip()}):
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file(): continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
+PY_EXPECT_MULTIPLEX_PROFILES
+)
+    if ((${#multiplex_profiles[@]})); then
+      if ! timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "${multiplex_profiles[@]}" <<'PY_VERIFY_SERVED_PROFILES'
+import json,sys
+from pathlib import Path
+state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+served=state.get('served_profiles') if isinstance(state,dict) else None
+missing=sorted(set(sys.argv[2:])-set(served if isinstance(served,list) else []))
+if missing:
+    print('Missing from live Hermes served_profiles record: '+', '.join(missing),file=sys.stderr)
+    raise SystemExit(1)
+PY_VERIFY_SERVED_PROFILES
+        echo 'Hermes gateway status did not confirm every non-standalone managed profile is served; preserving state for Resume / repair.' >&2
+        return 1
+      fi
+    fi
+    : > .installer-gateway-multiplex-owned
+    chmod 0600 .installer-gateway-multiplex-owned
+    rm -f .installer-temporary-standalone-profiles.json
+  fi
 fi
 verify_live_resource_policy_limits || {
   echo 'Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v13.' >&2
@@ -5978,4 +6104,3 @@ state_finish
 echo
 echo 'Recovery-aware configuration complete.'
 echo 'Run ./manage.sh audit for the state-aware verification report.'
-

@@ -171,8 +171,22 @@ def yaml_model_default(path: Path) -> bool:
         m = re.search(r"(?ms)^model:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+default:\s*['\"]?([^\s'\"#]+)", text)
         return bool(m and m.group(1).strip())
 
+
+def yaml_server_name(path: Path) -> str:
+    if not path.is_file():
+        return ""
+    try:
+        import yaml  # type: ignore
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        value = cfg.get("server_name") if isinstance(cfg, dict) else ""
+        return value.strip() if isinstance(value, str) else ""
+    except Exception:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        match = re.search(r"(?m)^server_name:\s*['\"]?([^'\"#\s]+)", text)
+        return match.group(1).strip() if match else ""
+
 def yaml_multiplex_enabled(path: Path) -> bool:
-    """True when either supported Hermes multiplex config form explicitly enables it."""
+    """True when a retired legacy multiplex override remains in profile YAML."""
     if not path.is_file() or path.stat().st_size == 0:
         return False
     try:
@@ -180,16 +194,16 @@ def yaml_multiplex_enabled(path: Path) -> bool:
         cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         if not isinstance(cfg, dict):
             return False
-        if cfg.get("multiplex_profiles") is True:
+        if cfg.get("multiplex_profiles") is not None:
             return True
         gateway = cfg.get("gateway") or {}
-        return isinstance(gateway, dict) and gateway.get("multiplex_profiles") is True
+        return isinstance(gateway, dict) and gateway.get("multiplex_profiles") is not None
     except Exception:
         text = path.read_text(encoding="utf-8", errors="replace")
         # Conservative fallback for malformed/unparseable YAML.
-        if re.search(r"(?m)^multiplex_profiles:\s*(true|yes|on|1)\s*(?:#.*)?$", text, re.I):
+        if re.search(r"(?m)^multiplex_profiles:\s*(?:true|false|yes|no|on|off|1|0)\s*(?:#.*)?$", text, re.I):
             return True
-        return bool(re.search(r"(?ms)^gateway:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+multiplex_profiles:\s*(true|yes|on|1)\s*(?:#.*)?$", text, re.I))
+        return bool(re.search(r"(?ms)^gateway:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+multiplex_profiles:\s*(?:true|false|yes|no|on|off|1|0)\s*(?:#.*)?$", text, re.I))
 
 
 def http_ok(url: str, headers: dict[str, str] | None = None, timeout: float = 3.0) -> bool:
@@ -658,9 +672,9 @@ def main() -> int:
         })
     c["profiles"] = {"status": "DISABLED" if not selected("multiAgent") else ("CONFIGURED" if all(p["status"] == "CONFIGURED" for p in report["profiles"]) else "PARTIAL"), "detail": f"{len(report['profiles'])} managed profile(s)"}
 
-    # LatticeVale intentionally runs standalone per-profile gateways. Current upstream
-    # multiplexing still has credential, Matrix-adapter, session/state, and s6
-    # reconciliation defects, so an explicit opt-in is a repair condition.
+    # Explicit gateway.standalone choices are user-owned topology. Only retired
+    # multiplex overrides and flags recorded as temporary by this installer need
+    # automatic repair.
     topology_paths = [("default", root / "data/hermes/config.yaml")]
     managed_names: set[str] = set()
     try:
@@ -670,22 +684,42 @@ def main() -> int:
     managed_names.update(p["name"] for p in report["profiles"] if p.get("name"))
     topology_paths.extend((name, root / "data/hermes/profiles" / name / "config.yaml") for name in sorted(managed_names))
     multiplex_profiles = [name for name, path in topology_paths if yaml_multiplex_enabled(path)]
+    temporary_gateway_profiles: list[str] = []
+    temporary_gateway_record_invalid = False
+    temporary_gateway_record = root / ".installer-temporary-standalone-profiles.json"
+    try:
+        ownership=json.loads(temporary_gateway_record.read_text(encoding="utf-8"))
+        if isinstance(ownership,dict): temporary_gateway_profiles=sorted(name for name in ownership if name in managed_names)
+        else: temporary_gateway_record_invalid=True
+    except Exception:
+        temporary_gateway_record_invalid=temporary_gateway_record.exists()
     env_override_locations: list[str] = []
     env_paths = [("container runtime", root / "secrets/hermes-runtime.env"), ("default", root / "data/hermes/.env")]
     env_paths.extend((name, root / "data/hermes/profiles" / name / ".env") for name in sorted(managed_names))
     for label, env_path in env_paths:
         try:
-            if any(line.startswith("GATEWAY_MULTIPLEX_PROFILES=") for line in env_path.read_text(encoding="utf-8").splitlines()):
-                env_override_locations.append(label)
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                if not line.startswith("GATEWAY_MULTIPLEX_PROFILES="):
+                    continue
+                value=line.split("=",1)[1].strip().lower()
+                # The current explicit `true` override is supported and already
+                # requests the shared topology. Only retired false/invalid values
+                # need repair; the installer removes false while preserving true.
+                if value in {"false", "no", "off", "0"}:
+                    env_override_locations.append(label)
+                elif value != "true":
+                    env_override_locations.append(label + " (invalid value)")
         except Exception:
             pass
-    if multiplex_profiles or env_override_locations:
+    if multiplex_profiles or temporary_gateway_profiles or env_override_locations or temporary_gateway_record_invalid:
         detail_bits=[]
-        if multiplex_profiles: detail_bits.append("enabled in profile config: " + ", ".join(multiplex_profiles))
+        if multiplex_profiles: detail_bits.append("retired multiplex YAML settings: " + ", ".join(multiplex_profiles))
+        if temporary_gateway_profiles: detail_bits.append("installer-owned temporary standalone profiles: " + ", ".join(temporary_gateway_profiles))
+        if temporary_gateway_record_invalid: detail_bits.append("installer temporary standalone ownership record is invalid")
         if env_override_locations: detail_bits.append("GATEWAY_MULTIPLEX_PROFILES override present in: " + ", ".join(env_override_locations))
-        c["gatewayTopology"] = {"status": "BROKEN", "detail": "; ".join(detail_bits) + "; Resume / repair will restore standalone per-profile gateways"}
+        c["gatewayTopology"] = {"status": "PARTIAL", "detail": "; ".join(detail_bits) + "; Resume / repair will remove retired settings and migrate installer-managed gateways while preserving explicit standalone choices"}
     else:
-        c["gatewayTopology"] = {"status": "CONFIGURED", "detail": "standalone per-profile gateway topology; multiplexing disabled"}
+        c["gatewayTopology"] = {"status": "CONFIGURED", "detail": "Hermes host gateway multiplexer is active"}
 
     matrix_cfg = (root / "data/synapse/homeserver.yaml").is_file() and (root / "secrets/matrix-bot.env").is_file()
     matrix_run = False if args.offline else http_ok(f"http://127.0.0.1:{matrix_port}/health")
@@ -722,7 +756,22 @@ def main() -> int:
     else:
         matrix_live_ok = matrix_run and matrix_token_valid and (runtime_stopped(hermes_state) or matrix_internal_ready)
         matrix_status = classify_service(selected("matrix"), matrix_cfg, matrix_live_ok, matrix_broken)
-    matrix_detail = "homeserver + bot identity present"
+    matrix_domain = yaml_server_name(root / "data/synapse/homeserver.yaml")
+    matrix_client_url = str(opts.get("matrixClientHomeserverUrl") or "").strip()
+    if not matrix_client_url:
+        matrix_port = int(opts.get("matrixLocalPort") or 8008)
+        if bool(opts.get("tailscaleMatrix")):
+            ts_host = str(opts.get("tailscaleHostname") or env_value(root / ".tailscale-info", "TAILSCALE_DNS") or "").strip().rstrip(".")
+            if ts_host:
+                ts_port = int(opts.get("tailscaleMatrixPort") or 443)
+                matrix_client_url = f"https://{ts_host}" + (f":{ts_port}" if ts_port != 443 else "") + "/"
+        else:
+            matrix_client_url = f"http://localhost:{matrix_port}/"
+    matrix_detail = f"homeserver + bot identity present; Matrix ID domain={matrix_domain or 'unknown'}"
+    if matrix_client_url:
+        matrix_detail += f"; Element homeserver URL={matrix_client_url}"
+    if bool(opts.get("tailscaleMatrix")) and matrix_domain.endswith(".local"):
+        matrix_detail += "; MANUAL_HOMESERVER_REQUIRED: enter the Tailscale HTTPS client URL in Element because .local identity discovery cannot route remotely"
     if matrix_status == "STARTING":
         matrix_detail += "; containers are still starting"
     elif matrix_status == "STOPPED":
@@ -743,7 +792,7 @@ def main() -> int:
         if not name or not bool(matrix_opts.get("enabled", False)):
             continue
         localpart = str(matrix_opts.get("localpart") or name).strip()
-        expected_user = f"@{localpart}:hermes.local"
+        expected_user = f"@{localpart}:{matrix_domain or 'hermes.local'}"
         pdir = root / "data/hermes/profiles" / name
         secret = root / "secrets/matrix-profiles" / f"{name}.env"
         info = root / ".matrix-profiles" / f"{name}.info"

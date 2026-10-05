@@ -1081,9 +1081,89 @@ finish_matrix_profile() {
 }
 
 start_selected_matrix_profile_gateways() {
-  [[ "$(opt_bool matrix)" == true ]] || return 0
   local name info secret state
   local -a names=()
+
+  # Resume legacy and interrupted migrations whenever the managed stack starts, even
+  # when Matrix is disabled. Restore only standalone flags recorded as temporary by
+  # configure-stack; explicit user standalone choices remain for Hermes to honor.
+  if [[ -s .installer-managed-profiles ]]; then
+    if [[ -s .installer-temporary-standalone-profiles.json ]]; then
+      python3 - data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY_RESTORE_TEMP_GATEWAYS'
+from pathlib import Path
+import json,sys,yaml
+root=Path(sys.argv[1]); managed={x.strip() for x in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines() if x.strip()}
+record=Path(sys.argv[3]); state=json.loads(record.read_text(encoding='utf-8'))
+if not isinstance(state,dict): raise SystemExit('Temporary gateway ownership record is invalid; preserving profile configuration.')
+for name,original in state.items():
+    if name not in managed or not isinstance(original,dict): continue
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file(): continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway')
+    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: continue
+    if original.get('present'): gateway['standalone']=original.get('value')
+    else: gateway.pop('standalone',None)
+    cfg['gateway']=gateway; path.write_text(yaml.safe_dump(cfg,sort_keys=False),encoding='utf-8')
+PY_RESTORE_TEMP_GATEWAYS
+    fi
+    # Migration covers the complete Hermes profile home. Block it while an
+    # unowned non-standalone gateway is active so Resume / repair cannot fold the
+    # user's running profile topology into LatticeVale's shared host gateway.
+    mapfile -t unowned_multiplex_candidates < <(python3 - data/hermes .installer-managed-profiles <<'PY_UNOWNED_GATEWAY_CANDIDATES'
+from pathlib import Path
+import sys,yaml
+root=Path(sys.argv[1]); managed={x.strip() for x in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines() if x.strip()}
+for path in sorted((root/'profiles').glob('*/config.yaml')):
+    name=path.parent.name
+    if name in managed: continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
+PY_UNOWNED_GATEWAY_CANDIDATES
+)
+    for unowned_profile in "${unowned_multiplex_candidates[@]}"; do
+      unowned_gateway_state="$(profile_gateway_s6_state_exact "$unowned_profile" 2>/dev/null || true)"
+      if [[ "$unowned_gateway_state" == up || "$unowned_gateway_state" == unknown ]]; then
+        echo "WARNING: cannot migrate LatticeVale profiles automatically while unowned profile '$unowned_profile' has gateway state '$unowned_gateway_state'. Its topology was left unchanged; set gateway.standalone: true to opt out, or stop it before Resume / repair." >&2
+        return 1
+      fi
+    done
+    timeout --foreground --kill-after=5s 90s docker exec -u hermes hermes-agent hermes gateway migrate --multiplex -y || {
+      echo 'WARNING: Hermes gateway multiplex migration did not complete; preserving all profile state for Resume / repair.' >&2
+      return 1
+    }
+    mapfile -t multiplex_profiles < <(python3 - data/hermes .installer-managed-profiles <<'PY_EXPECT_MULTIPLEX_PROFILES'
+from pathlib import Path
+import sys,yaml
+root=Path(sys.argv[1]); managed=Path(sys.argv[2])
+for name in sorted({x.strip() for x in managed.read_text(encoding='utf-8').splitlines() if x.strip()}):
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file(): continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
+PY_EXPECT_MULTIPLEX_PROFILES
+)
+    if ((${#multiplex_profiles[@]})); then
+      if ! timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "${multiplex_profiles[@]}" <<'PY_VERIFY_SERVED_PROFILES'
+import json,sys
+from pathlib import Path
+state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
+served=state.get('served_profiles') if isinstance(state,dict) else None
+missing=sorted(set(sys.argv[2:])-set(served if isinstance(served,list) else []))
+if missing:
+    print('Missing from live Hermes served_profiles record: '+', '.join(missing),file=sys.stderr)
+    raise SystemExit(1)
+PY_VERIFY_SERVED_PROFILES
+      then
+        echo 'WARNING: Hermes gateway migration did not serve every managed profile; preserving state for Resume / repair.' >&2
+        return 1
+      fi
+    fi
+    : > .installer-gateway-multiplex-owned
+    chmod 0600 .installer-gateway-multiplex-owned
+    rm -f .installer-temporary-standalone-profiles.json
+  fi
+
+  [[ "$(opt_bool matrix)" == true ]] || return 0
 
   # A running s6 gateway process is not sufficient evidence of Matrix connectivity.
   # After stack start/restart the gateway can race Docker DNS/Synapse, remain alive,
@@ -1094,6 +1174,19 @@ start_selected_matrix_profile_gateways() {
 
   mapfile -t names < <(selected_matrix_profile_names)
   ((${#names[@]})) || return 0
+
+  if [[ -e .installer-gateway-multiplex-owned ]]; then
+    if ! reconcile_default_gateway_manage; then
+      echo 'WARNING: shared Hermes host gateway could not be reconciled for Matrix profiles.' >&2
+      return 1
+    fi
+    timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes gateway status >/dev/null || {
+      echo 'WARNING: shared Hermes host gateway did not report ready after migration.' >&2
+      return 1
+    }
+    echo 'Installer-managed Matrix profiles are served through the shared Hermes host gateway.'
+    return 0
+  fi
 
   for name in "${names[@]}"; do
     [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || {

@@ -1,6 +1,6 @@
 # LatticeVale v14.6.3 audit
 
-> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Every device gets a fresh one-time HTTPS challenge, per-device results are shown immediately, and aggregate results are saved without changing the real Dashboard/Matrix Serve mappings. Installer-options schema 24 remains compatible with interim v14.6.3 state; the obsolete `tailscaleMatrixMaxConnections` value is ignored and no longer written. Current unattended-upgrades feature references remain removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
+> **v14.6.3 hotfix:** Matrix identity domain, Element homeserver URL, and Tailscale hostname are independent persisted values. Existing Synapse `server_name` and state remain authoritative; legacy `hermes.local` installs report `MANUAL_HOMESERVER_REQUIRED`. Remote-device checks use a unique path on the existing Matrix HTTPS listener and verify its permanent root mapping after cleanup. Installer-managed Hermes profiles migrate to the shared host gateway multiplexer. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -209,7 +209,7 @@ The Windows-native Tailscale relay is different from the stack: it is inexpensiv
 
 Tailscale remains Windows-native and Matrix remains tailnet-only. LatticeVale uses Tailscale Serve with `--bg`, not Funnel. Matrix's installer default is standard HTTPS 443, giving clients `https://<node>.<tailnet>.ts.net`; Dashboard remains 9443. Resume / repair removes only the old installer-owned 8448 Matrix mapping when migrating that historical default to 443, while preserving intentionally customized ports and unrelated Serve configuration.
 
-The Matrix `server_name` remains `hermes.local`; only Synapse `public_baseurl` follows the working Tailscale client URL. The proven Windows-native relay remains necessary because the prior Windows `netsh portproxy` path could be locally reachable yet return HTTP 502 when used as the Tailscale Serve backend.
+On fresh remote-capable installs, the resolved Tailscale hostname is selected as Matrix `server_name` before account creation. Existing Synapse `server_name` values always win during upgrades. Element's homeserver URL is stored separately; legacy `hermes.local` accounts keep their identity and require manual entry of the reachable Tailscale URL. The proven Windows-native relay remains necessary because the prior Windows `netsh portproxy` path could be locally reachable yet return HTTP 502 when used as the Tailscale Serve backend.
 
 ## Matrix E2EE / device trust
 

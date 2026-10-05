@@ -1,4 +1,4 @@
-# LatticeVale 14.6.2 Hotfix Resume / Repair
+# LatticeVale 14.6.3 Resume / Repair
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -44,3 +44,5 @@ Future schemas fail closed. Known historical schemas are migrated by the install
 Option 1 is designed to converge. Re-running it after a successful repair should normally verify healthy state or perform only newly stale work; it must not recreate persistent identities or databases merely because a derived hardware/policy fingerprint changed.
 
 Runtime supervisor state is also repairable. If Hermes persistent profile state exists but an exact s6 gateway slot under `/run/service/gateway-*` is missing after container startup, Resume / repair waits boundedly for the upstream boot reconciler and then re-registers only that exact slot through Hermes' runtime service-manager API. Missing ephemeral s6 registration is not treated as a reason to delete/recreate the profile or fail an otherwise recoverable installation.
+
+Hermes gateway migration runs at finalization and is retried at stack start. LatticeVale records and restores only the temporary `gateway.standalone` values it sets during profile provisioning. A preexisting `gateway.standalone: true` remains a user choice. Because Hermes migration applies to the whole profile home, repair pauses migration when an active non-standalone gateway belongs to an unowned profile; review that profile, set its standalone opt-out if intended, or stop it before retrying. Profiles and credentials remain in place.

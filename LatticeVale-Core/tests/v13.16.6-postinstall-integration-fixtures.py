@@ -52,7 +52,8 @@ assert "grep -v 'HERMES_QMD_REINDEX'" in conf
 # Prior safety fixes remain present.
 assert "'-WindowStyle','Hidden'" in ps
 assert 'instanceIdleTimeout=-1' in ps
-assert 'gateway[\'multiplex_profiles\']=False' in conf
+assert "gateway.pop('multiplex_profiles',None)" in conf
+assert 'hermes gateway migrate --multiplex' in conf
 assert not re.search(r'^[^#\n]*docker compose restart hermes', conf, re.M)
 assert 'sleep infinity' not in ps.lower()
 print('v13.16.6 post-install integration fixtures: PASS')

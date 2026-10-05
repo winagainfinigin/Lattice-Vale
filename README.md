@@ -1,6 +1,6 @@
 # LatticeVale v14.6.3
 
-> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Every device gets a fresh one-time HTTPS challenge, per-device results are shown immediately, and aggregate results are saved without changing the real Dashboard/Matrix Serve mappings. Installer-options schema 24 remains compatible with interim v14.6.3 state; the obsolete `tailscaleMatrixMaxConnections` value is ignored and no longer written. Current unattended-upgrades feature references remain removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
+> **v14.6.3 hotfix:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Remote-device checks use a unique path on the configured Matrix HTTPS listener and verify its permanent root route. Installer-managed Hermes profiles converge to the shared gateway multiplexer. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -11,6 +11,10 @@ The replacement-files/patch ZIP is **not a universal Git diff** and must not be 
 
 
 ## v14.6.3 - repeatable multi-device Tailscale/Matrix validation
+
+Installer-managed Matrix identities use the Synapse `server_name`. The installer displays that ID domain separately from the HTTPS or localhost URL to enter in Element. Existing `hermes.local` accounts are preserved and need manual URL entry for remote clients because automatic discovery cannot route `.local` identities.
+
+Named profiles use temporary standalone gateways only while LatticeVale provisions them. At finalization and stack start, the installer restores only standalone flags it recorded as temporary, then asks Hermes to migrate the managed topology to its shared host gateway. A `gateway.standalone: true` choice already present on a profile remains in place and Hermes leaves that profile standalone. Migration pauses if an active non-standalone gateway belongs to an unowned profile, so Resume / repair does not alter its topology.
 
 Windows Tailscale remote validation can now test more than one already-authorized tailnet device in the same installer run. Each device receives a newly generated one-time HTTPS challenge, its result is reported independently, and the installer asks whether to validate another device after every pass, failure, or skipped attempt. The temporary challenge is removed after each device while the real Dashboard and Matrix Serve mappings remain active.
 
