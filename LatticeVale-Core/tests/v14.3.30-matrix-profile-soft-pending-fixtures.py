@@ -115,6 +115,7 @@ esac
 read_env_file_value_optional(){ [ -f "$1" ] || return 0; sed -n "s/^$2=//p" "$1" | head -n1; }
 matrix_client_api_ready(){ return 0; }
 hermes_model_configured(){ return 0; }
+matrix_identity_domain(){ printf 'hermes.local\n'; }
 matrix_room_version(){ [ "${FAKE_JOINED:-false}" = true ] && printf '10\n' || return 1; }
 MATRIX_HOST_PORT=18008
 LATTICEVALE_MATRIX_ROOM_VERSION=10

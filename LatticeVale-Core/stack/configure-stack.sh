@@ -5866,6 +5866,7 @@ if missing:
     print('Missing from live Hermes served_profiles record: '+', '.join(missing),file=sys.stderr)
     raise SystemExit(1)
 PY_VERIFY_SERVED_PROFILES
+      then
         echo 'Hermes gateway status did not confirm every non-standalone managed profile is served; preserving state for Resume / repair.' >&2
         return 1
       fi

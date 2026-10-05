@@ -4,7 +4,7 @@
 The release contract is intentionally explicit: v14.6.3 hotfix ships 147 deterministic
 *-fixtures.py programs.  The suite can be run as six bounded shards to avoid CI or
 wrapper time ceilings, while invoking this file without --shard still executes all
-shards and reports one authoritative 146/146 result.
+shards and reports one authoritative 147/147 result.
 """
 from __future__ import annotations
 

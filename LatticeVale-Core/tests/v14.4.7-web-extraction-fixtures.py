@@ -40,7 +40,7 @@ assert "else:\n        enabled=[x for x in enabled if x not in {'web/latticevale
 
 # Execute the exact managed-profile config heredoc against representative repair/install
 # states. This guards preservation semantics rather than merely checking source strings.
-stage_marker = "python3 - install-options.json data/hermes .installer-managed-profiles <<'PY'\n"
+stage_marker = "python3 - install-options.json data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY'\n"
 stage_start = CONFIGURE.index(stage_marker) + len(stage_marker)
 stage_end = CONFIGURE.index("\nPY\n", stage_start)
 stage_source = CONFIGURE[stage_start:stage_end]
@@ -82,12 +82,14 @@ def run_profile_scenario(initial_web, searxng=True, initial_browser=None, initia
         }
         opts_path = base / "install-options.json"
         managed = base / ".installer-managed-profiles"
+        temporary = base / ".installer-temporary-standalone-profiles.json"
         opts_path.write_text(json.dumps(opts), encoding="utf-8")
         managed.write_text("assistant\n", encoding="utf-8")
+        temporary.write_text("{}\n", encoding="utf-8")
         stage_py = base / "stage.py"
         stage_py.write_text(stage_source, encoding="utf-8")
         subprocess.run(
-            [sys.executable, str(stage_py), str(opts_path), str(hermes), str(managed)],
+            [sys.executable, str(stage_py), str(opts_path), str(hermes), str(managed), str(temporary)],
             cwd=base,
             check=True,
             capture_output=True,

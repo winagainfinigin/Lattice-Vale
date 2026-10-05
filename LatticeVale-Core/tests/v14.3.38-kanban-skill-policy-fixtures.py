@@ -46,7 +46,7 @@ assert 'substantive task results/artifacts' in configure
 # A user-owned profile can remain orchestrator; LatticeVale does not edit it or
 # conscript it as automatic assignee fallback.
 stage_start=configure.index('stage_integrations() {')
-py_start=configure.index("python3 - install-options.json data/hermes .installer-managed-profiles <<'PY'", stage_start)
+py_start=configure.index("python3 - install-options.json data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY'", stage_start)
 py_start=configure.index('\n', py_start)+1
 py_end=configure.index('\nPY\n', py_start)
 stage_code=configure[py_start:py_end]
@@ -74,13 +74,14 @@ with tempfile.TemporaryDirectory() as td:
     ext_path.write_text(yaml.safe_dump(external_cfg,sort_keys=False),encoding='utf-8')
     external_before=ext_path.read_text(encoding='utf-8')
     managed=td/'managed.txt'; managed.write_text('worker-blue\n',encoding='utf-8')
+    temporary=td/'temporary.json'; temporary.write_text('{}\n',encoding='utf-8')
     opts=td/'opts.json'; opts.write_text(json.dumps({
         'kanban':True,'dashboard':False,'searxng':False,'qmd':False,'honcho':False,
         'kanbanMaxInProgress':3,'kanbanMaxInProgressPerProfile':2,
     }),encoding='utf-8')
     old_argv=sys.argv
     try:
-        sys.argv=['stage-integrations',str(opts),str(root),str(managed)]
+        sys.argv=['stage-integrations',str(opts),str(root),str(managed),str(temporary)]
         exec(compile(stage_code,'<stage-integrations-config>','exec'),{})
     finally:
         sys.argv=old_argv
