@@ -11,6 +11,10 @@ audit = (ROOT / "stack/state-audit.py").read_text(encoding="utf-8")
 compat = (ROOT / "compatibility.conf").read_text(encoding="utf-8")
 release_policy = (ROOT / "release/release-content.json").read_text(encoding="utf-8")
 
+kanban_start = configure.index("stage_kanban_gateway() {")
+kanban_end = configure.index("\nstage_finalize() {", kanban_start)
+kanban_stage = configure[kanban_start:kanban_end]
+
 checks = {
     "schema 24 remains supported": "INSTALL_OPTIONS_SCHEMA=24" in compat,
     "fresh Synapse identity comes from persisted options": "SYNAPSE_SERVER_NAME=\"$matrix_server_name\"" in configure,
@@ -31,6 +35,7 @@ checks = {
     "all three remote Matrix endpoints are independently probed": "'/_matrix/client/versions'" in installer and "'/.well-known/matrix/client'" in installer and "'/_matrix/client/v3/login'" in installer,
     "changing the Tailscale hostname updates persisted client endpoints": "Update-MatrixEndpointOptionsInWsl" in installer and "tailscaleHostname=$TailscaleHostname" in installer,
     "managed gateways migrate at finalization and lifecycle start": "hermes gateway migrate --multiplex -y" in configure and "hermes gateway migrate --multiplex -y" in manage and ".installer-gateway-multiplex-owned" in manage,
+    "final Kanban reload skips separate Matrix profile gateways after multiplex migration": ".installer-gateway-multiplex-owned" in kanban_stage and "skipping separate profile gateway starts" in kanban_stage and kanban_stage.index(".installer-gateway-multiplex-owned") < kanban_stage.index("start_or_restart_profile_gateway_exact"),
     "temporary standalone settings are ownership-tracked and restored": ".installer-temporary-standalone-profiles.json" in configure and "original.get('present')" in configure and "standalone choices remain for Hermes to honor" in manage,
     "gateway convergence verifies the live Hermes served profile record": "gateway_state.json" in configure and "served_profiles" in configure and "gateway_state.json" in manage and "served_profiles" in manage,
     "global migration refuses to alter an active unowned gateway": "unowned_multiplex_candidates" in configure and "unowned_multiplex_candidates" in manage and "unowned profile" in configure and "unowned profile" in manage,

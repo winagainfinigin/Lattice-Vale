@@ -5919,7 +5919,9 @@ while IFS= read -r managed_profile; do
   fi
 done < .installer-managed-profiles
 
-if [[ "$(opt_bool matrix)" == true ]]; then
+if [[ -e .installer-gateway-multiplex-owned ]]; then
+  echo 'Installer-managed Matrix profiles are served by the shared Hermes host gateway; skipping separate profile gateway starts.'
+elif [[ "$(opt_bool matrix)" == true ]]; then
   while IFS= read -r matrix_profile; do
     [[ -n "$matrix_profile" ]] || continue
     matrix_profile_secret="secrets/matrix-profiles/$matrix_profile.env"
