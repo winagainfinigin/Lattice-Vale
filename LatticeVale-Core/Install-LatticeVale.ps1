@@ -6503,17 +6503,24 @@ function Test-MatrixTailscaleClientPathViaIpv4(
     return [pscustomobject]$result
 }
 
+function Get-AvailableTailscaleRemoteValidationPort([string]$TailscaleExe) {
+    foreach ($port in 45443..45543) {
+        $state = Get-WindowsTailscaleServePortState $TailscaleExe $port 0
+        if ($state.Known -and -not $state.InUse -and (Test-WindowsTcpPortAvailable $port)) { return $port }
+    }
+    return 0
+}
+
 function Invoke-TailscaleRemotePeerValidation(
     [string]$TailscaleExe,
     [string]$DnsName,
-    [string]$Ipv4,
-    [int]$HttpsPort = 443
+    [string]$Ipv4
 ) {
     $result = [ordered]@{
-        Status='PARTIAL'; Category='NOT_RUN'; Detail='No remote devices were validated.'; Port=$HttpsPort
+        Status='PARTIAL'; Category='NOT_RUN'; Detail='No remote devices were validated.'; Port=0
         Attempted=0; Passed=0; Failed=0; Skipped=0; LastValidationUtc=''
     }
-    if (-not (Read-Choice 'Validate Matrix/Tailscale access from another device now?' 'The other device must already be signed into the same permitted tailnet. LatticeVale adds a unique temporary path challenge to the existing Matrix HTTPS listener.' 'Remote access remains installed but is reported PARTIAL because only this PC was tested.' $true)) {
+    if (-not (Read-Choice 'Validate Tailscale access from another device now?' 'The other device must already be signed into the same permitted tailnet. LatticeVale creates a unique temporary HTTPS text endpoint on a separate Tailscale Serve port; open it on the other device and type the displayed code here.' 'Remote access remains installed but is reported PARTIAL because only this PC was tested.' $true)) {
         Write-RemoteAccessLog 'Remote-device validation skipped by user; status=PARTIAL/NOT_RUN.'
         return [pscustomobject]$result
     }
@@ -6522,38 +6529,39 @@ function Invoke-TailscaleRemotePeerValidation(
         $deviceNumber++; $result.Attempted++; $result.LastValidationUtc=[DateTime]::UtcNow.ToString('o')
         $attemptStatus='FAIL'; $attemptCategory='SERVE'; $attemptDetail='Remote-device validation did not complete.'
         $token='LV-'+([Guid]::NewGuid().ToString('N').Substring(0,12).ToUpperInvariant())
-        $path='/.latticevale-validation/'+[Guid]::NewGuid().ToString('N')
+        $port=Get-AvailableTailscaleRemoteValidationPort $TailscaleExe
         $serveStarted=$false
         try {
-            $before=Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $script:matrixBridgePort
-            if (-not $before.Known -or -not $before.InUse -or -not $before.MatchesExpected) {
-                $attemptDetail='The permanent Matrix HTTPS mapping could not be verified before adding the challenge.'
+            if ($port -le 0) {
+                $attemptDetail='No safe temporary Tailscale Serve HTTPS port was available for remote validation.'
             } else {
-                $serve=Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg',"--https=$HttpsPort","--set-path=$path","text:$token") 30
+                $result.Port=$port
+                $serve=Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg',"--https=$port","text:$token") 30
                 if (-not $serve.Success) {
-                    $attemptDetail='Path-specific Tailscale Serve challenge could not be created: '+(Get-SafeDiagnosticExcerpt $serve.Text 420)
+                    $attemptDetail='Temporary Tailscale Serve validation endpoint could not be created: '+(Get-SafeDiagnosticExcerpt $serve.Text 420)
                 } else {
                     $serveStarted=$true
-                    $local=Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort $path
+                    $local=Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $port '/'
                     if (-not $local.Success -or $local.Body.Trim() -ne $token) {
-                        $attemptDetail='Path-specific validation endpoint failed its local direct-IP HTTPS self-test.'
+                        $attemptDetail='Temporary validation endpoint failed its local direct-IP HTTPS self-test.'
                     } else {
-                        $url=(Get-TailscaleHttpsUrl $DnsName $HttpsPort).TrimEnd('/')+$path
-                        Write-Host "`nREAL REMOTE-DEVICE VALIDATION - DEVICE $deviceNumber" -ForegroundColor Cyan
+                        $url=Get-TailscaleHttpsUrl $DnsName $port
+                        Write-Host ''
+                        Write-Host ("REAL REMOTE-DEVICE VALIDATION - DEVICE {0}" -f $deviceNumber) -ForegroundColor Cyan
                         Write-Host 'On another device signed into the same permitted tailnet, open:' -ForegroundColor White
                         Write-Host $url -ForegroundColor Green
                         Write-Host 'Type the one-time LV code shown by the page.' -ForegroundColor White
-                        $entered=(Read-Host "Code shown on device $deviceNumber (press Enter if unavailable)").Trim()
+                        $entered=(Read-Host ("Code shown on device {0} (press Enter if the page would not open)" -f $deviceNumber)).Trim()
                         if ($entered -ceq $token) {
-                            $attemptStatus='PASS'; $attemptCategory='REMOTE'; $attemptDetail="Device $deviceNumber opened the current path challenge."
+                            $attemptStatus='PASS'; $attemptCategory='REMOTE'; $attemptDetail=("Device {0} opened the temporary HTTPS challenge." -f $deviceNumber)
                         } else {
-                            $choice=Read-Menu "Device $deviceNumber validation result" @('DNS unavailable / hostname not found','Connection timed out / unreachable / refused','TLS or certificate error','Page opened but the validation code did not match','I did not complete this device test') 1
+                            $choice=Read-Menu ("Device {0} validation result" -f $deviceNumber) @('DNS unavailable / hostname not found','Connection timed out / unreachable / refused','TLS or certificate error','Page opened but the validation code did not match','I did not complete this device test') 1
                             switch ($choice) {
-                                1 { $attemptCategory='DNS'; $attemptDetail="Device $deviceNumber reported DNS/name-resolution failure." }
-                                2 { $attemptCategory='TRANSPORT'; $attemptDetail="Device $deviceNumber could not establish the remote connection." }
-                                3 { $attemptCategory='TLS'; $attemptDetail="Device $deviceNumber reported a TLS/certificate failure." }
-                                4 { $attemptCategory='SERVE'; $attemptDetail="Device $deviceNumber did not receive the current challenge token." }
-                                5 { $attemptStatus='PARTIAL'; $attemptCategory='SKIPPED'; $attemptDetail="Device $deviceNumber validation was not completed." }
+                                1 { $attemptCategory='DNS'; $attemptDetail=("Device {0} reported DNS/name-resolution failure." -f $deviceNumber) }
+                                2 { $attemptCategory='TRANSPORT'; $attemptDetail=("Device {0} could not establish the remote connection." -f $deviceNumber) }
+                                3 { $attemptCategory='TLS'; $attemptDetail=("Device {0} reported a TLS/certificate failure." -f $deviceNumber) }
+                                4 { $attemptCategory='SERVE'; $attemptDetail=("Device {0} did not receive the current challenge token." -f $deviceNumber) }
+                                5 { $attemptStatus='PARTIAL'; $attemptCategory='SKIPPED'; $attemptDetail=("Device {0} validation was not completed." -f $deviceNumber) }
                             }
                         }
                     }
@@ -6561,19 +6569,15 @@ function Invoke-TailscaleRemotePeerValidation(
             }
         } finally {
             if ($serveStarted) {
-                [void](Invoke-NativeProcessCapture $TailscaleExe @('serve',"--https=$HttpsPort","--set-path=$path",'off') 30)
-                Write-RemoteAccessLog "Removed temporary Matrix challenge path after device $deviceNumber."
-            }
-            $after=Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $script:matrixBridgePort
-            if (-not $after.Known -or -not $after.InUse -or -not $after.MatchesExpected) {
-                $attemptStatus='FAIL'; $attemptCategory='SERVE'; $attemptDetail='Permanent Matrix HTTPS mapping did not verify after challenge cleanup.'
+                [void](Invoke-NativeProcessCapture $TailscaleExe @('serve',"--https=$port",'off') 30)
+                Write-RemoteAccessLog ("Temporary remote-validation Serve mapping on HTTPS {0} removed." -f $port)
             }
         }
-        if ($attemptStatus -eq 'PASS') { $result.Passed++; Write-Host "Device $deviceNumber`: PASS" -ForegroundColor Green }
-        elseif ($attemptStatus -eq 'FAIL') { $result.Failed++; Write-Warning "Device $deviceNumber`: FAIL ($attemptCategory) - $attemptDetail" }
-        else { $result.Skipped++; Write-Warning "Device $deviceNumber`: PARTIAL/SKIPPED - $attemptDetail" }
+        if ($attemptStatus -eq 'PASS') { $result.Passed++; Write-Host ("Device {0}: PASS" -f $deviceNumber) -ForegroundColor Green }
+        elseif ($attemptStatus -eq 'FAIL') { $result.Failed++; Write-Warning ("Device {0}: FAIL ({1}) - {2}" -f $deviceNumber,$attemptCategory,$attemptDetail) }
+        else { $result.Skipped++; Write-Warning ("Device {0}: PARTIAL/SKIPPED - {1}" -f $deviceNumber,$attemptDetail) }
         Write-RemoteAccessLog ("Remote-device validation attempt {0}: {1}/{2}; {3}" -f $deviceNumber,$attemptStatus,$attemptCategory,$attemptDetail)
-        $keepTesting=Read-Choice 'Validate another Tailscale device?' 'Creates a fresh one-time challenge path on the existing Matrix HTTPS listener.' 'Finish remote-device validation and continue installation.' $false
+        $keepTesting=Read-Choice 'Validate another Tailscale device?' 'Creates a fresh one-time challenge on a separate temporary HTTPS port.' 'Finish remote-device validation and continue installation.' $false
     }
     if ($result.Attempted -le 0) { $result.Status='PARTIAL'; $result.Category='NOT_RUN'; $result.Detail='No remote devices were validated.' }
     elseif ($result.Passed -eq $result.Attempted) { $result.Status='PASS'; $result.Category='REMOTE'; $result.Detail="$($result.Passed) of $($result.Attempted) remote devices passed the HTTPS challenge." }
@@ -8871,7 +8875,7 @@ if ($tailscale) {
             }
 
             if (-not $tailscalePrerequisiteFailure -and ($trackedDashboardPort -gt 0 -or $trackedMatrixPort -gt 0)) {
-                $tailscaleRemoteValidation = Invoke-TailscaleRemotePeerValidation $tailscaleExe $dnsName $tsStatus.IPv4 $tailscaleMatrixPort
+                $tailscaleRemoteValidation = Invoke-TailscaleRemotePeerValidation $tailscaleExe $dnsName $tsStatus.IPv4
                 if ($tailscaleRemoteValidation.Status -eq 'PASS') {
                     Write-Host 'Tailscale remote-device validation: PASS' -ForegroundColor Green
                 } elseif ($tailscaleRemoteValidation.Status -eq 'FAIL') {
