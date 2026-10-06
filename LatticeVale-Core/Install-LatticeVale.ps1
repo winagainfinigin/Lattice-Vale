@@ -6539,8 +6539,8 @@ function Invoke-TailscaleRemotePeerValidation(
     while ($keepTesting) {
         $deviceNumber++; $result.Attempted++; $result.LastValidationUtc=[DateTime]::UtcNow.ToString('o')
         $attemptStatus='FAIL'; $attemptCategory='SERVE'; $attemptDetail='Remote-device validation did not complete.'
-        $token='LV-'+([Guid]::NewGuid().ToString('N').Substring(0,12).ToUpperInvariant())
-        $path='/.latticevale-validation/'+[Guid]::NewGuid().ToString('N')
+        $token='LV-'+([Guid]::NewGuid().ToString('N').Substring(0,6).ToUpperInvariant())
+        $path='/.lv/'+[Guid]::NewGuid().ToString('N').Substring(0,10)
         $serveStarted=$false
         try {
             $serve=Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg',"--https=$HttpsPort","--set-path=$path","text:$token") 30

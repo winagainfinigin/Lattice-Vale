@@ -6,7 +6,7 @@
 > **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
-This document describes the LatticeVale **v14.6.2** repository/release contract for GitHub.
+This document describes the LatticeVale **v14.6.3** repository/release contract for GitHub.
 
 ## Repository structure
 
@@ -41,13 +41,16 @@ Installed LatticeVale systems must use the full release and **Resume / repair in
 
 ## Pre-publication checks
 
-Before publishing v14.6.2 Hotfix:
+Before publishing v14.6.3:
 
 - version/schema/policy/fixture-count documentation must agree with source;
-- all 146 deterministic fixtures and both resume simulations must pass in their supported environments;
+- all 147 deterministic fixtures across the six current shards and both resume simulations must pass in their supported environments;
+- the v14.6.3 Matrix/gateway hotfix must preserve existing Synapse identity, use a unique challenge path on the configured Matrix listener, preserve the permanent root route, and migrate managed Hermes profiles without changing user-owned standalone settings;
 - Bash/Python/static checks and Windows PowerShell parse/manifest checks must pass in CI;
 - `installer/SOURCE-SHA256SUMS.txt` must be regenerated after the final source/documentation change;
 - both ZIPs must have the required `Lattice-Vale/` root, valid CRCs, portable paths, no duplicate/case-colliding members, and byte-for-byte source equivalence; and
 - no individual repository file may exceed 100 MiB.
+
+The current full release is built from the qualified `main` commit. The `14.6.3` tag must identify that exact commit before publication; do not publish a ZIP against an older tag target.
 
 GitHub's community-health checklist is a recommendation rather than a special LatticeVale runtime requirement. LatticeVale keeps its existing README, MIT license, contribution, security, support, issue-template, pull-request, and CI metadata synchronized so repository users receive current guidance.

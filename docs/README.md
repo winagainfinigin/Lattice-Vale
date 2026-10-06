@@ -19,7 +19,7 @@
 
 **GPU paths:** managed Ollama supports Auto, CPU, NVIDIA CUDA, AMD/ROCm, and Vulkan; DirectML remains an optional WSL-host text backend with Ollama fallback; native Windows Ollama remains user-owned. Vulkan requires an existing WSL `/dev/dri/renderD*` device and real `ollama ps` offload proof before GPU execution is trusted. LatticeVale never installs/replaces Windows/vendor display drivers.
 
-**Release qualification:** v14.6.3 requires exactly 146 deterministic fixtures across six shards, both resume simulations, source-tree contamination checks, corrected v14.5.47 schema-21 migration coverage, exact declarative release-content/source-manifest verification, repository-patch round-trip equivalence, and fresh-extraction ZIP byte equivalence before artifacts are publishable.
+**Release qualification:** the current v14.6.3 hotfix requires exactly 147 deterministic fixtures across six shards, both resume simulations, source-tree contamination checks, the 14.6.2 and 14.6.3 upgrade baselines, exact declarative release-content/source-manifest verification, and fresh-extraction ZIP byte equivalence before artifacts are publishable.
 
 **Resource diagnostics:** `~/hermes-stack/resource-policy-report.txt` remains the secret-free explanation of resource policy v13, GPU/offload state, generated ceilings, and hardware/policy fingerprints; `./manage.sh audit` independently verifies the same state.
 

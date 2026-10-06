@@ -1,6 +1,6 @@
 # LatticeVale v14.6.3 — Complete Features and Install Options Reference
 
-> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Every device gets a fresh one-time HTTPS challenge, per-device results are shown immediately, and aggregate results are saved without changing the real Dashboard/Matrix Serve mappings. Installer-options schema 24 remains compatible with interim v14.6.3 state; the obsolete `tailscaleMatrixMaxConnections` value is ignored and no longer written. Current unattended-upgrades feature references remain removed; only ownership-proven cleanup of old LatticeVale APT policy remains.
+> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Each device gets a fresh challenge path and token on the configured Matrix HTTPS listener; cleanup removes only that path and verifies the permanent Matrix root route remains. Per-device results and aggregate counts are saved. Existing Synapse identity is preserved, and managed Hermes profiles migrate to the shared gateway without changing user-owned standalone settings. Installer-options schema 24 remains compatible with interim state; obsolete relay-limit data is ignored and not rewritten.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -14,7 +14,7 @@
 - DirectML host-gateway recovery is isolated from healthy Docker infrastructure; `/health` remains responsive during model-load locking, the supervisor confirms misses before replacement, and installer self-test uses bounded readiness convergence.
 - Missing ephemeral Hermes `gateway-default` / profile s6 slots can be re-registered from preserved profile state through Hermes' runtime service-manager API instead of forcing profile recreation.
 - For recognized older stacks, mutating Options **1, 2, 4, 5, and 6** perform cumulative preservation-first migration before their mode-specific action. Options **3** and **8** remain read-only; Option **7** remains isolated cleanup.
-- The deterministic contract is **146 fixtures** across six shards, including the same-version runtime-policy/DirectML repair regression and the v14.5.2/v14.6.0 eight-option continuity baseline.
+- The current v14.6.3 hotfix deterministic contract is **147 fixtures** across six shards, including the Matrix identity/gateway migration and multi-device Serve-route regressions for both 14.6.2 and 14.6.3 upgrade baselines.
 
 ## v14.6.0 schema-23 / policy-13 additions
 

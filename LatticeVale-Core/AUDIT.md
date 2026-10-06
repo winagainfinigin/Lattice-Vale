@@ -8,7 +8,7 @@
 ## v14.6.2 managed-upstream delta audit
 
 The current v14.6.3 release retains the qualified v14.6.1 canonical architecture and adds latest-supported managed-upstream resolution: Option 6 forces the resolver, due/revision-triggered Option 1 uses the same resolver, stateful majors and the DirectML ABI remain compatibility-bounded, explicit overrides remain user-owned, and exact resolved image/source identity is recorded for diagnostics and rollback.
-Managed-refresh revision **5** is the current compatibility trigger, and the deterministic contract is **146 fixtures**. QMD uses its upstream `--host` support at the stable npm channel; the retired v2.5.3 listener source patch is removed from current release content.
+Managed-refresh revision **5** is the current compatibility trigger, and the v14.6.3 hotfix deterministic contract is **147 fixtures**. QMD uses its upstream `--host` support at the stable npm channel; the retired v2.5.3 listener source patch is removed from current release content. Matrix remote validation uses a unique challenge path on the configured HTTPS listener and verifies that the permanent Matrix root route survives each device attempt; managed Hermes profiles converge on the shared gateway while preserving user-owned standalone settings.
 
 
 > **Policy-13 audit gate:** verify `useGpuAcceleration` and `directmlFallbackPolicy` survive Resume / repair; verify DirectML `none` never creates/retains a forced-Ollama marker; verify `torch.no_grad()` is used instead of `torch.inference_mode()`; and verify the sum of all enabled Docker CPU quotas never exceeds `CPU_DOCKER_ENVELOPE_MILLI`. The canonical regression sweep covers 3,328 CPU/backend/service-topology combinations plus irregular RAM envelopes.

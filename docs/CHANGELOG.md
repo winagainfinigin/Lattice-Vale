@@ -3,12 +3,13 @@
 ## 14.6.3 - 2026-10-04
 
 - Makes Windows Tailscale remote validation repeatable for multiple already-authorized tailnet devices in one installer run.
-- Generates a fresh one-time HTTPS challenge token per device, removes each temporary Serve mapping after the attempt, and leaves the real Dashboard/Matrix mappings unchanged.
+- Generates a fresh one-time HTTPS challenge token per device on the configured Matrix listener, removes only its unique path after the attempt, and verifies the permanent Matrix root route remains intact.
 - Reports each device result independently and persists aggregate attempted/passed/failed/skipped counts plus the last validation timestamp.
 - Keeps installer-options schema **24** compatible with interim v14.6.3 state while treating `tailscaleMatrixMaxConnections` as obsolete compatibility data that is ignored and no longer written.
 - Restores Matrix/Dashboard relay concurrency to fixed independent internal gates rather than a user/device-count setting.
 - Removes the unattended-upgrades feature from current choices, summaries, durable options, and current feature documentation while retaining only ownership-proven cleanup of old LatticeVale APT policy.
-- Keeps the deterministic release contract at **146 fixtures** by extending the existing Windows-native Tailscale relay fixture with repeatable-device, aggregate-result, cleanup, compatibility, and gate-isolation assertions.
+- The initial v14.6.3 release contract had **146 fixtures**. The current same-version Matrix/gateway hotfix adds identity, upgrade, and route-preservation coverage, bringing the current contract to **147 fixtures** across six shards.
+- Preserves existing Synapse identity, stores the Matrix identity domain, Element homeserver URL, and authenticated Tailscale hostname separately, and migrates installer-managed Hermes profiles to the shared gateway without overwriting user-owned standalone choices.
 
 ## 14.6.2 Hotfix — 2026-10-01
 
@@ -2340,4 +2341,3 @@ v14.3.8 is a preservation-first Matrix reliability/room-version hotfix layered o
 `tests/v14.3.8-matrix-v10-online-order-fixtures.py` verifies the fixed v10 policy, Client-Server readiness ordering, preserved-room migration markers, absence of raw pre-E2EE `/join` calls, and executable bounded join behavior for both Matrix-offline and joined cases.
 
 The broader deterministic/static suite retains all prior v14.3.1–v14.3.7 hotfix fixtures. Real Windows/WSL/Element behavior remains a platform smoke-test boundary and is not represented as proven by Linux-only fixture execution.
-

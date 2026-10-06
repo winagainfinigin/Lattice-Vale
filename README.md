@@ -10,7 +10,7 @@
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
 
-## v14.6.3 - repeatable multi-device Tailscale/Matrix validation
+## v14.6.3 - multi-device Tailscale/Matrix and gateway hotfix
 
 Installer-managed Matrix identities use the Synapse `server_name`. The installer displays that ID domain separately from the HTTPS or localhost URL to enter in Element. Existing `hermes.local` accounts are preserved and need manual URL entry for remote clients because automatic discovery cannot route `.local` identities.
 
@@ -18,7 +18,7 @@ Named profiles use temporary standalone gateways only while LatticeVale provisio
 
 Windows Tailscale remote validation can now test more than one already-authorized tailnet device in the same installer run. Each device receives a newly generated one-time HTTPS challenge, its result is reported independently, and the installer asks whether to validate another device after every pass, failure, or skipped attempt. The temporary challenge is removed after each device while the real Dashboard and Matrix Serve mappings remain active.
 
-The final remote-access result records attempted, passed, failed, and skipped device counts plus the last validation time. A saved interim `tailscaleMatrixMaxConnections` field from an earlier v14.6.3 build is accepted for schema-24 compatibility but ignored and omitted from newly written options; Matrix relay concurrency returns to the fixed internal multi-client behavior inherited from v14.6.2. The unattended-upgrades option remains removed, with only ownership-proven legacy cleanup retained.
+The final remote-access result records attempted, passed, failed, and skipped device counts plus the last validation time. Each challenge uses a unique path and token on the configured Matrix HTTPS listener; cleanup removes only that path and checks that the permanent `/` route still targets Matrix. Existing Synapse `server_name` remains authoritative, while the Matrix identity domain, Element homeserver URL, and authenticated Tailscale hostname are stored separately. Installer-managed Hermes profiles migrate to the shared gateway; user-owned standalone choices are preserved. A saved interim `tailscaleMatrixMaxConnections` field is accepted for schema-24 compatibility but ignored and omitted from newly written options. The unattended-upgrades option remains removed, with only ownership-proven legacy cleanup retained.
 
 ## v14.6.2 — latest-supported managed software updates
 
@@ -113,7 +113,7 @@ Native Windows Ollama remains externally owned. LatticeVale recommends one loade
 
 Resource policy v11 is finalized once into a canonical installer-owned policy object. Generated Compose CPU/RAM limits, `.latticevale-resource-state`, audit expectations, and the human-readable `resource-policy-report.txt` consume that same finalized object instead of independently recalculating ceilings. The state records separate hardware and policy SHA-256 fingerprints, so audit/repair can distinguish a hardware/topology change from policy/configuration drift. The report contains no credentials and records the RAM/CPU profile, acceleration/offload status, GPU topology, DirectML/Ollama coordination, context/model floor, and generated service ceilings.
 
-Release qualification is deterministic and contamination-checked. The authoritative suite contains exactly 135 fixtures in six numbered shards; bytecode/cache/temp artifacts are rejected before and after test execution. Packaging is accepted only after the exact v14.5.4 parent can reproduce the qualified v14.5.42 tree through its patch, the reconstructed v14.5.2 parent can reproduce the same tree through the combined patch, and a freshly extracted release ZIP matches the qualified source tree and source manifest byte-for-byte.
+Current v14.6.3 release qualification requires exactly 147 deterministic fixtures across six shards, both resume simulations, PowerShell parsing under Windows PowerShell 5.1 and PowerShell 7, exact source-manifest verification, and a fresh release ZIP whose extracted files match the qualified source tree. Historical v14.5.42 qualification used a 135-fixture suite and its own patch-lineage reconstruction; those historical numbers do not describe the current release gate.
 
 ### v14.5.4 — DirectML VRAM guard + 16 GB-class RAM efficiency
 

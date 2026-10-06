@@ -140,7 +140,7 @@ assert "Read-Choice 'Validate another Tailscale device?'" in remote
 assert 'while ($keepTesting)' in remote
 assert 'REAL REMOTE-DEVICE VALIDATION - DEVICE $deviceNumber' in remote
 assert remote.index('while ($keepTesting)') < remote.index("$token='LV-'+([Guid]::NewGuid()")
-assert "'/.latticevale-validation/'" in remote and '"--https=$HttpsPort"' in remote
+assert "'/.lv/'" in remote and '"--https=$HttpsPort"' in remote
 assert 'RootTargets' in ps and '"--set-path=$path"' in remote and "'off') 30" in remote
 assert 'finally {' in remote
 assert 'Permanent Matrix HTTPS mapping did not verify after challenge cleanup.' in remote
