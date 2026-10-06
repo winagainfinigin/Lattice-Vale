@@ -5653,7 +5653,7 @@ while IFS= read -r name; do
 done < .installer-managed-profiles
 for f in "${profile_envs[@]}"; do
   touch "$f"; chmod 0600 "$f"
-  set_env "$f" TERMINAL_CWD /workspace
+  remove_env_keys "$f" TERMINAL_CWD
   remove_legacy_gateway_multiplex_off "$f"
   if [[ "$(opt_bool searxng)" == true ]]; then set_env "$f" SEARXNG_URL http://searxng:8080; else remove_env_keys "$f" SEARXNG_URL; fi
   if [[ "$(opt_bool qmd)" == true ]]; then set_env "$f" OBSIDIAN_VAULT_PATH /vault; else remove_env_keys "$f" OBSIDIAN_VAULT_PATH; fi
