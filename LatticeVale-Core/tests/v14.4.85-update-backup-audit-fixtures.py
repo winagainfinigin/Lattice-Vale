@@ -7,16 +7,23 @@ ps=(ROOT/'Install-LatticeVale.ps1').read_text()
 backup=ROOT/'linux/pre-update-safety-backup.sh'
 backup_text=backup.read_text()
 
-# Option 6 must not depend on the installed manage.sh it is trying to repair.
-update_start=ps.index("if ($forceManagedUpdate) {")
-update_end=ps.index("if ($repairMaintenance) {", update_start)
-update=ps[update_start:update_end]
-assert "pre-update-safety-backup.sh" in update
-assert "./manage.sh backup" not in update
-assert "cd \"$1\"" not in update
-assert "Invoke-WslDirectCapture $DistroName 'root' $backupHelperLinux @($stackLinuxPath,[string]$selectedUid,[string]$selectedGid)" in update
-assert "StdErr" in update and "StdOut" in update and "ExitCode" in update
-assert "No installer-managed software refresh was started" in update
+# Every mutating managed repair/update mode takes the bundle-owned backup before staging.
+# v14.6.3 moved this shared safety gate ahead of the mode-specific bootstrap path.
+if (ROOT/'VERSION.txt').read_text().strip() == '14.6.3':
+    backup_start=ps.index("if ($repairMaintenance -and -not $skipPreInstallBackup) {")
+    backup_end=ps.index("if ($repairMaintenance -and $skipPreInstallBackup) {", backup_start)
+    backup_block=ps[backup_start:backup_end]
+    assert "'update'" in ps[ps.index('$repairMaintenance ='):ps.index('\nif ($repairMaintenance', ps.index('$repairMaintenance ='))]
+else:
+    update_start=ps.index("if ($forceManagedUpdate) {")
+    update_end=ps.index("if ($repairMaintenance) {", update_start)
+    backup_block=ps[update_start:update_end]
+assert "pre-update-safety-backup.sh" in backup_block
+assert "./manage.sh backup" not in backup_block
+assert "cd \"$1\"" not in backup_block
+assert "Invoke-WslDirectCapture $DistroName 'root' $backupHelperLinux @($stackLinuxPath,[string]$selectedUid,[string]$selectedGid)" in backup_block
+assert "StdErr" in backup_block and "StdOut" in backup_block and "ExitCode" in backup_block
+assert "No installer-managed software refresh was started" in backup_block
 
 # Option 3 must print a fresh report after selection, not merely a completion sentence.
 assert "function Show-LatticeValeReadOnlyVerification" in ps

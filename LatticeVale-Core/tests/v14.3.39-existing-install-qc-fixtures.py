@@ -52,13 +52,15 @@ assert 'cp -a data/hermes/platforms/matrix/store "$recovery_dir/matrix-store"' i
 assert '[[ ! -e .matrix-identity-rebuild-pending ]] || return 1' in cfg
 
 # Update/repair must back up before the Linux staging/bootstrap path begins.
-backup_idx=ps.index("Write-Step $(if ($universalRepairMigration) { 'Creating cumulative managed-stack migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })")
+backup_idx=ps.index("if ($repairMaintenance -and -not $skipPreInstallBackup) {")
 stage_idx=ps.index('$stageLinux = "/tmp/$stageName"', backup_idx)
 assert backup_idx < stage_idx
 backup_block=ps[backup_idx:stage_idx]
 assert 'pre-update-safety-backup.sh' in backup_block
 assert './manage.sh backup' not in backup_block
 assert 'No installer-managed software refresh was started' in backup_block
+assert "Creating pre-install managed-stack safety backup" in backup_block
+assert "if ($repairMaintenance -and $skipPreInstallBackup)" in ps
 
 # Component removal may remove only selected LatticeVale containers; persistent data stays.
 assert 'If a previously selected optional service is now disabled, stop/remove only its containers. Persistent data is retained.' in cfg

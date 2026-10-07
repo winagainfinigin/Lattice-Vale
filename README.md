@@ -1,6 +1,6 @@
 # LatticeVale v14.6.3
 
-> **v14.6.3 test build:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge, and keeps exact matching Serve routes in place. Installer-managed Hermes profiles converge to the shared gateway multiplexer. Existing-stack runs include backup progress and a per-run backup skip; planned Ubuntu APT refresh includes elapsed progress and a per-run skip. Schema 24 remains compatible.
+> **v14.6.3 release:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge, and keeps exact matching Serve routes in place. Installer-managed Hermes profiles converge to the shared gateway multiplexer. Existing-stack runs include backup progress and a per-run backup skip; planned Ubuntu APT refresh includes elapsed progress and a per-run skip. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -612,7 +612,7 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.6.0** | Prior install release | Canonical hardware/backend/resource architecture, adaptive cross-vendor qualification, structured diagnostics, schema-21/schema-22 migration to schema 23, durable GPU opt-out, and conserved CPU allocation |
 | **v14.6.1** | Prior install release | Preservation-first eight-option migration continuity, same-version canonical runtime-policy repair, bounded/nonblocking DirectML readiness, exact Hermes s6 gateway-slot recovery, and hardened Matrix/Tailscale remote validation |
 | **v14.6.2 Hotfix** | Prior install release | Latest-supported managed upstream resolution for Options 1/6, stable Honcho tag tracking, compatible stateful-major bounds, exact resolved-artifact recording, and inherited preservation-first repair |
-| **v14.6.3** | **Current test release** | Local Tailscale/Matrix route validation without a second-device challenge, backup and Ubuntu refresh progress with run-level skips, streamed cleanup, and schema-24 compatibility |
+| **v14.6.3** | **Current install release** | Local Tailscale/Matrix route validation without a second-device challenge, backup and Ubuntu refresh progress with run-level skips, streamed cleanup, and schema-24 compatibility |
 
 ### v14.4.1
 

@@ -26,7 +26,7 @@ assert (("$relayWaitSeconds = if ($SelfTest) { '30' } else { '120' }" in ps) if 
 assert '-ExecutionTimeLimit ([TimeSpan]::Zero)' in ps and '-RestartCount 5' in ps
 assert '-RunLevel Highest' in ps
 assert '#Requires -RunAsAdministrator' not in relay
-assert 'Do not rewrite the relay config here.' in ps
+assert ('Keep the verified persistent relay running; do not replace its live config.' in ps) if version == '14.6.3' else ('Do not rewrite the relay config here.' in ps)
 assert 'Test-HttpsEndpoint' in ps and '$request.Proxy = $null' in ps
 
 # v14.6.1 and v14.6.2 deterministically rebuilt exact installer-owned Serve mappings.

@@ -95,7 +95,7 @@ assert 'Find-ReachableWslIp $DistroName $Services $initialProbeSeconds' in helpe
 assert "if ($script:RelayTargetMode -eq 'mirrored-localhost')" in helper
 assert "Test-RelayTargetForServices '127.0.0.1'" in helper
 assert 'if (-not (Test-LocalTcpPort $bridgePort))' in ps
-assert 'does not require rewriting relay config.' in ps
+assert ('Keep the verified persistent relay running; do not replace its live config.' in ps) if version == '14.6.3' else ('does not require rewriting relay config.' in ps)
 assert "pattern=re.compile(r'(?m)^public_baseurl\\s*:\\s*(.*?)\\s*$')" in ps
 assert "print('UNCHANGED')" in ps
 set_base=ps[ps.index('function Set-SynapsePublicBaseUrl'):ps.index('function Test-HttpsEndpoint')]

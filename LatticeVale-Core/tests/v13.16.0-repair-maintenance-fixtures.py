@@ -42,7 +42,9 @@ assert "tail -n 5000" in cfg
 assert 'data/ollama' not in cfg[cfg.index('repair_storage_maintenance() {'):cfg.index('repair_database_maintenance() {')].replace('preserves Matrix/Postgres data, Hermes profiles/memory/sessions, QMD data, Ollama models, vault/workspace files, credentials, and user backups.','')
 
 # Repair handles APT/stale interrupted staging before package work can need the space.
-assert 'Repair pre-maintenance: clearing disposable APT cache' in boot
+assert 'Repair pre-maintenance: WSL root has' in boot
+assert 'skipped disposable-cache purge and stale staging scan' in boot
+assert 'Repair pre-maintenance: WSL root is below 2 GiB free or its free space is unknown; clearing disposable APT cache and stale LatticeVale staging directories.' in boot
 assert 'apt-get clean' in boot
 assert "-name 'hermes-installer-*'" in boot and "-name 'hermes-audit-*'" in boot
 
