@@ -5,6 +5,7 @@ ps=(root/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
 compose=(root/'stack/compose.yaml').read_text(encoding='utf-8')
 cfg=(root/'stack/configure-stack.sh').read_text(encoding='utf-8')
 helper=(root/'windows/LatticeVale-WslNativeRelay.ps1').read_text(encoding='utf-8')
+uninstaller=(root/'Uninstall-LatticeVale.ps1').read_text(encoding='utf-8')
 
 assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3'}
 assert 'tailscale/tailscale' not in compose
@@ -50,6 +51,18 @@ assert 'interface portproxy set' not in helper.lower()
 assert 'netsh.exe' not in helper.lower()
 assert 'Migration cleanup only: v13.12.x used netsh portproxy' in ps
 assert 'tailscale serve reset' not in ps.lower()
+# Serve removal uses the supported per-port command and keeps output visible.
+serve_disable = ps[ps.index('function Disable-WindowsTailscaleServe'):ps.index('function Resolve-UnownedTailscaleServeConflict')]
+assert "Invoke-NativeProcessPassthrough $TailscaleExe @('serve',\"--https=$Port\",'off') 30" in serve_disable
+assert "Check 'tailscale serve status --json' in Windows." in serve_disable
+assert 'return $false' in serve_disable
+serve_conflict = ps[ps.index('function Resolve-UnownedTailscaleServeConflict'):ps.index('function Enable-WindowsTailscaleServe')]
+assert 'adopting it without changing or restarting Tailscale Serve' in serve_conflict
+assert "return 'adopt'" in serve_conflict
+matching_rule = serve_conflict.split('if (-not (Read-Choice "Replace the existing untracked Tailscale rule', 1)[0]
+assert "@('serve',\"--https=$HttpsPort\",'off')" not in matching_rule
+assert 'return \'leave\'' in serve_conflict
+assert "@('serve',\"--https=$port\",'off')" in uninstaller
 # Matrix remote access remains multi-client through fixed internal per-service gates.
 # The corrected v14.6.3 removes the accidental user-facing relay-session setting.
 assert "maxConnections=64" in ps
@@ -82,7 +95,7 @@ assert 'Find-ReachableWslIp $DistroName $Services $initialProbeSeconds' in helpe
 assert "if ($script:RelayTargetMode -eq 'mirrored-localhost')" in helper
 assert "Test-RelayTargetForServices '127.0.0.1'" in helper
 assert 'if (-not (Test-LocalTcpPort $bridgePort))' in ps
-assert 'Do not rewrite the relay config here.' in ps
+assert 'does not require rewriting relay config.' in ps
 assert "pattern=re.compile(r'(?m)^public_baseurl\\s*:\\s*(.*?)\\s*$')" in ps
 assert "print('UNCHANGED')" in ps
 set_base=ps[ps.index('function Set-SynapsePublicBaseUrl'):ps.index('function Test-HttpsEndpoint')]
@@ -100,14 +113,13 @@ for text in (
     'Test-WindowsTailscaleServeListener',
     'Invoke-TailscaleHttpsProbeViaIpv4',
     'Test-MatrixTailscaleClientPathViaIpv4',
-    'Invoke-TailscaleRemotePeerValidation',
+    'Remote-device page challenge skipped',
     "@('set','--shields-up=false')",
     "@('syspolicy','list')",
     "--resolve",
     'REMOTE_VALIDATION_STATUS',
-    "$remoteStatus = [string]$tailscaleRemoteValidation.Status",
+    'Remote-device page validation is not part of installation',
     'Tailscale remote access: {0} - {1}',
-    'REAL REMOTE-DEVICE VALIDATION',
 ):
     assert text in ps, text
 assert '/.well-known/matrix/client' in ps
@@ -134,18 +146,13 @@ _arch.validate_install_options({"schema": 23}, 24)
 for _legacy in (2, 0, 4097, True, "obsolete"):
     _arch.validate_install_options({"schema": 24, "tailscaleMatrixMaxConnections": _legacy}, 24)
 
-remote = ps[ps.index('function Invoke-TailscaleRemotePeerValidation'):ps.index('function Test-WingetPackageInstalled')]
-assert 'Validate Matrix/Tailscale access from another device now?' in remote
-assert "Read-Choice 'Validate another Tailscale device?'" in remote
-assert 'while ($keepTesting)' in remote
-assert 'REAL REMOTE-DEVICE VALIDATION - DEVICE $deviceNumber' in remote
-assert remote.index('while ($keepTesting)') < remote.index("$token='LV-'+([Guid]::NewGuid()")
-assert "'/.lv/'" in remote and '"--https=$HttpsPort"' in remote
-assert 'RootTargets' in ps and '"--set-path=$path"' in remote and "'off') 30" in remote
-assert 'finally {' in remote
-assert 'Permanent Matrix HTTPS mapping did not verify after challenge cleanup.' in remote
-assert 'Disable-WindowsTailscaleServe' not in remote
-assert 'Enable-WindowsTailscaleServe' not in remote
+assert 'Invoke-TailscaleRemotePeerValidation' not in ps
+assert 'Validate another Tailscale device?' not in ps
+assert 'REMOTE-DEVICE VALIDATION' not in ps
+assert 'Remote-device page challenge skipped' in ps
+assert "Status='NOT_RUN'; Category='NOT_RUN'" in ps
+assert "if ($resolution -eq 'adopt')" in ps
+assert 'Could not deterministically rebuild the installer-owned Matrix Serve mapping' not in ps
 for key in (
     'REMOTE_VALIDATION_ATTEMPTED', 'REMOTE_VALIDATION_PASSED', 'REMOTE_VALIDATION_FAILED',
     'REMOTE_VALIDATION_SKIPPED', 'REMOTE_VALIDATION_LAST_UTC'

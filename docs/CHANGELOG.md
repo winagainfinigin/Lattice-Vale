@@ -1,12 +1,18 @@
 # Changelog
 
-## 14.6.3 - 2026-10-04
+## 14.6.3 - 2026-10-06 test build
 
-- Makes Windows Tailscale remote validation repeatable for multiple already-authorized tailnet devices in one installer run.
-- Generates a fresh one-time HTTPS challenge token per device on the configured Matrix listener, removes only its unique path after the attempt, and verifies the permanent Matrix root route remains intact.
-- Reports each device result independently and persists aggregate attempted/passed/failed/skipped counts plus the last validation timestamp.
+- Removes the installer-time second-device web-page challenge. The installer checks the Windows Tailscale prerequisites, local relay, Serve listener, and Matrix client API, then displays the service URL for permitted tailnet devices.
+- Keeps exact matching Matrix and Dashboard Serve rules in place without stopping or recreating them. Replacing a different target still requires explicit approval.
+- Adds pre-install backup progress with a per-run skip prompt for applicable existing-stack operations; backup remains the default.
+- Adds elapsed progress to Ubuntu APT metadata refresh and a per-run skip prompt when a refresh is planned or cannot be ruled out. Targeted package installs remain explicit.
+- Skips disposable cache cleanup and stale staging scans during ordinary repairs when the WSL root has at least 2 GiB free; retains that recovery cleanup below the threshold or when free space cannot be measured.
+- Streams Option 7 cleanup helper output so selected cleanup work reports its progress while running.
 - Keeps installer-options schema **24** compatible with interim v14.6.3 state while treating `tailscaleMatrixMaxConnections` as obsolete compatibility data that is ignored and no longer written.
 - Restores Matrix/Dashboard relay concurrency to fixed independent internal gates rather than a user/device-count setting.
+- Adds live progress to the bundle-owned pre-install safety backup, including database dumps and archive creation. Mutating existing-stack runs ask whether to skip this backup for the current run; the normal path still creates it before installer-managed files change.
+- Adds a per-run choice to skip Ubuntu APT package-index refresh when one is planned or cannot be ruled out, with an elapsed-time progress indicator. The prompt is omitted when no refresh is planned; required targeted package installs still run.
+- Streams cleanup output and scope progress, and explains before category selection that cleanup reclaims Ubuntu/Docker space without compacting the Windows-side WSL VHDX.
 - Removes the unattended-upgrades feature from current choices, summaries, durable options, and current feature documentation while retaining only ownership-proven cleanup of old LatticeVale APT policy.
 - The initial v14.6.3 release contract had **146 fixtures**. The current same-version Matrix/gateway hotfix adds identity, upgrade, and route-preservation coverage, bringing the current contract to **147 fixtures** across six shards.
 - Preserves existing Synapse identity, stores the Matrix identity domain, Element homeserver URL, and authenticated Tailscale hostname separately, and migrates installer-managed Hermes profiles to the shared gateway without overwriting user-owned standalone choices.
@@ -20,7 +26,7 @@
 - Existing installations that already created a verified pre-update backup can apply the hotfix and rerun Resume / repair or Update / repair; no uninstall or data reset is required.
 
 
-> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the user chooses the per-run pre-update backup behavior (backup remains the normal choice). Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ## 14.6.2 - 2026-10-01

@@ -1,12 +1,16 @@
 # LatticeVale v14.6.3 — Complete Features and Install Options Reference
 
-> **v14.6.3:** Windows Tailscale remote validation is repeatable for as many already-authorized tailnet devices as desired in one installer run. Each device gets a fresh challenge path and token on the configured Matrix HTTPS listener; cleanup removes only that path and verifies the permanent Matrix root route remains. Per-device results and aggregate counts are saved. Existing Synapse identity is preserved, and managed Hermes profiles migrate to the shared gateway without changing user-owned standalone settings. Installer-options schema 24 remains compatible with interim state; obsolete relay-limit data is ignored and not rewritten.
+> **v14.6.3:** Installer validation checks Windows Tailscale prerequisites, the local relay, Serve listener, and Matrix client API without requiring a second-device page challenge. Any permitted tailnet device can use the configured service URL after installation. Exact matching Serve routes are adopted without restarting them. Existing Synapse identity is preserved, and managed Hermes profiles migrate to the shared gateway without changing user-owned standalone settings. Mutating existing-stack runs show progress during the pre-install managed-stack backup and let you skip it for that run. Ubuntu package-index refresh shows elapsed progress and can be skipped for a run when a refresh is planned. Healthy repairs skip unnecessary pre-maintenance cache and stale-staging cleanup; low-space repairs retain the cleanup path. Installer-options schema 24 remains compatible with interim state; obsolete relay-limit data is ignored and not rewritten.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-## v14.6.3 repeatable remote-device validation and inherited update/repair continuity
+## v14.6.3 installer progress, run-level skips, and remote Matrix continuity
 
+- Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) ask whether to skip the full managed-stack safety backup for the current run; the default path creates and verifies that backup before installer-managed files are replaced. Progress reports database-dump and archive activity.
+- When Ubuntu APT metadata refresh is due or cannot be ruled out, the installer offers a one-run skip choice. It omits that question when no package-index refresh is planned, and targeted package installs remain separately reported.
+- Routine repair with at least 2 GiB free on the WSL root skips disposable-cache purging and stale temporary-directory scans. Low-space or unknown-space repair retains the bounded pre-maintenance cleanup and reports its progress.
+- Option 7 streams its selected cleanup scopes and progress, and explains that it reclaims Ubuntu/Docker space without compacting the Windows-side WSL VHDX.
 - Option 6 forces the newest supported stable upstream software now; due/revision-triggered Option 1 refresh uses the same resolver.
 - Application channels float to stable upstream (`latest`/stable package channel), while database majors and PyTorch/DirectML remain compatibility-bounded and explicit user overrides are preserved.
 - Exact resolved image IDs/digests, Honcho tag/commit, channels, and DirectML requirements hash are recorded in `data/latticevale/managed-upstreams.json`.
@@ -772,7 +776,7 @@ Identity-changing Matrix recovery is intentionally narrow and uses preservation/
 
 Controlled, on-demand **latest-supported** updater.
 
-Before refresh, the bundle-owned pre-update safety backup must succeed. It runs independently of the installed `manage.sh`, validates database dumps/archive output, restores previously-running containers, and fails closed before software mutation when the backup is not trustworthy.
+Before a forced refresh, the installer asks whether to skip the bundle-owned pre-update safety backup for this run. The normal path creates the backup; skipping proceeds without a fresh rollback copy. The helper runs independently of the installed `manage.sh`, reports database-dump/archive progress, validates output, and restores previously-running containers. Installer runs also ask whether to skip `apt-get update` when package-index refresh is applicable; targeted package installs remain required and may fail if cached indexes are stale.
 
 The refresh then resolves installer-owned software from official stable upstream channels, reconciles/pulls/builds those artifacts, records exact resolved identities, and continues through the normal repair/verifier sequence. Explicit user overrides are preserved.
 
@@ -790,6 +794,8 @@ Persistent Matrix/Synapse/Honcho data, Matrix E2EE state, Hermes profiles/memory
 ## 5.7 Cleanup / reclaim disk space
 
 Install-preserving, user-selected storage maintenance for a recognized managed stack. Cleanup is intentionally **not** part of automatic Resume / repair and exits immediately after the selected cleanup work.
+
+Before category selection, the installer explains that cleanup reclaims selected space inside Ubuntu/Docker. It streams progress and helper output while work runs. Ubuntu may report more free space afterward and TRIM may make released blocks visible to the virtual-disk layer; Option 7 does not compact the WSL VHDX or promise more free space on the Windows drive.
 
 The user may choose one, several, or **ALL** of these bounded categories before a final confirmation:
 

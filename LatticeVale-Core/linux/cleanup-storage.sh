@@ -106,14 +106,17 @@ show_state() {
 }
 
 echo '=== LatticeVale cleanup / reclaim disk space ==='
+printf 'LV_PROGRESS|3|Managed stack validated; gathering cleanup state\n'
 echo "Stack: $STACK"
 echo "Selected scopes: ${REQUESTED[*]}"
 echo 'Safety boundary: persistent data, Docker volumes/containers/networks/tagged images, configured models, and user backups are not cleanup targets.'
 echo
 echo '--- BEFORE ---'
 show_state
+printf 'LV_PROGRESS|10|Managed stack validated; starting selected cleanup scopes\n'
 
 if [[ -n "${WANT[preupdate-backups]:-}" ]]; then
+  printf 'LV_PROGRESS|18|Checking verified pre-update backups\n'
   echo
   echo '--- LatticeVale Option 6 pre-update safety backups ---'
   removed=0
@@ -133,6 +136,7 @@ if [[ -n "${WANT[preupdate-backups]:-}" ]]; then
 fi
 
 if [[ -n "${WANT[staging]:-}" ]]; then
+  printf 'LV_PROGRESS|32|Checking stale installer staging residue\n'
   echo
   echo '--- Disposable LatticeVale staging residue ---'
   removed=0
@@ -160,6 +164,7 @@ if [[ -n "${WANT[staging]:-}" ]]; then
 fi
 
 if [[ -n "${WANT[apt-cache]:-}" ]]; then
+  printf 'LV_PROGRESS|48|Clearing downloaded APT package archives\n'
   echo
   echo '--- APT downloaded-package cache ---'
   before="$(path_bytes /var/cache/apt/archives)"
@@ -173,6 +178,7 @@ if [[ -n "${WANT[apt-cache]:-}" ]]; then
 fi
 
 if [[ -n "${WANT[docker-dangling]:-}" ]]; then
+  printf 'LV_PROGRESS|62|Checking dangling Docker images\n'
   echo
   echo '--- Docker dangling images only ---'
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -185,6 +191,7 @@ if [[ -n "${WANT[docker-dangling]:-}" ]]; then
 fi
 
 if [[ -n "${WANT[docker-build-cache]:-}" ]]; then
+  printf 'LV_PROGRESS|76|Checking dangling default-builder cache\n'
   echo
   echo '--- Docker dangling build cache only ---'
   if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
@@ -198,6 +205,7 @@ if [[ -n "${WANT[docker-build-cache]:-}" ]]; then
 fi
 
 if [[ -n "${WANT[trim-root]:-}" ]]; then
+  printf 'LV_PROGRESS|90|Requesting WSL root filesystem TRIM\n'
   echo
   echo '--- WSL root filesystem TRIM ---'
   if command -v fstrim >/dev/null 2>&1; then
@@ -212,6 +220,7 @@ fi
 echo
 echo '--- AFTER ---'
 show_state
+printf 'LV_PROGRESS|100|Selected cleanup scopes completed\n'
 cat <<'EOF_NOTE'
 
 Cleanup completed without deleting LatticeVale runtime containers, Docker volumes or networks,

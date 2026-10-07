@@ -3,12 +3,12 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ## Windows Tailscale remote-access diagnostics
 
-A Tailscale-enabled install/repair writes a focused log at `%LOCALAPPDATA%\LatticeVale\logs\remote-access-YYYYMMDD-HHMMSS.log` when possible. It records prerequisite, preference, DNS, Serve/listener, Matrix client-path, remote-device challenge, cleanup, and final-state diagnostics without treating a host-local request as remote proof.
+A Tailscale-enabled install/repair writes a focused log at `%LOCALAPPDATA%\LatticeVale\logs\remote-access-YYYYMMDD-HHMMSS.log` when possible. It records prerequisite, preference, DNS, Serve/listener, Matrix client-path, mapping adoption/replacement, cleanup, and final-state diagnostics. It does not claim that a particular remote device was tested during installation.
 
 Installer-owned `.tailscale-info` also records `TAILSCALE_IPV4`, `WINDOWS_DNS_STATUS`, and `REMOTE_VALIDATION_STATUS`. These are diagnostic history only; a saved `REMOTE_VALIDATION_STATUS=PASS` is never reused to claim a new run passed.
 

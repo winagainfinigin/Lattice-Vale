@@ -29,12 +29,17 @@ assert '#Requires -RunAsAdministrator' not in relay
 assert 'Do not rewrite the relay config here.' in ps
 assert 'Test-HttpsEndpoint' in ps and '$request.Proxy = $null' in ps
 
-# Current v14.6.1 deterministically rebuilds exact installer-owned Serve mappings instead of
-# treating a host-local compatible mapping as proof that remote access is healthy.
-if version in {'14.6.1','14.6.2','14.6.3'}:
+# v14.6.1 and v14.6.2 deterministically rebuilt exact installer-owned Serve mappings.
+# v14.6.3 retains local route verification, adopts exact matches, and removes the peer-page gate.
+if version in {'14.6.1','14.6.2'}:
     assert 'Rebuilt installer-owned Tailscale Dashboard Serve mapping' in ps
     assert 'Rebuilt installer-owned Tailscale Matrix Serve mapping' in ps
-    assert 'Invoke-TailscaleRemotePeerValidation' in ps
+    assert 'Test-MatrixTailscaleClientPathViaIpv4' in ps
+elif version == '14.6.3':
+    assert 'Keeping the existing installer-owned Matrix Serve mapping' in ps
+    assert 'adopting it without changing or restarting Tailscale Serve' in ps
+    assert 'Invoke-TailscaleRemotePeerValidation' not in ps
+    assert 'Test-MatrixTailscaleClientPathViaIpv4' in ps
 else:
     assert 'Adopted existing compatible Tailscale Dashboard Serve mapping' in ps
     assert 'Adopted existing compatible Tailscale Matrix Serve mapping' in ps

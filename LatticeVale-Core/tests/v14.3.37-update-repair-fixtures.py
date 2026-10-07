@@ -15,10 +15,10 @@ assert "schema = $compat.InstallOptionsSchema" in PS
 assert "forceManagedUpdate = $forceManagedUpdate" in PS
 assert "@('resume','change','reconfigure','advanced','update')" in PS
 assert "@('resume','change','reconfigure','advanced','update')) -and $null -ne $existingOptions" in PS
-assert "Creating pre-update managed-stack safety backup" in PS
+assert "Creating pre-install managed-stack safety backup" in PS
 assert "pre-update-safety-backup.sh" in PS
 assert "./manage.sh backup" not in PS[PS.index("if ($forceManagedUpdate) {"):PS.index("if ($repairMaintenance) {")]
-assert "managed repair/update stopped before software refresh because the bundle-owned safety backup failed" in PS
+assert "installer stopped before replacing managed files because the bundle-owned safety backup failed" in PS
 assert "$forceManagedUpdateArg" in PS and "$bundleVersion, $forceManagedUpdateArg" in PS
 
 assert 'force_managed_update="${4:-false}"' in BOOT

@@ -12,12 +12,51 @@ options_b64="${2:-}"
 installer_version="${3:-v13}"
 force_managed_update="${4:-false}"
 windows_hardware_b64="${5:-}"
+skip_ubuntu_apt_refresh="${6:-false}"
 [[ "$force_managed_update" == true || "$force_managed_update" == false ]] || { echo 'Invalid force-managed-update control flag.' >&2; exit 2; }
+[[ "$skip_ubuntu_apt_refresh" == true || "$skip_ubuntu_apt_refresh" == false ]] || { echo 'Invalid skip-Ubuntu-APT-refresh control flag.' >&2; exit 2; }
 if [[ -z "$linux_user" ]] || ! id "$linux_user" >/dev/null 2>&1; then
   echo 'Usage: bootstrap.sh EXISTING_LINUX_USER OPTIONS_BASE64' >&2; exit 2
 fi
 if [[ -z "$options_b64" ]]; then echo 'Installer options were not supplied.' >&2; exit 2; fi
 [[ "$installer_version" =~ ^[A-Za-z0-9._-]{1,64}$ ]] || { echo 'Installer version identifier is invalid.' >&2; exit 2; }
+
+run_apt_update_with_progress() {
+  local label="$1"; shift
+  if [[ "$skip_ubuntu_apt_refresh" == true ]]; then
+    echo "APT package-index refresh skipped for this run: $label"
+    return 0
+  fi
+  echo "Refreshing Ubuntu package indexes: $label"
+  local started=$SECONDS pid rc=0 elapsed filled bar log
+  log="$(mktemp /tmp/latticevale-apt-update.XXXXXX)"
+  apt-get "$@" update >"$log" 2>&1 &
+  pid=$!
+  while kill -0 "$pid" 2>/dev/null; do
+    elapsed=$((SECONDS - started))
+    filled=$((elapsed % 11))
+    printf -v bar '%*s' "$filled" ''
+    bar="${bar// /#}"
+    printf '\rAPT index refresh [%-10s] %ss elapsed (%s; activity indicator)' "$bar" "$elapsed" "$label"
+    sleep 1
+  done
+  wait "$pid" || rc=$?
+  printf '\rAPT index refresh [==========] complete (%s; %ss elapsed)\n' "$label" "$((SECONDS - started))"
+  cat "$log"
+  rm -f -- "$log"
+  if (( rc != 0 )); then return "$rc"; fi
+}
+
+lv_apt_install() {
+  local rc=0
+  apt-get --show-progress "$@" || rc=$?
+  if (( rc != 0 )); then
+    if [[ "$skip_ubuntu_apt_refresh" == true ]]; then
+      echo 'A targeted package install failed with the per-run APT refresh skip enabled. Rerun the installer and allow APT package-index refresh.' >&2
+    fi
+    return "$rc"
+  fi
+}
 
 bundle_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 user_home="$(getent passwd "$linux_user" | cut -d: -f6)"
@@ -62,12 +101,33 @@ if [[ -L "$stack_dir" ]]; then
 fi
 
 # An existing managed stack can reach this bootstrap with very little logical WSL free
-# space. Reclaim only root-owned disposable package/staging residue BEFORE creating the
-# pre-repair configuration snapshot. This deliberately never touches application data.
+# space. Reclaim disposable package/staging residue only when the WSL root is below the
+# repair safety floor or its free space cannot be measured. On healthy filesystems, avoid
+# running apt-get clean and walking/removing stale trees on every ordinary repair.
 if [[ -f "$stack_dir/install-options.json" || -f "$stack_dir/.installer-state.json" || -s "$stack_dir/.install-info" || -f "$stack_dir/.configured" ]]; then
-  echo 'Repair pre-maintenance: clearing disposable APT cache and stale LatticeVale staging directories.'
-  apt-get clean >/dev/null 2>&1 || true
-  find /tmp -mindepth 1 -maxdepth 1 -type d \( -name 'latticevale-installer-*' -o -name 'latticevale-audit-*' -o -name 'hermes-installer-*' -o -name 'hermes-audit-*' \) -mmin +60 -exec rm -rf -- {} + 2>/dev/null || true
+  root_free_kib="$(df -Pk / 2>/dev/null | awk 'NR==2 {print $4; exit}' || true)"
+  if [[ "$root_free_kib" =~ ^[0-9]+$ ]] && (( root_free_kib >= 2097152 )); then
+    printf 'Repair pre-maintenance: WSL root has %.1f GiB free; skipped disposable-cache purge and stale staging scan.\n' "$(awk -v kib="$root_free_kib" 'BEGIN {printf "%.1f", kib/1048576}')"
+  else
+    echo 'Repair pre-maintenance: WSL root is below 2 GiB free or its free space is unknown; clearing disposable APT cache and stale LatticeVale staging directories.'
+    maintenance_started=$SECONDS
+    if timeout --foreground --kill-after=2s 45s apt-get clean; then
+      echo "Repair pre-maintenance: APT cache cleanup finished in $((SECONDS - maintenance_started))s."
+    else
+      echo 'Repair pre-maintenance: APT cache cleanup did not finish within 45s; continuing because it is best-effort and application data is untouched.' >&2
+    fi
+    stale_staging_dirs=()
+    while IFS= read -r -d '' staging_dir; do stale_staging_dirs+=("$staging_dir"); done < <(find /tmp -mindepth 1 -maxdepth 1 -type d \( -name 'latticevale-installer-*' -o -name 'latticevale-audit-*' -o -name 'hermes-installer-*' -o -name 'hermes-audit-*' \) -mmin +60 -print0 2>/dev/null || true)
+    if ((${#stale_staging_dirs[@]})); then
+      for staging_dir in "${stale_staging_dirs[@]}"; do
+        echo "Repair pre-maintenance: removing stale temporary staging directory $staging_dir."
+        rm -rf -- "$staging_dir" || echo "Repair pre-maintenance warning: could not remove $staging_dir." >&2
+      done
+    else
+      echo 'Repair pre-maintenance: no stale temporary staging directories found.'
+    fi
+    echo "Repair pre-maintenance finished in $((SECONDS - maintenance_started))s."
+  fi
 fi
 
 # Preserve installer-owned configuration before a rerun upgrades/replaces scripts. This is
@@ -183,16 +243,16 @@ if [[ "$repair_root_refresh_needed" == true ]]; then
   else
     echo 'Managed repair refresh: refreshing APT metadata and upgrading/installing only LatticeVale prerequisite packages; unrelated Ubuntu packages are not broadly upgraded.'
   fi
-  apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
-  apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${prereq_packages[@]}"
+  run_apt_update_with_progress 'LatticeVale prerequisites' -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
+  lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${prereq_packages[@]}"
 elif [[ "$repair_run" == true && ${#missing_prereqs[@]} -eq 0 ]]; then
   echo 'Repair prerequisite check: required Ubuntu packages are already installed and the periodic managed-package refresh is not due.'
 else
-  apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+  run_apt_update_with_progress 'LatticeVale prerequisites' -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
   if [[ "$repair_run" == true ]]; then
-    apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${missing_prereqs[@]}"
+    lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${missing_prereqs[@]}"
   else
-    apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${prereq_packages[@]}"
+    lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${prereq_packages[@]}"
   fi
 fi
 python3 -m json.tool "$tmp_options" >/dev/null
@@ -252,7 +312,7 @@ if [[ "$local_ai_requested" == true && "$local_text_backend" == directml ]]; the
   done
   if ((${#missing_directml_packages[@]})); then
     echo "Installing missing DirectML WSL prerequisites: ${missing_directml_packages[*]}"
-    DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${missing_directml_packages[@]}"
+    DEBIAN_FRONTEND=noninteractive lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${missing_directml_packages[@]}"
   else
     echo 'DirectML WSL prerequisite packages are already installed; reusing them.'
   fi
@@ -321,31 +381,49 @@ Architectures: $arch
 Signed-By: /etc/apt/keyrings/docker.asc
 EOF
   rm -f /etc/apt/sources.list.d/docker.list /etc/apt/keyrings/docker.gpg
-  apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update
+  run_apt_update_with_progress 'Docker Engine packages' -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
   if [[ "$repair_root_refresh_needed" == true ]]; then
     echo "Aged managed repair: upgrading/installing the complete official Docker Engine/CLI/containerd/Buildx/Compose package set from Docker's configured stable Ubuntu repository."
-    apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "${docker_required_packages[@]}"
+    lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "${docker_required_packages[@]}"
   elif [[ "$repair_run" == true ]]; then
     echo "Repair Docker package check: installing only missing official Docker packages: ${missing_docker_packages[*]}"
-    apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "${missing_docker_packages[@]}"
+    lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "${missing_docker_packages[@]}"
   else
-    apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "${docker_required_packages[@]}"
+    lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y "${docker_required_packages[@]}"
   fi
 fi
 usermod -aG docker "$linux_user"
 
+docker_info_ready() {
+  timeout --foreground --kill-after=1s 2s docker info >/dev/null 2>&1
+}
+
+wait_for_docker() {
+  local wait_seconds="$1" started=$SECONDS elapsed last_notice=0
+  while (( SECONDS - started < wait_seconds )); do
+    if docker_info_ready; then return 0; fi
+    elapsed=$((SECONDS - started))
+    if (( elapsed >= last_notice + 5 )); then
+      echo "Waiting for Docker daemon readiness (${elapsed}/${wait_seconds}s)..."
+      last_notice="$elapsed"
+    fi
+    sleep 0.25
+  done
+  return 1
+}
+
 start_docker_daemon() {
-  if timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1; then return 0; fi
+  if docker_info_ready; then return 0; fi
   if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
     systemctl enable docker.service containerd.service >/dev/null 2>&1 || true
-    timeout --foreground --kill-after=10s 90s systemctl start docker.service
+    timeout --foreground --kill-after=10s 90s systemctl start docker.service || true
   elif command -v service >/dev/null 2>&1; then
     timeout --foreground --kill-after=10s 90s service docker start >/dev/null 2>&1 || true
   fi
-  for _ in {1..30}; do timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1 && return 0; sleep 1; done
+  if wait_for_docker 30; then return 0; fi
   # Last-resort compatibility path for older inbox WSL2 builds without systemd/init startup.
   nohup dockerd >/var/log/hermes-dockerd.log 2>&1 </dev/null &
-  for _ in {1..30}; do timeout --foreground --kill-after=5s 15s docker info >/dev/null 2>&1 && return 0; sleep 1; done
+  if wait_for_docker 30; then return 0; fi
   echo 'Docker daemon did not start. See /var/log/hermes-dockerd.log if present.' >&2
   return 1
 }
@@ -435,7 +513,7 @@ install_nvidia_container_toolkit_if_needed() {
     install -m 0644 "$key_tmp" "$key_path" || { rm -f "$key_tmp" "$list_tmp"; return 1; }
     install -m 0644 "$list_tmp" "$source_path" || { rm -f "$key_tmp" "$list_tmp"; return 1; }
     rm -f "$key_tmp" "$list_tmp"
-    if ! apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 update; then
+    if ! run_apt_update_with_progress 'NVIDIA Container Toolkit packages' -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30; then
       if [[ -n "$source_backup" && -f "$source_backup" ]]; then cp -a "$source_backup" "$source_path" || true; else rm -f "$source_path"; fi
       if [[ -n "$key_backup" && -f "$key_backup" ]]; then cp -a "$key_backup" "$key_path" || true; else rm -f "$key_path"; fi
       return 1
@@ -443,7 +521,7 @@ install_nvidia_container_toolkit_if_needed() {
     # Follow NVIDIA's official stable repository to the newest available toolkit
     # package set. LatticeVale does not request package downgrades; a locally newer package is
     # never intentionally forced backward by LatticeVale.
-    if ! apt-get -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
+    if ! lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends \
       "${nvidia_toolkit_packages[@]}"; then
       if [[ -n "$source_backup" && -f "$source_backup" ]]; then cp -a "$source_backup" "$source_path" || true; else rm -f "$source_path"; fi
       if [[ -n "$key_backup" && -f "$key_backup" ]]; then cp -a "$key_backup" "$key_path" || true; else rm -f "$key_path"; fi

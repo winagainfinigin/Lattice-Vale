@@ -3,14 +3,14 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh immediately after the verified safety backup. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.3 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
-## Inherited v14.6.1 Tailscale remote-access completion
+## Historical v14.6.1 Tailscale remote-access behavior
 
-When Windows Tailscale remote access is selected, installation is not considered fully healthy merely because the same PC can open its own `.ts.net` URL. The installer verifies the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and the selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
+Earlier releases required a second-device proof even after local service checks passed. Current v14.6.3 test builds remove that page challenge. They verify the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
 
-For a `PASS`, complete the temporary second-device challenge when prompted. Open the one-time private HTTPS URL from another Tailscale device, preferably the phone on cellular, and type the displayed `LV-...` token back into the installer. Skipping this check leaves remote access `PARTIAL`; a diagnosed remote failure is `FAIL`.
+No second-device challenge is requested during v14.6.3 installation. Local route checks establish installer status; permitted remote devices use the displayed service URL after installation.
 
 The installer does not rewrite tailnet-wide Admin Console DNS policy. If another device reports DNS unavailable, repair the tailnet/client DNS configuration and rerun Resume / repair.
 

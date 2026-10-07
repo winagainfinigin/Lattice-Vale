@@ -3628,12 +3628,127 @@ function ConvertTo-WindowsProcessArgument([string]$Argument) {
     return $builder.ToString()
 }
 
+function Invoke-NativeProcessCaptureLive(
+    [string]$FilePath,
+    [string[]]$Arguments,
+    [int]$TimeoutSeconds = 15,
+    [string]$StandardInputPath = '',
+    [string]$ProgressActivity = 'LatticeVale maintenance'
+) {
+    $process = $null
+    $inputStream = $null
+    $stdoutLines = [System.Collections.Generic.List[string]]::new()
+    $stderrLines = [System.Collections.Generic.List[string]]::new()
+    $timedOut = $false
+    $progressId = 42
+    $savedProgressPreference = $ProgressPreference
+    $ProgressPreference = 'Continue'
+    try {
+        $argumentLine = (($Arguments | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }) -join ' ')
+        if (-not [string]::IsNullOrWhiteSpace($StandardInputPath) -and -not (Test-Path -LiteralPath $StandardInputPath -PathType Leaf)) {
+            throw "Standard-input file does not exist: $StandardInputPath"
+        }
+
+        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
+        $startInfo.FileName = $FilePath
+        $startInfo.Arguments = $argumentLine
+        $startInfo.UseShellExecute = $false
+        $startInfo.CreateNoWindow = $true
+        $startInfo.RedirectStandardOutput = $true
+        $startInfo.RedirectStandardError = $true
+        $startInfo.RedirectStandardInput = (-not [string]::IsNullOrWhiteSpace($StandardInputPath))
+
+        $process = New-Object System.Diagnostics.Process
+        $process.StartInfo = $startInfo
+        if (-not $process.Start()) { throw "Could not start native process: $FilePath" }
+        $stdoutTask = $process.StandardOutput.ReadLineAsync()
+        $stderrTask = $process.StandardError.ReadLineAsync()
+        if (-not [string]::IsNullOrWhiteSpace($StandardInputPath)) {
+            $inputStream = [System.IO.File]::OpenRead($StandardInputPath)
+            $inputStream.CopyTo($process.StandardInput.BaseStream)
+            $process.StandardInput.BaseStream.Flush()
+            $process.StandardInput.Close()
+            $inputStream.Dispose()
+            $inputStream = $null
+        }
+
+        $started = [DateTime]::UtcNow
+        $stdoutDone = $false
+        $stderrDone = $false
+        $lastStatus = 'Starting'
+        while (-not $process.HasExited -or -not $stdoutDone -or -not $stderrDone) {
+            if (-not $process.HasExited -and $TimeoutSeconds -gt 0 -and ([DateTime]::UtcNow - $started).TotalSeconds -ge $TimeoutSeconds) {
+                $timedOut = $true
+                try { $process.Kill() } catch { }
+                try { $process.WaitForExit(2000) | Out-Null } catch { }
+            }
+
+            $readLine = $false
+            if (-not $stdoutDone -and $stdoutTask.IsCompleted) {
+                $line = $stdoutTask.Result
+                if ($null -eq $line) { $stdoutDone = $true }
+                else {
+                    $stdoutLines.Add([string]$line)
+                    if ($line -match '^LV_PROGRESS\|([0-9]{1,3})\|(.+)$') {
+                        $percent = [math]::Min(100, [math]::Max(0, [int]$Matches[1]))
+                        $lastStatus = [string]$Matches[2]
+                        Write-Progress -Id $progressId -Activity $ProgressActivity -Status $lastStatus -PercentComplete $percent
+                    } else { Write-Host $line }
+                    $stdoutTask = $process.StandardOutput.ReadLineAsync()
+                    $readLine = $true
+                }
+            }
+            if (-not $stderrDone -and $stderrTask.IsCompleted) {
+                $line = $stderrTask.Result
+                if ($null -eq $line) { $stderrDone = $true }
+                else {
+                    $stderrLines.Add([string]$line)
+                    if ($line -match '^LV_PROGRESS\|([0-9]{1,3})\|(.+)$') {
+                        $percent = [math]::Min(100, [math]::Max(0, [int]$Matches[1]))
+                        $lastStatus = [string]$Matches[2]
+                        Write-Progress -Id $progressId -Activity $ProgressActivity -Status $lastStatus -PercentComplete $percent
+                    } else { Write-Host $line -ForegroundColor Yellow }
+                    $stderrTask = $process.StandardError.ReadLineAsync()
+                    $readLine = $true
+                }
+            }
+            if (-not $readLine -and (-not $stdoutDone -or -not $stderrDone)) {
+                [void]$process.WaitForExit(100)
+            }
+        }
+
+        $stdout = ConvertFrom-WslCliOutput @($stdoutLines.ToArray())
+        $stderr = ConvertFrom-WslCliOutput @($stderrLines.ToArray())
+        $allLines = [System.Collections.Generic.List[string]]::new()
+        $allLines.AddRange($stdoutLines)
+        $allLines.AddRange($stderrLines)
+        $text = ConvertFrom-WslCliOutput @($allLines.ToArray())
+        if ($timedOut) {
+            return [pscustomobject]@{ Success = $false; ExitCode = -1; TimedOut = $true; Text = $text; StdOut = $stdout; StdErr = $stderr; Arguments = $Arguments }
+        }
+        $process.WaitForExit()
+        $exitCode = [int]$process.ExitCode
+        return [pscustomobject]@{ Success = ($exitCode -eq 0); ExitCode = $exitCode; TimedOut = $false; Text = $text; StdOut = $stdout; StdErr = $stderr; Arguments = $Arguments }
+    } catch {
+        return [pscustomobject]@{ Success = $false; ExitCode = -1; TimedOut = $false; Text = $_.Exception.Message; StdOut = ''; StdErr = $_.Exception.Message; Arguments = $Arguments }
+    } finally {
+        Write-Progress -Id $progressId -Activity $ProgressActivity -Completed
+        $ProgressPreference = $savedProgressPreference
+        if ($inputStream) { try { $inputStream.Dispose() } catch { } }
+        if ($process) { try { $process.Dispose() } catch { } }
+    }
+}
+
 function Invoke-NativeProcessCapture(
     [string]$FilePath,
     [string[]]$Arguments,
     [int]$TimeoutSeconds = 15,
-    [string]$StandardInputPath = ''
+    [string]$StandardInputPath = '',
+    [string]$ProgressActivity = ''
 ) {
+    if (-not [string]::IsNullOrWhiteSpace($ProgressActivity)) {
+        return Invoke-NativeProcessCaptureLive $FilePath $Arguments $TimeoutSeconds $StandardInputPath $ProgressActivity
+    }
     $process = $null
     $inputStream = $null
     try {
@@ -3799,6 +3914,7 @@ function Invoke-LatticeValeCleanupMaintenance(
     if ($beforeVhdBytes -ge 0) {
         Write-Info "WSL VHDX physical file before cleanup: $([math]::Round($beforeVhdBytes / 1GB,2)) GB ($($vhdCandidates[0].FullName))."
     }
+    Write-Info 'Option 7 reclaims selected space inside Ubuntu. It does not compact the WSL VHDX, so Windows drive free space may not increase.'
     Write-Info 'Option 7 never stops/removes LatticeVale containers, removes Docker volumes/networks/tagged images, deletes configured models/application data, or modifies/moves/resizes the WSL VHDX.'
 
     $scopeCsv = ($Scopes -join ',')
@@ -3806,9 +3922,9 @@ function Invoke-LatticeValeCleanupMaintenance(
     # Stream the bundle-owned helper over stdin instead of copying it into the nearly-full
     # distro. This lets Cleanup remain reachable specifically when host-backed VHDX space is
     # critically constrained and avoids creating installer staging before reclamation.
-    $probe = Invoke-NativeProcessCapture 'wsl.exe' $wslArgs 1800 $cleanupScript
-    if ($probe.StdOut) { Write-Host $probe.StdOut }
-    if ($probe.StdErr) { Write-Host $probe.StdErr -ForegroundColor Yellow }
+    # Stream the helper output while it works. The capture-only path buffered up to 30
+    # minutes of output, making Option 7 appear idle even when cleanup was still running.
+    $probe = Invoke-NativeProcessCapture 'wsl.exe' $wslArgs 1800 $cleanupScript 'LatticeVale cleanup / reclaim disk space'
     if (-not $probe.Success) {
         $detail = Get-SafeDiagnosticExcerpt $probe.Text 900
         if (-not $detail) { $detail = "wsl.exe exit code $($probe.ExitCode)" }
@@ -3870,7 +3986,8 @@ function Invoke-WslDirectCapture(
     [string]$User,
     [string]$Command,
     [string[]]$CommandArguments = @(),
-    [int]$TimeoutSeconds = 0
+    [int]$TimeoutSeconds = 0,
+    [string]$ProgressActivity = ''
 ) {
     if ($TimeoutSeconds -le 0) { $TimeoutSeconds = [int](Get-LatticeValeCompatibility).WslProbeTimeoutSeconds }
     # Direct command execution avoids shell quoting/expansion during prerequisite probes.
@@ -3880,7 +3997,7 @@ function Invoke-WslDirectCapture(
     $prefix = @('-d', $Name)
     if (-not [string]::IsNullOrWhiteSpace($User)) { $prefix += @('-u', $User) }
     $standardArgs = [string[]]($prefix + @('--', $Command) + $CommandArguments)
-    $attempt = Invoke-NativeProcessCapture 'wsl.exe' $standardArgs $TimeoutSeconds
+    $attempt = Invoke-NativeProcessCapture 'wsl.exe' $standardArgs $TimeoutSeconds '' $ProgressActivity
     if ($attempt.Success) {
         # Machine-readable WSL probes must consume stdout only. WSL itself can emit
         # startup diagnostics (for example an /etc/fstab mount warning) on stderr
@@ -3896,7 +4013,7 @@ function Invoke-WslDirectCapture(
     }
 
     $legacyArgs = [string[]]($prefix + @($Command) + $CommandArguments)
-    $legacy = Invoke-NativeProcessCapture 'wsl.exe' $legacyArgs $TimeoutSeconds
+    $legacy = Invoke-NativeProcessCapture 'wsl.exe' $legacyArgs $TimeoutSeconds '' $ProgressActivity
     if ($legacy.Success) {
         return [pscustomobject]@{ Success = $true; ExitCode = 0; TimedOut = $false; Text = $legacy.StdOut; StdOut = $legacy.StdOut; StdErr = $legacy.StdErr; Arguments = $legacyArgs }
     }
@@ -6364,18 +6481,11 @@ function Resolve-UnownedTailscaleServeConflict(
     [string]$Label,
     [object]$PortState
 ) {
-    if (-not $PortState -or -not $PortState.Known -or -not $PortState.InUse) { return 'none' }
-    $targets = if ($PortState.Targets.Count -gt 0) { $PortState.Targets -join ', ' } else { 'an unknown target' }
-    if ($PortState.MatchesExpected) {
-        if (-not (Read-Choice "Rebuild the existing matching Tailscale $Label rule on HTTPS port $HttpsPort?" "The existing untracked rule already targets http://127.0.0.1:$BackendPort. Yes removes only this listener and recreates it from current LatticeVale state so stale Serve state cannot be inherited." 'No preserves the existing untracked rule and marks this remote exposure partial.' $true)) {
-            return 'leave'
-        }
-        $serveOff = Invoke-NativeProcessPassthrough $TailscaleExe @('serve',"--https=$HttpsPort",'off') 30
-        if (-not $serveOff.Success) {
-            Write-Warning "Could not remove the matching untracked Tailscale rule on HTTPS port $HttpsPort."
-            return 'leave'
-        }
-        return 'replace'
+        if (-not $PortState -or -not $PortState.Known -or -not $PortState.InUse) { return 'none' }
+        $targets = if ($PortState.Targets.Count -gt 0) { $PortState.Targets -join ', ' } else { 'an unknown target' }
+        if ($PortState.MatchesExpected) {
+        Write-Info "The existing $Label Serve rule on HTTPS port $HttpsPort already targets the expected LatticeVale bridge; adopting it without changing or restarting Tailscale Serve."
+        return 'adopt'
     }
     if (-not (Read-Choice "Replace the existing untracked Tailscale rule on HTTPS port $HttpsPort for $Label?" "Current target(s): $targets. Yes removes ONLY this HTTPS Serve listener and replaces it with LatticeVale's http://127.0.0.1:$BackendPort bridge. Use this when migrating a manual/legacy rule." 'No leaves the existing rule untouched and skips this LatticeVale remote exposure.' $false)) {
         return 'leave'
@@ -6503,103 +6613,6 @@ function Test-MatrixTailscaleClientPathViaIpv4(
     return [pscustomobject]$result
 }
 
-function Get-AvailableTailscaleRemoteValidationPort([string]$TailscaleExe) {
-    foreach ($port in 45443..45543) {
-        $state = Get-WindowsTailscaleServePortState $TailscaleExe $port 0
-        if ($state.Known -and -not $state.InUse -and (Test-WindowsTcpPortAvailable $port)) { return $port }
-    }
-    return 0
-}
-
-function Invoke-TailscaleRemotePeerValidation(
-    [string]$TailscaleExe,
-    [string]$DnsName,
-    [string]$Ipv4,
-    [int]$HttpsPort,
-    [int]$BackendPort,
-    [string]$ServiceLabel = 'Matrix'
-) {
-    $result = [ordered]@{
-        Status='PARTIAL'; Category='NOT_RUN'; Detail='No remote devices were validated.'; Port=$HttpsPort
-        Attempted=0; Passed=0; Failed=0; Skipped=0; LastValidationUtc=''
-    }
-    $question = if ($ServiceLabel -eq 'Matrix') { 'Validate Matrix/Tailscale access from another device now?' } else { 'Validate Dashboard/Tailscale access from another device now?' }
-    if (-not (Read-Choice $question 'The other device must already be signed into the same permitted tailnet. LatticeVale adds a one-time challenge at a unique path on the configured HTTPS listener, then removes only that path. The permanent service route is checked after every attempt.' 'Remote access remains installed but is reported PARTIAL because only this PC was tested.' $true)) {
-        Write-RemoteAccessLog 'Remote-device validation skipped by user; status=PARTIAL/NOT_RUN.'
-        return [pscustomobject]$result
-    }
-    $permanentState = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
-    if (-not $permanentState.Known -or -not $permanentState.InUse -or -not $permanentState.MatchesExpected) {
-        $result.Status='FAIL'; $result.Category='SERVE'; $result.Detail="Permanent $ServiceLabel HTTPS mapping on port $HttpsPort could not be verified; remote validation was not started."
-        Write-RemoteAccessLog $result.Detail
-        return [pscustomobject]$result
-    }
-
-    $deviceNumber=0; $keepTesting=$true
-    while ($keepTesting) {
-        $deviceNumber++; $result.Attempted++; $result.LastValidationUtc=[DateTime]::UtcNow.ToString('o')
-        $attemptStatus='FAIL'; $attemptCategory='SERVE'; $attemptDetail='Remote-device validation did not complete.'
-        $token='LV-'+([Guid]::NewGuid().ToString('N').Substring(0,6).ToUpperInvariant())
-        $path='/.lv/'+[Guid]::NewGuid().ToString('N').Substring(0,10)
-        $serveStarted=$false
-        try {
-            $serve=Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg',"--https=$HttpsPort","--set-path=$path","text:$token") 30
-            if (-not $serve.Success) {
-                $attemptDetail='Temporary Tailscale Serve path could not be created: '+(Get-SafeDiagnosticExcerpt $serve.Text 420)
-            } else {
-                $serveStarted=$true
-                $local=Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort $path
-                if (-not $local.Success -or $local.Body.Trim() -ne $token) {
-                    $attemptDetail='Temporary validation path failed its local direct-IP HTTPS self-test.'
-                } else {
-                    $url=(Get-TailscaleHttpsUrl $DnsName $HttpsPort).TrimEnd('/')+$path
-                    Write-Host ''
-                    Write-Host "REAL REMOTE-DEVICE VALIDATION - DEVICE $deviceNumber" -ForegroundColor Cyan
-                    Write-Host 'On another device signed into the same permitted tailnet, open:' -ForegroundColor White
-                    Write-Host $url -ForegroundColor Green
-                    Write-Host 'Type the one-time LV code shown by the page.' -ForegroundColor White
-                    $entered=(Read-Host ("Code shown on device {0} (press Enter if the page would not open)" -f $deviceNumber)).Trim()
-                    if ($entered -ceq $token) {
-                        $attemptStatus='PASS'; $attemptCategory='REMOTE'; $attemptDetail=("Device {0} opened the temporary HTTPS challenge." -f $deviceNumber)
-                    } else {
-                        $choice=Read-Menu ("Device {0} validation result" -f $deviceNumber) @('DNS unavailable / hostname not found','Connection timed out / unreachable / refused','TLS or certificate error','Page opened but the validation code did not match','I did not complete this device test') 1
-                        switch ($choice) {
-                            1 { $attemptCategory='DNS'; $attemptDetail=("Device {0} reported DNS/name-resolution failure." -f $deviceNumber) }
-                            2 { $attemptCategory='TRANSPORT'; $attemptDetail=("Device {0} could not establish the remote connection." -f $deviceNumber) }
-                            3 { $attemptCategory='TLS'; $attemptDetail=("Device {0} reported a TLS/certificate failure." -f $deviceNumber) }
-                            4 { $attemptCategory='SERVE'; $attemptDetail=("Device {0} did not receive the current challenge token." -f $deviceNumber) }
-                            5 { $attemptStatus='PARTIAL'; $attemptCategory='SKIPPED'; $attemptDetail=("Device {0} validation was not completed." -f $deviceNumber) }
-                        }
-                    }
-                }
-            }
-        } finally {
-            if ($serveStarted) {
-                $cleanup=Invoke-NativeProcessCapture $TailscaleExe @('serve',"--https=$HttpsPort","--set-path=$path",'off') 30
-                if (-not $cleanup.Success) {
-                    $attemptStatus='FAIL'; $attemptCategory='SERVE'; $attemptDetail="Temporary validation path cleanup failed on HTTPS port $HttpsPort."
-                }
-                Write-RemoteAccessLog ("Temporary remote-validation Serve path {0} cleanup on HTTPS {1}: {2}." -f $path,$HttpsPort,$cleanup.Success)
-            }
-        }
-        $rootState=Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
-        if (-not $rootState.Known -or -not $rootState.InUse -or -not $rootState.MatchesExpected) {
-            $attemptStatus='FAIL'; $attemptCategory='SERVE'; $attemptDetail='Permanent Matrix HTTPS mapping did not verify after challenge cleanup.'
-        }
-        if ($attemptStatus -eq 'PASS') { $result.Passed++; Write-Host ("Device {0}: PASS" -f $deviceNumber) -ForegroundColor Green }
-        elseif ($attemptStatus -eq 'FAIL') { $result.Failed++; Write-Warning ("Device {0}: FAIL ({1}) - {2}" -f $deviceNumber,$attemptCategory,$attemptDetail) }
-        else { $result.Skipped++; Write-Warning ("Device {0}: PARTIAL/SKIPPED - {1}" -f $deviceNumber,$attemptDetail) }
-        Write-RemoteAccessLog ("Remote-device validation attempt {0}: {1}/{2}; {3}" -f $deviceNumber,$attemptStatus,$attemptCategory,$attemptDetail)
-        $keepTesting=Read-Choice 'Validate another Tailscale device?' 'Creates a fresh one-time token and URL path on the configured HTTPS listener.' 'Finish remote-device validation and continue installation.' $false
-    }
-    if ($result.Attempted -le 0) { $result.Status='PARTIAL'; $result.Category='NOT_RUN'; $result.Detail='No remote devices were validated.' }
-    elseif ($result.Passed -eq $result.Attempted) { $result.Status='PASS'; $result.Category='REMOTE'; $result.Detail="$($result.Passed) of $($result.Attempted) remote devices passed the HTTPS challenge." }
-    elseif ($result.Passed -gt 0) { $result.Status='PARTIAL'; $result.Category='MIXED'; $result.Detail="$($result.Passed) of $($result.Attempted) passed; failed=$($result.Failed), skipped=$($result.Skipped)." }
-    elseif ($result.Failed -eq $result.Attempted) { $result.Status='FAIL'; $result.Category='REMOTE'; $result.Detail="All $($result.Attempted) attempted remote devices failed validation." }
-    else { $result.Status='PARTIAL'; $result.Category='MIXED'; $result.Detail="No device passed; failed=$($result.Failed), skipped=$($result.Skipped)." }
-    Write-RemoteAccessLog ("Remote-device validation aggregate: status={0}; attempted={1}; passed={2}; failed={3}; skipped={4}; lastUtc={5}" -f $result.Status,$result.Attempted,$result.Passed,$result.Failed,$result.Skipped,$result.LastValidationUtc)
-    return [pscustomobject]$result
-}
 function Test-WingetPackageInstalled([string]$Id) {
     $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
     if (-not $winget) { return $null }
@@ -6994,13 +7007,14 @@ switch ($stackState) {
                 $installMode = 'update'
                 $forceManagedUpdate = $true
                 Write-Host "`nCONTROLLED UPDATE / REPAIR" -ForegroundColor Cyan
-                Write-Info 'This mode preserves saved component choices and persistent application data, creates a pre-update managed-stack backup, then resolves and forces the latest supported stable managed package/image/source refresh instead of waiting for the periodic refresh window.'
+                Write-Info 'This mode preserves saved component choices and persistent application data, asks whether to make the pre-install managed-stack backup for this run, then resolves and forces the latest supported stable managed package/image/source refresh instead of waiting for the periodic refresh window.'
                 Write-Info 'It resolves installer-owned application references from supported stable upstream channels at update time, keeps stateful database majors and the DirectML/PyTorch ABI inside LatticeVale compatibility bounds, preserves explicit user-owned image/source overrides, and does not update separately owned native Windows Ollama.'
             }
             7 {
                 $installMode = 'cleanup'
                 Write-Host "`nCLEANUP / RECLAIM DISK SPACE" -ForegroundColor Cyan
                 Write-Info 'Cleanup is an isolated maintenance mode. It exits after cleanup and does not continue into component reconciliation, provider setup, managed software refresh, or normal install stages.'
+                Write-Info 'Cleanup targets selected disposable space inside Ubuntu/Docker. It does not compact the WSL VHDX or promise more free space on the Windows drive.'
                 Write-Info 'Every offered category is bounded so selecting one or ALL cannot delete the live LatticeVale containers, Docker volumes/networks/tagged images, Hermes/Matrix/Honcho/QMD/Ollama persistent state, configured models, vault/workspace files, credentials, or user-created backups.'
                 $cleanupScopes = @()
                 $cleanupDone = $false
@@ -8379,6 +8393,77 @@ if (-not (Read-ChoiceExplicit 'Proceed with installation?' 'Confirms the selecte
     exit 0
 }
 
+$skipPreInstallBackup = $false
+if ($repairMaintenance) {
+    $skipPreInstallBackup = Read-ChoiceExplicit 'Skip the pre-install safety backup for this run?' 'A verified managed-stack backup is normally created before this repair/reconciliation changes installer-managed files. Choose YES only if you accept proceeding without a fresh rollback point. This choice applies to this run only.' 'The verified pre-install safety backup will run.' $false $false
+}
+$skipUbuntuAptRefresh = $false
+$aptRefreshNeeded = (-not $repairMaintenance) -or $forceManagedUpdate
+if ($repairMaintenance -and -not $forceManagedUpdate) {
+    $aptRefreshProbeScript = @'
+set -u
+stack="$1"
+local_ai="$2"
+accel="$3"
+directml="$4"
+need=false
+compat="$stack/compatibility.conf"
+if [[ ! -f "$compat" || -L "$compat" ]]; then
+  need=true
+else
+  # shellcheck disable=SC1090
+  . "$compat"
+  days="${MANAGED_REPAIR_REFRESH_DAYS:-30}"
+  revision="${MANAGED_REPAIR_REFRESH_REVISION:-1}"
+  pending="$stack/.repair-package-refresh-pending"
+  state="$stack/.repair-package-refresh"
+  if [[ -f "$pending" ]]; then
+    pending_revision="$(sed -n 's/^POLICY_REVISION=//p' "$pending" 2>/dev/null | head -n1 || true)"
+    [[ "$pending_revision" == "$revision" ]] || need=true
+  else
+    last_epoch="$(sed -n 's/^LAST_SUCCESS_EPOCH=//p' "$state" 2>/dev/null | head -n1 || true)"
+    last_revision="$(sed -n 's/^POLICY_REVISION=//p' "$state" 2>/dev/null | head -n1 || true)"
+    if [[ ! "$days" =~ ^[0-9]+$ || ! "$revision" =~ ^[0-9]+$ || ! "$last_epoch" =~ ^[0-9]+$ || "$last_revision" != "$revision" ]] || (( $(date +%s) - last_epoch >= days * 86400 )); then
+      need=true
+    fi
+  fi
+fi
+installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -qx 'install ok installed'; }
+for pkg in ca-certificates curl git gnupg jq openssl procps python3 python3-yaml sudo tzdata uidmap docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin; do
+  installed "$pkg" || need=true
+done
+if [[ "$local_ai" == true ]] && { [[ "$accel" == nvidia ]] || { [[ "$accel" == auto ]] && { command -v nvidia-smi >/dev/null 2>&1 || [[ -x /usr/lib/wsl/lib/nvidia-smi ]]; }; }; }; then
+  for pkg in nvidia-container-toolkit nvidia-container-toolkit-base libnvidia-container-tools libnvidia-container1; do
+    installed "$pkg" || need=true
+  done
+  command -v nvidia-ctk >/dev/null 2>&1 || need=true
+fi
+if [[ "$local_ai" == true && "$directml" == true ]]; then
+  for pkg in python3-venv libblas3 libomp5 liblapack3; do
+    installed "$pkg" || need=true
+  done
+fi
+printf '%s\n' "$need"
+'@
+    $localOllama = ($hermesLocalAI -or $honcho) -and $localTextBackend -eq 'ollama'
+    $localDirectML = ($hermesLocalAI -or $honcho) -and $localTextBackend -eq 'directml'
+    $accelProbe = if ($localOllama) { [string]$ollamaAcceleration } else { 'cpu' }
+    $aptProbe = Invoke-WslDirectCapture $DistroName 'root' 'bash' @('-lc',$aptRefreshProbeScript,'latticevale-apt-refresh-probe',$stackLinuxPath,([string]$localOllama).ToLowerInvariant(),$accelProbe,([string]$localDirectML).ToLowerInvariant()) 30
+    if ($aptProbe.Success -and $aptProbe.StdOut.Trim() -match '^(?i:true|false)$') {
+        $aptRefreshNeeded = ($aptProbe.StdOut.Trim() -ieq 'true')
+    } else {
+        # Fail closed: if the read-only preflight cannot prove no refresh is due, offer the choice.
+        $aptRefreshNeeded = $true
+        $aptProbeDetail = Get-SafeDiagnosticExcerpt $aptProbe.Text 400
+        if ($aptProbeDetail) { Write-Warning "Could not determine whether Ubuntu APT refresh is needed; keeping the per-run choice available. $aptProbeDetail" }
+    }
+}
+if ($aptRefreshNeeded) {
+    $skipUbuntuAptRefresh = Read-ChoiceExplicit 'Skip Ubuntu APT package-index refresh for this run?' 'YES skips only apt-get update/package-index downloads for this run. Required targeted package installs still run and may fail if their package indexes are stale. This choice is never saved.' 'Refresh package indexes before the selected package work.' $false $false
+} else {
+    Write-Info 'Ubuntu package-index refresh is not planned for this run; no APT refresh skip prompt is needed.'
+}
+
 
 # Do NOT restart WSL here. The Linux stack is configured/repaired first while the
 # distro is already known-responsive. If a global networking change is required,
@@ -8416,15 +8501,15 @@ if (-not $homeWritableProbe.Success) {
     throw "The selected Ubuntu user's home directory is not writable by '$linuxUser'. Repair that account/home ownership before running the installer."
 }
 
-if ($forceManagedUpdate) {
-    Write-Step $(if ($universalRepairMigration) { 'Creating cumulative managed-stack migration safety backup' } else { 'Creating pre-update managed-stack safety backup' })
-    $backupReason = if ($universalRepairMigration) { 'Cumulative managed-stack migration requires a verified rollback backup before installer-managed software is refreshed.' } else { 'Update / repair requires a verified rollback backup before installer-managed software is refreshed.' }
+if ($repairMaintenance -and -not $skipPreInstallBackup) {
+    Write-Step $(if ($universalRepairMigration) { 'Creating cumulative managed-stack migration safety backup' } else { 'Creating pre-install managed-stack safety backup' })
+    $backupReason = if ($universalRepairMigration) { 'Cumulative managed-stack migration requires a verified rollback backup before installer-managed files or software are changed.' } else { 'Existing-stack repair/reconciliation requires a verified rollback backup before installer-managed files or software are changed.' }
     Write-Info "$backupReason This bundle supplies its own backup helper so a broken/outdated installed manage.sh cannot block the repair that would replace it."
     Write-Info 'The helper runs as WSL root only for this backup operation so container-owned persistent files can be read safely, dumps running Synapse/Honcho PostgreSQL databases, briefly stops only currently-running LatticeVale containers for a consistent filesystem snapshot, archives persistent configuration/data (including local Ollama data when present), restores the previously-running containers, and returns backup ownership to the selected Linux user.'
 
     $backupSource = Join-Path $PSScriptRoot 'linux\pre-update-safety-backup.sh'
     if (-not (Test-Path -LiteralPath $backupSource -PathType Leaf)) {
-        throw "Update / repair cannot start because the bundled pre-update safety-backup helper is missing: $backupSource"
+        throw "Existing-stack repair cannot start because the bundled pre-install safety-backup helper is missing: $backupSource"
     }
     $backupStage = "/tmp/latticevale-preupdate-$([guid]::NewGuid().ToString('N'))"
     $backupStageCreate = Invoke-WslDirectCapture $DistroName 'root' 'install' @('-d','-m','0755',$backupStage) 30
@@ -8436,7 +8521,7 @@ if ($forceManagedUpdate) {
     try {
         $backupHelperLinux = "$backupStage/pre-update-safety-backup.sh"
         Copy-LocalFileToWslRoot $DistroName $backupSource $backupHelperLinux '0755'
-        $preUpdateBackup = Invoke-WslDirectCapture $DistroName 'root' $backupHelperLinux @($stackLinuxPath,[string]$selectedUid,[string]$selectedGid) 3600
+        $preUpdateBackup = Invoke-WslDirectCapture $DistroName 'root' $backupHelperLinux @($stackLinuxPath,[string]$selectedUid,[string]$selectedGid) 3600 '' 'LatticeVale pre-install safety backup'
         if (-not $preUpdateBackup.Success) {
             $parts = @()
             if ($preUpdateBackup.TimedOut) { $parts += 'backup exceeded the 3600-second safety timeout' }
@@ -8445,13 +8530,15 @@ if ($forceManagedUpdate) {
             if ($preUpdateBackup.ExitCode -ne $null) { $parts += "exit code $($preUpdateBackup.ExitCode)" }
             $backupDetail = (($parts | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) } | Select-Object -Unique) -join ' | ')
             if (-not $backupDetail) { $backupDetail = 'backup helper failed without stdout/stderr diagnostics' }
-            throw "The managed repair/update stopped before software refresh because the bundle-owned safety backup failed. Detail: $backupDetail`nNo installer-managed software refresh was started. The existing stack/data was left in place; correct the reported backup problem and rerun the current full installer."
+            throw "The installer stopped before replacing managed files because the bundle-owned safety backup failed. Detail: $backupDetail`nNo installer-managed software refresh was started. Correct the backup problem and rerun the current full installer."
         }
         if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdOut)) { Write-Host $preUpdateBackup.StdOut.Trim() }
         if (-not [string]::IsNullOrWhiteSpace([string]$preUpdateBackup.StdErr)) { Write-Warning $preUpdateBackup.StdErr.Trim() }
     } finally {
         [void](Invoke-WslDirectCapture $DistroName 'root' 'rm' @('-rf',$backupStage) 30)
     }
+} elseif ($repairMaintenance -and $skipPreInstallBackup) {
+    Write-Warning 'Per-run choice: skipping the pre-install safety backup. The installer will continue without a new rollback backup; existing backups are not changed.'
 }
 
 if ($repairMaintenance) {
@@ -8532,7 +8619,8 @@ try {
     $windowsHardwareJson = $windowsHardwareSnapshot | ConvertTo-Json -Depth 6 -Compress
     $windowsHardwareB64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($windowsHardwareJson))
     $forceManagedUpdateArg = if ($forceManagedUpdate) { 'true' } else { 'false' }
-    Invoke-LatticeValeWslInteractiveGuarded $DistroName @('-d', $DistroName, '-u', 'root', '--', 'bash', "$stageLinux/linux/bootstrap.sh", $linuxUser, $optionsB64, $bundleVersion, $forceManagedUpdateArg, $windowsHardwareB64) 14400 30 20 4
+    $skipUbuntuAptRefreshArg = if ($skipUbuntuAptRefresh) { 'true' } else { 'false' }
+    Invoke-LatticeValeWslInteractiveGuarded $DistroName @('-d', $DistroName, '-u', 'root', '--', 'bash', "$stageLinux/linux/bootstrap.sh", $linuxUser, $optionsB64, $bundleVersion, $forceManagedUpdateArg, $windowsHardwareB64, $skipUbuntuAptRefreshArg) 14400 30 20 4
 } finally {
     [void](Invoke-WslDirectCapture $DistroName 'root' 'rm' @('-rf', $stageLinux))
 }
@@ -8665,6 +8753,7 @@ $oldMatrixBackendPort = if ($oldMatrixBridgePort -gt 0) { $oldMatrixBridgePort }
 $bridgePaths = $null; $bridgeReady = $false; $bridgeTaskReady = $false; $bridgeWslIp = ''; $bridgeTargetAddress = ''
 $tailscaleRemoteValidation = [pscustomobject]@{ Status='NOT_RUN'; Category='NOT_RUN'; Detail='Remote validation not run.'; Port=0; Attempted=0; Passed=0; Failed=0; Skipped=0; LastValidationUtc='' }
 $tailscaleDnsValidation = [pscustomobject]@{ Status='UNKNOWN'; SystemResolution=$false; MagicDnsResolution=$false; Detail='DNS validation not run.' }
+$tsStatus = $null
 $tailscalePrerequisiteFailure = ''
 $tailscaleFailureCategory = 'NONE'
 
@@ -8778,16 +8867,14 @@ if ($tailscale) {
                 if (-not $portState.Known) {
                     Write-Warning "Could not safely inspect Tailscale Serve HTTPS port $tailscaleDashboardPort. Dashboard exposure was skipped."
                 } elseif ($portState.InUse -and $portState.MatchesExpected -and $oldDashboardPort -eq $tailscaleDashboardPort -and $oldDashboardBackendPort -eq $dashboardBridgePort) {
-                    if ((Disable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard') -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')) {
-                        $trackedDashboardPort = $tailscaleDashboardPort
-                        Write-Info "Rebuilt installer-owned Tailscale Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort."
-                    } else {
-                        $trackedDashboardPort = 0
-                        Write-Warning "Could not deterministically rebuild the installer-owned Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort."
-                    }
+                    $trackedDashboardPort = $tailscaleDashboardPort
+                    Write-Info "Keeping the existing installer-owned Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort; its target already matches."
                 } elseif ($portState.InUse) {
                     $resolution = Resolve-UnownedTailscaleServeConflict $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard' $portState
-                    if ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')) {
+                    if ($resolution -eq 'adopt') {
+                        $trackedDashboardPort = $tailscaleDashboardPort
+                        Write-Info "Adopted the existing matching Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort without restarting it."
+                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')) {
                         $trackedDashboardPort = $tailscaleDashboardPort
                     } else {
                         Write-Warning "Dashboard Tailscale exposure was left unchanged/skipped on HTTPS port $tailscaleDashboardPort."
@@ -8802,16 +8889,14 @@ if ($tailscale) {
                 if (-not $portState.Known) {
                     Write-Warning "Could not safely inspect Tailscale Serve HTTPS port $tailscaleMatrixPort. Matrix exposure was skipped."
                 } elseif ($portState.InUse -and $portState.MatchesExpected -and $oldMatrixPort -eq $tailscaleMatrixPort -and $oldMatrixBackendPort -eq $matrixBridgePort) {
-                    if ((Disable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix') -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')) {
-                        $trackedMatrixPort = $tailscaleMatrixPort
-                        Write-Info "Rebuilt installer-owned Tailscale Matrix Serve mapping on HTTPS port $tailscaleMatrixPort."
-                    } else {
-                        $trackedMatrixPort = 0
-                        Write-Warning "Could not deterministically rebuild the installer-owned Matrix Serve mapping on HTTPS port $tailscaleMatrixPort."
-                    }
+                    $trackedMatrixPort = $tailscaleMatrixPort
+                    Write-Info "Keeping the existing installer-owned Matrix Serve mapping on HTTPS port $tailscaleMatrixPort; its target already matches."
                 } elseif ($portState.InUse) {
                     $resolution = Resolve-UnownedTailscaleServeConflict $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix' $portState
-                    if ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')) {
+                    if ($resolution -eq 'adopt') {
+                        $trackedMatrixPort = $tailscaleMatrixPort
+                        Write-Info "Adopted the existing matching Matrix Serve mapping on HTTPS port $tailscaleMatrixPort without restarting it."
+                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')) {
                         $trackedMatrixPort = $tailscaleMatrixPort
                     } else {
                         Write-Warning "Matrix Tailscale exposure was left unchanged/skipped on HTTPS port $tailscaleMatrixPort."
@@ -8888,21 +8973,14 @@ if ($tailscale) {
             }
 
             if (-not $tailscalePrerequisiteFailure -and ($trackedDashboardPort -gt 0 -or $trackedMatrixPort -gt 0)) {
-                $remoteValidationService = if ($trackedMatrixPort -gt 0) { 'Matrix' } else { 'Dashboard' }
-                $remoteValidationPort = if ($trackedMatrixPort -gt 0) { $trackedMatrixPort } else { $trackedDashboardPort }
-                $remoteValidationBackendPort = if ($trackedMatrixPort -gt 0) { $matrixBridgePort } else { $dashboardBridgePort }
-                $tailscaleRemoteValidation = Invoke-TailscaleRemotePeerValidation $tailscaleExe $dnsName $tsStatus.IPv4 $remoteValidationPort $remoteValidationBackendPort $remoteValidationService
-                if ($tailscaleRemoteValidation.Status -eq 'PASS') {
-                    Write-Host 'Tailscale remote-device validation: PASS' -ForegroundColor Green
-                } elseif ($tailscaleRemoteValidation.Status -eq 'FAIL') {
-                    Write-Warning "Tailscale remote-device validation: FAIL ($($tailscaleRemoteValidation.Category)) - $($tailscaleRemoteValidation.Detail)"
-                } else {
-                    Write-Warning "Tailscale remote-device validation: PARTIAL - $($tailscaleRemoteValidation.Detail)"
+                # A remote peer challenge is not required during installation. Permitted
+                # devices use the configured service URL after the local route checks pass.
+                $tailscaleRemoteValidation = [pscustomobject]@{
+                    Status='NOT_RUN'; Category='NOT_RUN'; Detail='Remote peer challenge is not required during installation.'; Port=0
+                    Attempted=0; Passed=0; Failed=0; Skipped=0; LastValidationUtc=''
                 }
-                # Do not rewrite the relay config here. Write-LatticeValeBridgeConfig intentionally
-                # stops a prior long-running relay before replacing files; doing that after
-                # host-local and remote validation would immediately tear down the working listener.
-                # Any requested-but-unpublished relay remains localhost-only and harmless.
+                Write-Info 'Remote-device page challenge skipped; local Tailscale service-route checks passed. Use the displayed service URL from any permitted tailnet device.'
+                # Keep the verified persistent relay running; do not replace its live config.
                 $infoDashBridge = if ($trackedDashboardPort -gt 0) { $dashboardBridgePort } else { 0 }
                 $infoMatrixBridge = if ($trackedMatrixPort -gt 0) { $matrixBridgePort } else { 0 }
                 $taskNameForInfo = if ($bridgePaths) { $bridgePaths.TaskName } else { '' }
@@ -8993,19 +9071,12 @@ if ($tailscale) {
     if ((-not $bridgeTracked -or -not $bridgeTaskTracked) -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'RELAY' }
     elseif (-not $dashTracked -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'SERVE' }
     elseif (-not $matrixTracked -and $tailscaleFailureCategory -eq 'NONE') { $tailscaleFailureCategory = 'MATRIX' }
-    $remoteStatus = [string]$tailscaleRemoteValidation.Status
     if (-not $localMappingReady) {
         $tailscaleState = 'FAIL'
         $tailscaleDetail = if ($tailscalePrerequisiteFailure) { "[$tailscaleFailureCategory] Remote-access prerequisite failed: $tailscalePrerequisiteFailure" } elseif ($tailscaleFailureCategory -ne 'NONE') { "[$tailscaleFailureCategory] One or more requested Windows Tailscale Serve/relay mappings did not complete or validate." } else { 'One or more requested Windows Tailscale Serve/relay mappings did not complete or validate.' }
-    } elseif ($remoteStatus -eq 'PASS') {
-        $tailscaleState = 'PASS'
-        $tailscaleDetail = ('Windows Tailscale prerequisites, relay, Serve listeners, Matrix client path, and remote-device HTTPS challenges passed ({0}/{1}).' -f $tailscaleRemoteValidation.Passed,$tailscaleRemoteValidation.Attempted)
-    } elseif ($remoteStatus -eq 'FAIL') {
-        $tailscaleState = 'FAIL'
-        $tailscaleDetail = "[$($tailscaleRemoteValidation.Category)] Local Tailscale/Matrix validation passed, but remote-device validation failed: $($tailscaleRemoteValidation.Detail)"
     } else {
-        $tailscaleState = 'PARTIAL'
-        $tailscaleDetail = ('Local Tailscale/Matrix validation passed, but remote-device validation is incomplete: {0}' -f $tailscaleRemoteValidation.Detail)
+        $tailscaleState = 'PASS'
+        $tailscaleDetail = 'Windows Tailscale prerequisites, relay, Serve listener, and Matrix client API passed local checks. Remote-device page validation is not part of installation; permitted tailnet devices use the configured service URL.'
     }
 } elseif ($finalTailscaleInfo.Count -gt 0) {
     $tailscaleState = 'PARTIAL'

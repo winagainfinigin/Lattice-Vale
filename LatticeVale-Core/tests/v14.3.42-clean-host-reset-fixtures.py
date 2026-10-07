@@ -15,7 +15,7 @@ assert '[switch]$RemoveLegacyHermesFoundry' in reset
 assert '[switch]$DeleteLatticeValeSource' in reset and 'Refusing to delete a filesystem root' in reset
 assert r'LatticeVale-Core\VERSION.txt' in reset and r"'installer\Install-LatticeVale.ps1'" in reset
 assert 'tailscale serve reset' not in reset.lower()
-assert "@('serve',\"--https=$($pair.Https)\",'off')" in reset
+assert "@('serve','--bg',\"--https=$($pair.Https)\",'off')" in reset
 assert "Win32_LogicalDisk -Filter 'DriveType=3'" in reset and "Get-ChildItem -LiteralPath $driveRoot -Filter '*.lnk'" in reset
 assert 'Remove-HnsNetwork' not in reset
 assert 'Disable-WindowsOptionalFeature' not in reset and 'dism.exe /online /disable-feature' not in reset.lower()

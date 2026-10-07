@@ -1,6 +1,6 @@
 # LatticeVale v14.6.3
 
-> **v14.6.3 hotfix:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Remote-device checks use a unique path on the configured Matrix HTTPS listener and verify its permanent root route. Installer-managed Hermes profiles converge to the shared gateway multiplexer. Schema 24 remains compatible.
+> **v14.6.3 test build:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge, and keeps exact matching Serve routes in place. Installer-managed Hermes profiles converge to the shared gateway multiplexer. Existing-stack runs include backup progress and a per-run backup skip; planned Ubuntu APT refresh includes elapsed progress and a per-run skip. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -10,15 +10,15 @@
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
 
-## v14.6.3 - multi-device Tailscale/Matrix and gateway hotfix
+## v14.6.3 - Matrix/Tailscale and gateway hotfix
 
 Installer-managed Matrix identities use the Synapse `server_name`. The installer displays that ID domain separately from the HTTPS or localhost URL to enter in Element. Existing `hermes.local` accounts are preserved and need manual URL entry for remote clients because automatic discovery cannot route `.local` identities.
 
 Named profiles use temporary standalone gateways only while LatticeVale provisions them. At finalization and stack start, the installer restores only standalone flags it recorded as temporary, then asks Hermes to migrate the managed topology to its shared host gateway. A `gateway.standalone: true` choice already present on a profile remains in place and Hermes leaves that profile standalone. Migration pauses if an active non-standalone gateway belongs to an unowned profile, so Resume / repair does not alter its topology.
 
-Windows Tailscale remote validation can now test more than one already-authorized tailnet device in the same installer run. Each device receives a newly generated one-time HTTPS challenge, its result is reported independently, and the installer asks whether to validate another device after every pass, failure, or skipped attempt. The temporary challenge is removed after each device while the real Dashboard and Matrix Serve mappings remain active.
+The installer does not require another device to open a temporary validation page. It validates the Windows Tailscale prerequisites, local relay, Serve listener, and Matrix client API; any permitted tailnet device can then use the displayed service URL. Exact existing Serve routes that already target the expected LatticeVale bridge are adopted without stopping or recreating them.
 
-The final remote-access result records attempted, passed, failed, and skipped device counts plus the last validation time. Each challenge uses a unique path and token on the configured Matrix HTTPS listener; cleanup removes only that path and checks that the permanent `/` route still targets Matrix. Existing Synapse `server_name` remains authoritative, while the Matrix identity domain, Element homeserver URL, and authenticated Tailscale hostname are stored separately. Installer-managed Hermes profiles migrate to the shared gateway; user-owned standalone choices are preserved. A saved interim `tailscaleMatrixMaxConnections` field is accepted for schema-24 compatibility but ignored and omitted from newly written options. The unattended-upgrades option remains removed, with only ownership-proven legacy cleanup retained.
+Existing Synapse `server_name` remains authoritative, while the Matrix identity domain, Element homeserver URL, and authenticated Tailscale hostname are stored separately. Installer-managed Hermes profiles migrate to the shared gateway; user-owned standalone choices are preserved. A saved interim `tailscaleMatrixMaxConnections` field is accepted for schema-24 compatibility but ignored and omitted from newly written options. The unattended-upgrades option remains removed, with only ownership-proven legacy cleanup retained. Routine repairs with at least 2 GiB free on the WSL root skip unnecessary pre-maintenance cache purges and stale staging scans; low-space repairs keep that recovery path.
 
 ## v14.6.2 — latest-supported managed software updates
 
@@ -437,7 +437,7 @@ The lower repair threshold is used only after LatticeVale has confirmed an exist
 
 ## Forced managed update
 
-**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer to the **latest supported stable upstream** software available at that time. Before refresh it creates a verified **bundle-owned** safety backup, so a stale or broken installed `manage.sh` cannot prevent the updater from repairing that same managed layer. The backup includes persistent configuration/data and running PostgreSQL dumps, briefly stops only the currently-running LatticeVale containers for a consistent filesystem snapshot, then restores them before refresh. Application channels advance to current stable upstream releases; stateful database/cache majors and the PyTorch/DirectML ABI remain compatibility-bounded, explicit user overrides remain authoritative, and exact resolved image/source identities are recorded after reconciliation.
+**Option 6 — Update / repair installer-managed software** explicitly forces convergence of the installer-managed software layer to the **latest supported stable upstream** software available at that time. The installer asks whether to skip the full **bundle-owned** pre-install safety backup for this run; by default it creates and verifies the backup before refresh, so a stale or broken installed `manage.sh` cannot prevent the updater from repairing that same managed layer. Backup progress covers persistent configuration/data, running PostgreSQL dumps, and archive creation; only currently running LatticeVale containers are briefly stopped for a consistent snapshot, then restored. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the same backup choice. A separate Ubuntu APT index-refresh choice appears when refresh is planned or uncertain; targeted package installs still run if the refresh is skipped. Application channels advance to current stable upstream releases; stateful database/cache majors and the PyTorch/DirectML ABI remain compatibility-bounded, explicit user overrides remain authoritative, and exact resolved image/source identities are recorded after reconciliation.
 
 Depending on the enabled components, this can include:
 
@@ -612,7 +612,7 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.6.0** | Prior install release | Canonical hardware/backend/resource architecture, adaptive cross-vendor qualification, structured diagnostics, schema-21/schema-22 migration to schema 23, durable GPU opt-out, and conserved CPU allocation |
 | **v14.6.1** | Prior install release | Preservation-first eight-option migration continuity, same-version canonical runtime-policy repair, bounded/nonblocking DirectML readiness, exact Hermes s6 gateway-slot recovery, and hardened Matrix/Tailscale remote validation |
 | **v14.6.2 Hotfix** | Prior install release | Latest-supported managed upstream resolution for Options 1/6, stable Honcho tag tracking, compatible stateful-major bounds, exact resolved-artifact recording, and inherited preservation-first repair |
-| **v14.6.3** | **Current install release** | Repeatable multi-device Tailscale/Matrix validation, schema-24 compatibility, fixed internal relay concurrency, and removal of the current unattended-upgrades feature |
+| **v14.6.3** | **Current test release** | Local Tailscale/Matrix route validation without a second-device challenge, backup and Ubuntu refresh progress with run-level skips, streamed cleanup, and schema-24 compatibility |
 
 ### v14.4.1
 

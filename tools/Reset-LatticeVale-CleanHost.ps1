@@ -285,7 +285,7 @@ function Remove-KnownLatticeValeTailscaleServe {
         $httpsPattern='(?i)(?:"|:|\b)'+[regex]::Escape([string]$pair.Https)+'(?:"|\b)'
         if ($raw -notmatch $backendPattern -or $raw -notmatch $httpsPattern) { continue }
         if (-not $Execute) { Write-Would "disable Tailscale Serve HTTPS $($pair.Https) because it points at the canonical LatticeVale $($pair.Label) bridge port $($pair.Backend)"; continue }
-        $off=Invoke-NativeCapture $exe @('serve',"--https=$($pair.Https)",'off') 20
+        $off=Invoke-NativeCapture $exe @('serve','--bg',"--https=$($pair.Https)",'off') 20
         if ($off.Success) { Write-Info "Disabled LatticeVale $($pair.Label) Tailscale Serve listener on HTTPS $($pair.Https)." }
         else { Write-Warning "Could not disable Tailscale Serve HTTPS $($pair.Https); inspect it manually before reusing that port." }
     }
