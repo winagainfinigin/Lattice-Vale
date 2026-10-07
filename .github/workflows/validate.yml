@@ -56,7 +56,8 @@ jobs:
           grep -q '^INSTALL_OPTIONS_SCHEMA=24$' LatticeVale-Core/compatibility.conf
           grep -q '^RUNTIME_POLICY_SCHEMA=13$' LatticeVale-Core/compatibility.conf
           ! grep -q 'tailscaleMatrixMaxConnections' LatticeVale-Core/Install-LatticeVale.ps1
-          grep -q 'Validate another Tailscale device?' LatticeVale-Core/Install-LatticeVale.ps1
+          ! grep -q 'Validate another Tailscale device?' LatticeVale-Core/Install-LatticeVale.ps1
+          grep -q 'Remote-device page challenge skipped' LatticeVale-Core/Install-LatticeVale.ps1
           grep -q 'REMOTE_VALIDATION_ATTEMPTED' LatticeVale-Core/Install-LatticeVale.ps1
           ! grep -q 'Enable unattended Ubuntu security updates?' LatticeVale-Core/Install-LatticeVale.ps1
           ! grep -q 'optional unattended Ubuntu security updates' docs/FEATURES.md

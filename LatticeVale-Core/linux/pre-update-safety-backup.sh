@@ -113,9 +113,12 @@ if [[ "$COMPOSE_AVAILABLE" == true ]]; then
     echo 'Dumping running Synapse PostgreSQL database.'
     docker compose exec -T synapse-db pg_dump -U synapse -d synapse -Fc > "$TMP_TARGET/synapse.dump" 2> "$TMP_TARGET/synapse-pg-dump.log" &
     dump_pid=$!
-    if ! wait_with_progress "$dump_pid" 12 'Dumping Synapse PostgreSQL database' "$TMP_TARGET/synapse.dump"; then
+    if wait_with_progress "$dump_pid" 12 'Dumping Synapse PostgreSQL database' "$TMP_TARGET/synapse.dump"; then
+      :
+    else
+      dump_rc=$?
       tail -n 12 "$TMP_TARGET/synapse-pg-dump.log" >&2 || true
-      exit 1
+      exit "$dump_rc"
     fi
     rm -f -- "$TMP_TARGET/synapse-pg-dump.log"
     [[ -s "$TMP_TARGET/synapse.dump" && "$(head -c 5 "$TMP_TARGET/synapse.dump")" == PGDMP ]] || {
@@ -129,9 +132,12 @@ if [[ "$COMPOSE_AVAILABLE" == true ]]; then
     echo 'Dumping running Honcho PostgreSQL database.'
     docker compose exec -T honcho-db pg_dump -U honcho -d honcho -Fc > "$TMP_TARGET/honcho.dump" 2> "$TMP_TARGET/honcho-pg-dump.log" &
     dump_pid=$!
-    if ! wait_with_progress "$dump_pid" 18 'Dumping Honcho PostgreSQL database' "$TMP_TARGET/honcho.dump"; then
+    if wait_with_progress "$dump_pid" 18 'Dumping Honcho PostgreSQL database' "$TMP_TARGET/honcho.dump"; then
+      :
+    else
+      dump_rc=$?
       tail -n 12 "$TMP_TARGET/honcho-pg-dump.log" >&2 || true
-      exit 1
+      exit "$dump_rc"
     fi
     rm -f -- "$TMP_TARGET/honcho-pg-dump.log"
     [[ -s "$TMP_TARGET/honcho.dump" && "$(head -c 5 "$TMP_TARGET/honcho.dump")" == PGDMP ]] || {
