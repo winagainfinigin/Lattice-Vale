@@ -7,6 +7,7 @@
 - Ensures the Windows installer validates and stages the live gateway verifier into its private WSL bundle, then bootstrap copies it into `~/hermes-stack` during install and repair. The helper is included in backup, installer-owned-file, and post-copy verification lists, so reconcile can invoke it after Hermes migration.
 - Updates current installation, support, architecture, testing, repository, and feature documentation to describe v14.6.4 and the gateway convergence recovery behavior. Historical release notes and upgrade baselines retain their original version labels.
 - Carries forward the deterministic regression suite at 148 fixtures across six shards, including live convergence, stale heartbeat, missing profile, PID mismatch, and standalone-profile exclusion cases.
+- Fixes a release regression fixture that still expected the pre-verifier installer staging list; it now checks the staged-file set, including `gateway-multiplex-verify.py`, without relying on one exact source-string layout. This changes CI coverage only; installer/runtime behavior is unchanged.
 
 ## 14.6.3 - 2026-10-06 test build
 

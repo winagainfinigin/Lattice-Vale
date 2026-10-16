@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import importlib.util
+import re
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -55,7 +56,18 @@ assert "Latest-supported managed-upstream reconciliation failed before Docker mu
 assert "Option 6 pre-update safety backups" in installer
 assert "force latest supported stable upstream channels/sources now" in installer
 assert "stack\\managed-upstreams.py" in installer
-assert "'compose.yaml','Dockerfile.qmd','configure-stack.sh','manage.sh','managed-upstreams.py','state-audit.py'" in installer
+stack_copy = re.search(r"foreach\s*\(\$file\s+in\s+@\(([^)]*)\)\)", installer)
+assert stack_copy is not None
+stack_files = set(re.findall(r"'([^']+)'", stack_copy.group(1)))
+assert {
+    "compose.yaml",
+    "Dockerfile.qmd",
+    "configure-stack.sh",
+    "manage.sh",
+    "managed-upstreams.py",
+    "state-audit.py",
+    "gateway-multiplex-verify.py",
+}.issubset(stack_files)
 assert "versions/channels declared by this bundle" not in installer
 assert "current managed package/image/source pins" not in installer
 assert "managed-upstreams.json" in upstream_path.read_text(encoding="utf-8")
