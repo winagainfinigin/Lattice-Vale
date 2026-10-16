@@ -1,6 +1,6 @@
 # Current v14.6.4 patch notes
 
-The v14.6.4 release retains the v14.6.3 Matrix, Tailscale, and gateway behavior. Its gateway migration recovery accepts a nonzero Hermes migration result only when the live default s6 slot is up, the supervisor and Hermes state PIDs match, the state heartbeat is fresh, and all installer-managed non-standalone profiles are served. Invalid or incomplete state remains a failure with a specific diagnostic. Verified convergence avoids another restart and leaves Hermes migration state intact. The current deterministic contract is 148 fixtures across six shards.
+The v14.6.4 release retains the v14.6.3 Matrix, Tailscale, and gateway behavior. Its gateway migration recovery accepts a nonzero Hermes migration result only when the live default s6 slot is up, the supervisor and Hermes state PIDs match, the state heartbeat is fresh, and all installer-managed non-standalone profiles are served. The verifier is staged into the runtime stack directory during install and repair, then checked with the other installer-owned files. Invalid or incomplete state remains a failure with a specific diagnostic. Verified convergence avoids another restart and leaves Hermes migration state intact. The current deterministic contract is 148 fixtures across six shards.
 
 Historical v14.6.3 patch notes follow.
 

@@ -36,9 +36,14 @@ assert "does not match" in verify.verify_state(BASE, 5800, ["default", "assistan
 assert verify.verify_state(BASE, 5799, ["default"], NOW) is None
 
 CONFIGURE = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
+BOOTSTRAP = (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8")
 assert "gateway.get('standalone') is not True: print(name)" in CONFIGURE
 assert '| tee;' in CONFIGURE
 assert CONFIGURE.index("< gateway-multiplex-verify.py") < CONFIGURE.index("default_s6_status_after=")
+assert BOOTSTRAP.count("gateway-multiplex-verify.py") >= 5
+assert BOOTSTRAP.count("configure-stack.sh gateway-multiplex-verify.py manage.sh") == 2
+assert '"$bundle_root/stack/gateway-multiplex-verify.py" "$stack_dir/gateway-multiplex-verify.py"' in BOOTSTRAP
+assert '"$stack_dir/configure-stack.sh" "$stack_dir/gateway-multiplex-verify.py" "$stack_dir/manage.sh"' in BOOTSTRAP
 expected_scan_start = CONFIGURE.index("if ! multiplex_profiles_text=")
 expected_profile_scan = CONFIGURE[
     expected_scan_start : CONFIGURE.index('default_s6_status="', expected_scan_start)
