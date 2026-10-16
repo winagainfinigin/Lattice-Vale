@@ -1,8 +1,15 @@
-# Current v14.6.3 patch notes
+# Current v14.6.4 patch notes
 
-The current 14.6.3 package also adds database/archive progress for the pre-install backup and asks whether to skip it for the current repair/migration run (backup remains the default). Managed-stack repair/update asks separately whether to skip APT package-index refresh for that run; targeted package installation is retained. Routine repairs with adequate WSL root free space skip unnecessary cache purging and stale-staging scans; low-space repairs retain that recovery path with visible progress. Option 7 streams its helper output and progress and explains its Ubuntu/Docker storage boundary: it does not compact the Windows-side WSL VHDX. Tailscale setup validates the local service route without a second-device page challenge and adopts exact matching Serve rules without restarting them.
+The v14.6.4 release retains the v14.6.3 Matrix, Tailscale, and gateway behavior. Its gateway migration recovery accepts a nonzero Hermes migration result only when the live default s6 slot is up, the supervisor and Hermes state PIDs match, the state heartbeat is fresh, and all installer-managed non-standalone profiles are served. Invalid or incomplete state remains a failure with a specific diagnostic. Verified convergence avoids another restart and leaves Hermes migration state intact. The current deterministic contract is 148 fixtures across six shards.
 
-## v14.6.3 hotfix — Matrix identity and Hermes gateway convergence
+Historical v14.6.3 patch notes follow.
+
+
+The v14.6.3 package added database/archive progress for the pre-install backup and asks whether to skip it for the current repair/migration run (backup remains the default). Managed-stack repair/update asks separately whether to skip APT package-index refresh for that run; targeted package installation is retained. Routine repairs with adequate WSL root free space skip unnecessary cache purging and stale-staging scans; low-space repairs retain that recovery path with visible progress. Option 7 streams its helper output and progress and explains its Ubuntu/Docker storage boundary: it does not compact the Windows-side WSL VHDX. Tailscale setup validates the local service route without a second-device page challenge and adopts exact matching Serve rules without restarting them.
+
+## v14.6.3 hotfix — Matrix identity and gateway multiplexer (historical)
+
+The v14.6.3 hotfix separated Matrix identity domains, Element homeserver URLs, and Tailscale hostnames while preserving existing Synapse state. Installer-managed Hermes profiles moved to the shared gateway multiplexer, and explicit user-owned standalone choices remained intact. The 14.6.4 release adds the live-state recovery checks for a migration command that reports failure after convergence.
 
 Matrix identity domains, Element homeserver URLs, and Tailscale hostnames are persisted separately. Fresh remote-capable Matrix installs use a resolved Tailscale hostname before creating accounts; existing Synapse `server_name` values and Matrix state remain authoritative. Legacy `hermes.local` deployments keep their reachable Tailscale URL and receive `MANUAL_HOMESERVER_REQUIRED` guidance because `.local` IDs cannot use remote autodiscovery.
 

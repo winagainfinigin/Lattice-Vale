@@ -1,9 +1,13 @@
-# LatticeVale v14.6.3 — Complete Features and Install Options Reference
+# LatticeVale v14.6.4 — Complete Features and Install Options Reference
 
-> **v14.6.3:** Installer validation checks Windows Tailscale prerequisites, the local relay, Serve listener, and Matrix client API without requiring a second-device page challenge. Any permitted tailnet device can use the configured service URL after installation. Exact matching Serve routes are adopted without restarting them. Existing Synapse identity is preserved, and managed Hermes profiles migrate to the shared gateway without changing user-owned standalone settings. Mutating existing-stack runs show progress during the pre-install managed-stack backup and let you skip it for that run. Ubuntu package-index refresh shows elapsed progress and can be skipped for a run when a refresh is planned. Healthy repairs skip unnecessary pre-maintenance cache and stale-staging cleanup; low-space repairs retain the cleanup path. Installer-options schema 24 remains compatible with interim state; obsolete relay-limit data is ignored and not rewritten.
+> **v14.6.4:** Installer validation checks Windows Tailscale prerequisites, the local relay, Serve listener, and Matrix client API without requiring a second-device page challenge. Any permitted tailnet device can use the configured service URL after installation. Exact matching Serve routes are adopted without restarting them. Existing Synapse identity is preserved, and managed Hermes profiles migrate to the shared gateway without changing user-owned standalone settings. Mutating existing-stack runs show progress during the pre-install managed-stack backup and let you skip it for that run. Ubuntu package-index refresh shows elapsed progress and can be skipped for a run when a refresh is planned. Healthy repairs skip unnecessary pre-maintenance cache and stale-staging cleanup; low-space repairs retain the cleanup path. Installer-options schema 24 remains compatible with interim state; obsolete relay-limit data is ignored and not rewritten.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
+
+## v14.6.4 gateway migration recovery
+
+A failed Hermes migration command no longer forces reconcile to fail when the shared gateway has already converged. The verifier accepts that state only when the default s6 slot is up, the s6 and Hermes gateway-state PIDs match, the state heartbeat is fresh, and every installer-managed non-standalone profile is served. A missing profile, stale or malformed state, PID mismatch, or ambiguous standalone ownership remains a hard failure. Verified convergence avoids another restart and preserves the migration manifest for repair/resume.
 
 ## v14.6.3 installer progress, run-level skips, and remote Matrix continuity
 
@@ -18,7 +22,7 @@
 - DirectML host-gateway recovery is isolated from healthy Docker infrastructure; `/health` remains responsive during model-load locking, the supervisor confirms misses before replacement, and installer self-test uses bounded readiness convergence.
 - Missing ephemeral Hermes `gateway-default` / profile s6 slots can be re-registered from preserved profile state through Hermes' runtime service-manager API instead of forcing profile recreation.
 - For recognized older stacks, mutating Options **1, 2, 4, 5, and 6** perform cumulative preservation-first migration before their mode-specific action. Options **3** and **8** remain read-only; Option **7** remains isolated cleanup.
-- The current v14.6.3 hotfix deterministic contract is **147 fixtures** across six shards, including the Matrix identity/gateway migration and multi-device Serve-route regressions for both 14.6.2 and 14.6.3 upgrade baselines.
+- The current v14.6.4 hotfix deterministic contract is **148 fixtures** across six shards, including live Hermes gateway-convergence and Matrix identity/route regressions for the 14.6.2 and 14.6.3 upgrade baselines.
 
 ## v14.6.0 schema-23 / policy-13 additions
 
@@ -28,7 +32,7 @@
 - Conserved automatic CPU allocation: system/DirectML reservations are removed before enabled Docker services share one aggregate envelope.
 - DirectML generation uses `torch.no_grad()`; no-fallback mode cannot create or retain forced-Ollama fallback markers.
 
-> **Current managed software/source policy (v14.6.3):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
+> **Current managed software/source policy (v14.6.4):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
 
 > **v14.6.0 architecture:** canonical hardware/backend/resource state separates durable user intent from machine-derived capability. Current task docs: `QUICKSTART.md`, `INSTALLATION.md`, `REPAIR.md`, `GPU-BACKENDS.md`, `DIAGNOSTICS.md`, `RESOURCE-POLICY.md`, and `ARCHITECTURE.md`.
 
@@ -69,9 +73,9 @@
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.6.3 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.6.4 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.3 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.4 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -871,7 +875,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source policy documented by v14.6.3
+# 8. Current managed software/source policy documented by v14.6.4
 
 Installer-owned application defaults use stable upstream channels at refresh time:
 

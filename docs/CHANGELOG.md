@@ -1,5 +1,12 @@
 # Changelog
 
+## 14.6.4 - 2026-10-15
+
+- Advances the release identity to v14.6.4 while retaining the qualified v14.6.3 installer behavior and compatibility contracts.
+- Fixes reconcile handling when Hermes reports a migration error after the live gateway has already converged: recovery now requires the default s6 slot, matching PID, fresh gateway-state heartbeat, and all expected managed non-standalone profiles. Failed checks remain failures with diagnostics; verified convergence avoids another restart and retains Hermes migration state.
+- Updates current installation, support, architecture, testing, repository, and feature documentation to describe v14.6.4 and the gateway convergence recovery behavior. Historical release notes and upgrade baselines retain their original version labels.
+- Carries forward the deterministic regression suite at 148 fixtures across six shards, including live convergence, stale heartbeat, missing profile, PID mismatch, and standalone-profile exclusion cases.
+
 ## 14.6.3 - 2026-10-06 test build
 
 - Removes the installer-time second-device web-page challenge. The installer checks the Windows Tailscale prerequisites, local relay, Serve listener, and Matrix client API, then displays the service URL for permitted tailnet devices.
@@ -14,7 +21,7 @@
 - Adds a per-run choice to skip Ubuntu APT package-index refresh when one is planned or cannot be ruled out, with an elapsed-time progress indicator. The prompt is omitted when no refresh is planned; required targeted package installs still run.
 - Streams cleanup output and scope progress, and explains before category selection that cleanup reclaims Ubuntu/Docker space without compacting the Windows-side WSL VHDX.
 - Removes the unattended-upgrades feature from current choices, summaries, durable options, and current feature documentation while retaining only ownership-proven cleanup of old LatticeVale APT policy.
-- The initial v14.6.3 release contract had **146 fixtures**. The current same-version Matrix/gateway hotfix adds identity, upgrade, and route-preservation coverage, bringing the current contract to **147 fixtures** across six shards.
+- The initial v14.6.3 release contract had **146 fixtures**. Its same-version Matrix/gateway hotfix added identity, upgrade, and route-preservation coverage, bringing the v14.6.3 contract to **147 fixtures** across six shards.
 - Preserves existing Synapse identity, stores the Matrix identity domain, Element homeserver URL, and authenticated Tailscale hostname separately, and migrates installer-managed Hermes profiles to the shared gateway without overwriting user-owned standalone choices.
 
 ## 14.6.2 Hotfix — 2026-10-01
