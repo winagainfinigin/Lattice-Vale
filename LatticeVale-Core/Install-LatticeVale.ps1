@@ -6808,6 +6808,7 @@ $requiredBundleFiles = @(
     'stack\compose.yaml',
     'stack\Dockerfile.qmd',
     'stack\configure-stack.sh',
+    'stack\gateway-multiplex-verify.py',
     'stack\manage.sh',
     'stack\managed-upstreams.py',
     'stack\state-audit.py',
@@ -8608,7 +8609,7 @@ if (-not $mkdirProbe.Success) {
 try {
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'compatibility.conf') "$stageLinux/compatibility.conf" '0600'
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'linux\bootstrap.sh') "$stageLinux/linux/bootstrap.sh" '0600'
-    foreach ($file in @('compose.yaml','Dockerfile.qmd','configure-stack.sh','manage.sh','managed-upstreams.py','state-audit.py','latticevale_readonly.py','latticevale_arch.py','hardware-capabilities.py','backend-capabilities.py','runtime-policy.py','diagnostics.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
+    foreach ($file in @('compose.yaml','Dockerfile.qmd','configure-stack.sh','gateway-multiplex-verify.py','manage.sh','managed-upstreams.py','state-audit.py','latticevale_readonly.py','latticevale_arch.py','hardware-capabilities.py','backend-capabilities.py','runtime-policy.py','diagnostics.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
         Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot "stack\$file") "$stageLinux/stack/$file" '0600'
     }
     $optionsJson = $options | ConvertTo-Json -Depth 8 -Compress
