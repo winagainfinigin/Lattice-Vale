@@ -2,13 +2,9 @@
 
 ## 14.6.4 - 2026-10-15
 
-### 14.6.4 hotfix — 2026-10-20
-
-- Fixes QMD health failures on clean installs and repairs: Compose overrides the Dockerfile command, so it now explicitly passes QMD's upstream `--host 0.0.0.0` option. It sets `QMD_ALLOWED_HOSTS=qmd:8181` to retain QMD's Host-header validation for Hermes, while keeping QMD unpublished on Windows host ports and available through the private Docker networks.
 - Advances the release identity to v14.6.4 while retaining the qualified v14.6.3 installer behavior and compatibility contracts.
 - Fixes reconcile handling when Hermes reports a migration error after the live gateway has already converged: recovery now requires the default s6 slot, matching PID, fresh gateway-state heartbeat, and all expected managed non-standalone profiles. Failed checks remain failures with diagnostics; verified convergence avoids another restart and retains Hermes migration state.
-- Fixes Matrix reconnection after LatticeVale shortcut startup by skipping already-completed gateway migrations and removing a duplicate default-gateway restart from the shared-multiplexer path. The start path now waits for Matrix readiness and reconciles the shared gateway once.
-- Preserves the completed multiplex-ownership marker in installer, pre-update, and manage.sh backups so restoring a snapshot does not unnecessarily rerun gateway migration.
+- Fixes a gateway-topology audit false positive after successful migration: the default profile's `gateway.multiplex_profiles: true` is recognized as the expected Hermes host-multiplexer setting. Misplaced top-level keys, managed worker-profile overrides, and disabled or unrecognized values remain repair findings, while explicit standalone-profile checks are unchanged.
 - Ensures the Windows installer validates and stages the live gateway verifier into its private WSL bundle, then bootstrap copies it into `~/hermes-stack` during install and repair. The helper is included in backup, installer-owned-file, and post-copy verification lists, so reconcile can invoke it after Hermes migration.
 - Updates current installation, support, architecture, testing, repository, and feature documentation to describe v14.6.4 and the gateway convergence recovery behavior. Historical release notes and upgrade baselines retain their original version labels.
 - Carries forward the deterministic regression suite at 148 fixtures across six shards, including live convergence, stale heartbeat, missing profile, PID mismatch, and standalone-profile exclusion cases.

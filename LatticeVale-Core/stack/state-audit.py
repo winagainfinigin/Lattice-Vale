@@ -186,9 +186,20 @@ def yaml_server_name(path: Path) -> str:
         return match.group(1).strip() if match else ""
 
 def yaml_multiplex_enabled(path: Path) -> bool:
-    """True when a retired legacy multiplex override remains in profile YAML."""
+    """True when a conflicting legacy multiplex override remains in profile YAML.
+
+    Hermes' migration command writes gateway.multiplex_profiles: true to the
+    default profile config to enable the host multiplexer. That exact setting
+    is expected there; the same setting in a worker profile, a top-level key,
+    or a disabled/malformed value remains a repair condition.
+    """
     if not path.is_file() or path.stat().st_size == 0:
         return False
+    is_default_config = (
+        path.name == "config.yaml"
+        and path.parent.name == "hermes"
+        and path.parent.parent.name == "data"
+    )
     try:
         import yaml  # type: ignore
         cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
@@ -197,13 +208,27 @@ def yaml_multiplex_enabled(path: Path) -> bool:
         if cfg.get("multiplex_profiles") is not None:
             return True
         gateway = cfg.get("gateway") or {}
-        return isinstance(gateway, dict) and gateway.get("multiplex_profiles") is not None
+        if not isinstance(gateway, dict) or gateway.get("multiplex_profiles") is None:
+            return False
+        if is_default_config and gateway.get("multiplex_profiles") is True:
+            return False
+        return True
     except Exception:
         text = path.read_text(encoding="utf-8", errors="replace")
         # Conservative fallback for malformed/unparseable YAML.
-        if re.search(r"(?m)^multiplex_profiles:\s*(?:true|false|yes|no|on|off|1|0)\s*(?:#.*)?$", text, re.I):
+        top_level_setting = re.search(r"(?m)^multiplex_profiles:\s*(.*?)\s*(?:#.*)?$", text, re.I)
+        if top_level_setting and top_level_setting.group(1).strip().lower() not in {"", "null", "~"}:
             return True
-        return bool(re.search(r"(?ms)^gateway:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+multiplex_profiles:\s*(?:true|false|yes|no|on|off|1|0)\s*(?:#.*)?$", text, re.I))
+        gateway_setting = re.search(
+            r"(?ms)^gateway:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+multiplex_profiles:\s*(.*?)\s*(?:#.*)?$",
+            text,
+            re.I,
+        )
+        if not gateway_setting or gateway_setting.group(1).strip().lower() in {"", "null", "~"}:
+            return False
+        if is_default_config and gateway_setting.group(1).strip().lower() == "true":
+            return False
+        return True
 
 
 def http_ok(url: str, headers: dict[str, str] | None = None, timeout: float = 3.0) -> bool:
