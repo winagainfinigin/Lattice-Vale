@@ -130,13 +130,14 @@ services:
         QMD_VERSION: ${QMD_VERSION:-latest}
     image: hermes-qmd:local
     container_name: hermes-qmd
-    command: ["sh", "-lc", "mkdir -p \"$$HOME\" && exec qmd mcp --http --port 8181"]
+    command: ["sh", "-lc", "mkdir -p \"$$HOME\" && exec qmd mcp --http --host 0.0.0.0 --port 8181"]
     environment:
       HOME: /tmp/qmd-home
       QMD_CONFIG_DIR: /home/node/.config/qmd
       XDG_CONFIG_HOME: /home/node/.config
       XDG_CACHE_HOME: /home/node/.cache
       INDEX_PATH: /home/node/.cache/qmd/index.sqlite
+      QMD_ALLOWED_HOSTS: qmd:8181
       QMD_FORCE_CPU: ${QMD_FORCE_CPU:-1}
     volumes:
       - ./data/qmd/config:/home/node/.config/qmd

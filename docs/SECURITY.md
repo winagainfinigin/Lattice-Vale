@@ -189,7 +189,7 @@ Backups can contain credentials. `./manage.sh backup` prints a reminder after ea
 Defaults and intended boundaries include:
 
 - Dashboard and Matrix host ports are loopback/local unless remote exposure is explicitly selected.
-- QMD's API remains Docker-network-local.
+- QMD's API remains unpublished on host ports and Docker-network-local; the QMD 2.8.3 Host-header allowlist accepts Hermes at `qmd:8181` when the listener binds to container interfaces.
 - Tailscale integration uses the **Windows** Tailscale client and private **Serve**, not public Funnel, for the managed remote-access design.
 - Synapse public registration remains disabled.
 - Matrix room access is restricted with explicit users/rooms and E2EE where LatticeVale manages the room.

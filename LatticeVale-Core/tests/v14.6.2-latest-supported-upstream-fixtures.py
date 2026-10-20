@@ -19,6 +19,9 @@ assert "${POSTGRES_IMAGE:-postgres:16-alpine}" in compose
 assert "${PGVECTOR_IMAGE:-pgvector/pgvector:pg15}" in compose
 assert "${REDIS_IMAGE:-redis:8-alpine}" in compose
 assert "${VALKEY_IMAGE:-valkey/valkey:8-alpine}" in compose
+qmd_compose_command = next(line.strip() for line in compose.splitlines() if line.strip().startswith("command:") and "qmd mcp" in line)
+assert "--host 0.0.0.0" in qmd_compose_command
+assert "QMD_ALLOWED_HOSTS: qmd:8181" in compose
 
 dockerfile = (ROOT / "stack/Dockerfile.qmd").read_text(encoding="utf-8")
 assert "ARG QMD_VERSION=latest" in dockerfile

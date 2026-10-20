@@ -2,6 +2,9 @@
 
 ## 14.6.4 - 2026-10-15
 
+### 14.6.4 hotfix — 2026-10-20
+
+- Fixes QMD health failures on clean installs and repairs: Compose overrides the Dockerfile command, so it now explicitly passes QMD's upstream `--host 0.0.0.0` option. It sets `QMD_ALLOWED_HOSTS=qmd:8181` to retain QMD's Host-header validation for Hermes, while keeping QMD unpublished on Windows host ports and available through the private Docker networks.
 - Advances the release identity to v14.6.4 while retaining the qualified v14.6.3 installer behavior and compatibility contracts.
 - Fixes reconcile handling when Hermes reports a migration error after the live gateway has already converged: recovery now requires the default s6 slot, matching PID, fresh gateway-state heartbeat, and all expected managed non-standalone profiles. Failed checks remain failures with diagnostics; verified convergence avoids another restart and retains Hermes migration state.
 - Ensures the Windows installer validates and stages the live gateway verifier into its private WSL bundle, then bootstrap copies it into `~/hermes-stack` during install and repair. The helper is included in backup, installer-owned-file, and post-copy verification lists, so reconcile can invoke it after Hermes migration.

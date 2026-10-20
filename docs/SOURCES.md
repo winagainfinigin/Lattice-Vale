@@ -7,7 +7,7 @@
 
 LatticeVale no longer treats its own release bundle as the permanent application-version authority. When a managed refresh is due or Option 6 is selected, installer-owned Hermes, Synapse, SearXNG, Ollama, and QMD resolve through stable upstream channels; installer-owned Honcho resolves the newest stable semantic-version tag from the official `plastic-labs/honcho` origin. Stateful database/cache services remain on compatible major channels (PostgreSQL 16, pgvector/PG15, Redis 8, Valkey 8), and the WSL DirectML Python environment remains a tested PyTorch/torch-directml/Transformers compatibility envelope rather than floating each ABI-sensitive package independently. Explicit user-owned image/source overrides are preserved. After successful pull/build/reconciliation, LatticeVale records exact image IDs/digests, Honcho commit/tag/origin, selected channels, and the DirectML requirements hash in `data/latticevale/managed-upstreams.json`.
 
-QMD current stable releases expose a native `--host` option, so v14.6.2 removes the historical source-rewriting listener patch used for QMD 2.5.3 and starts QMD with its upstream CLI interface instead.
+QMD current stable releases expose a native `--host` option, so v14.6.2 removed the historical source-rewriting listener patch used for QMD 2.5.3. The Dockerfile default and effective Compose command both pass `--host 0.0.0.0`; the Compose value is explicit because Compose's `command` overrides the Dockerfile `CMD`. Compose sets `QMD_ALLOWED_HOSTS=qmd:8181` to retain Host-header validation under QMD 2.8.3. QMD's port remains unpublished on the Windows host and is available over the private Docker networks.
 
 ## v14.6.2 canonical architecture source policy
 
