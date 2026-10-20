@@ -169,7 +169,7 @@ STEP=archive-persistent-state
 items=()
 for p in \
   .env install-options.json .installer-state.json compatibility.conf state-audit.py latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json .install-info \
-  .configured .provider-configured .installer-managed-profiles .matrix-configured \
+  .configured .provider-configured .installer-gateway-multiplex-owned .installer-managed-profiles .matrix-configured \
   .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
   compose.yaml compose.override.yaml config secrets logs \
   data/hermes data/qmd data/synapse data/tailscale data/tailscale-matrix \

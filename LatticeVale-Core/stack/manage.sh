@@ -1106,6 +1106,11 @@ for name,original in state.items():
     cfg['gateway']=gateway; path.write_text(yaml.safe_dump(cfg,sort_keys=False),encoding='utf-8')
 PY_RESTORE_TEMP_GATEWAYS
     fi
+    # The ownership marker records a completed migration. Re-running Hermes'
+    # migration command on every shortcut start can restart the shared gateway
+    # before the Matrix backend is ready; only resume migration when it has not
+    # already completed.
+    if [[ ! -e .installer-gateway-multiplex-owned ]]; then
     # Migration covers the complete Hermes profile home. Block it while an
     # unowned non-standalone gateway is active so Resume / repair cannot fold the
     # user's running profile topology into LatticeVale's shared host gateway.
@@ -1160,6 +1165,7 @@ PY_VERIFY_SERVED_PROFILES
     fi
     : > .installer-gateway-multiplex-owned
     chmod 0600 .installer-gateway-multiplex-owned
+    fi
     rm -f .installer-temporary-standalone-profiles.json
   fi
 
@@ -1176,10 +1182,6 @@ PY_VERIFY_SERVED_PROFILES
   ((${#names[@]})) || return 0
 
   if [[ -e .installer-gateway-multiplex-owned ]]; then
-    if ! reconcile_default_gateway_manage; then
-      echo 'WARNING: shared Hermes host gateway could not be reconciled for Matrix profiles.' >&2
-      return 1
-    fi
     timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes gateway status >/dev/null || {
       echo 'WARNING: shared Hermes host gateway did not report ready after migration.' >&2
       return 1
@@ -1248,7 +1250,7 @@ backup() {
     honcho_dumped=true
   fi
   local -a items=()
-  for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-managed-profiles .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
+  for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-gateway-multiplex-owned .installer-managed-profiles .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
     compose.yaml compatibility.conf latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/latticevale data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
     [[ -e "$p" ]] && items+=("$p")
   done
