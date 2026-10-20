@@ -36,7 +36,6 @@ assert "does not match" in verify.verify_state(BASE, 5800, ["default", "assistan
 assert verify.verify_state(BASE, 5799, ["default"], NOW) is None
 
 CONFIGURE = (ROOT / "stack/configure-stack.sh").read_text(encoding="utf-8")
-MANAGE = (ROOT / "stack/manage.sh").read_text(encoding="utf-8")
 BOOTSTRAP = (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8")
 INSTALLER = (ROOT / "Install-LatticeVale.ps1").read_text(encoding="utf-8-sig")
 assert "gateway.get('standalone') is not True: print(name)" in CONFIGURE
@@ -68,27 +67,4 @@ success_migration_path = CONFIGURE[success_migration_branch:CONFIGURE.index(": >
 assert "gateway migration returned success, but gateway status could not be read" in success_migration_path
 assert "PY_VERIFY_SERVED_PROFILES" in success_migration_path
 assert "default s6 PID" in VERIFY_PATH.read_text(encoding="utf-8")
-
-managed_roster_start = MANAGE.index("managed_multiplex_profiles_manage() {")
-managed_roster_end = MANAGE.index("verify_live_multiplex_gateway_manage() {", managed_roster_start)
-managed_roster = MANAGE[managed_roster_start:managed_roster_end]
-assert "expected={'default'}" in managed_roster
-assert "gateway.get('standalone') is not True" in managed_roster
-assert "has no config.yaml" in managed_roster
-assert "gateway settings are malformed" in managed_roster
-
-startup_start = MANAGE.index("start_selected_matrix_profile_gateways() {")
-startup_end = MANAGE.index("\n}\n", startup_start)
-startup = MANAGE[startup_start:startup_end]
-migration_call = startup.index("hermes gateway migrate --multiplex -y")
-assert "gateway_migration.json" in startup[:migration_call]
-assert ".installer-gateway-multiplex-owned" in startup[:migration_call]
-assert "verify_live_multiplex_gateway_manage" in startup[:migration_call]
-assert "2>&1 | tee; then" in startup[migration_call:migration_call + 180]
-assert "exit 10" in startup[:migration_call]
-assert "migration_manifest_rc != 10" in startup[:migration_call]
-assert "migration_rc=$?" in startup[migration_call:]
-assert "if ! verify_live_multiplex_gateway_manage; then" in startup[migration_call:]
-assert "preserving Hermes migration state" in startup
-assert "rm -f /opt/data/gateway_migration.json" not in MANAGE
-print("PASS live convergence, stale heartbeat, missing profile, PID mismatch, standalone exclusion, and startup resume recovery")
+print("PASS live convergence, stale heartbeat, missing profile, PID mismatch, explicit standalone exclusion")

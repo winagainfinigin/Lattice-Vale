@@ -7,7 +7,7 @@
 
 ## v14.6.4 gateway migration recovery
 
-A failed Hermes migration command no longer forces repair reconciliation or normal stack startup to fail when the shared gateway has already converged. Startup checks a live gateway before retrying when the LatticeVale ownership marker or Hermes migration manifest exists, avoiding the repeated resume/restart loop for an already healthy multiplexer. The verifier requires the default s6 slot to remain up with the same PID, a fresh Hermes gateway-state heartbeat, and every installer-managed non-standalone profile in `served_profiles`. A missing profile, stale or malformed state, PID mismatch, or ambiguous standalone ownership remains a hard failure. Verified convergence preserves Hermes' manifest; LatticeVale does not edit that Hermes-owned record.
+A failed Hermes migration command no longer forces reconcile to fail when the shared gateway has already converged. The verifier accepts that state only when the default s6 slot is up, the s6 and Hermes gateway-state PIDs match, the state heartbeat is fresh, and every installer-managed non-standalone profile is served. A missing profile, stale or malformed state, PID mismatch, or ambiguous standalone ownership remains a hard failure. Verified convergence avoids another restart and preserves the migration manifest for repair/resume.
 
 ## v14.6.3 installer progress, run-level skips, and remote Matrix continuity
 

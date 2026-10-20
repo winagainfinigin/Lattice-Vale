@@ -1080,66 +1080,6 @@ finish_matrix_profile() {
   return 0
 }
 
-managed_multiplex_profiles_manage() {
-  python3 - data/hermes .installer-managed-profiles <<'PY_MANAGED_MULTIPLEX_PROFILES'
-from pathlib import Path
-import re,sys,yaml
-root=Path(sys.argv[1]); managed_file=Path(sys.argv[2])
-if not managed_file.is_file(): raise SystemExit('Installer-managed profile roster is missing')
-expected={'default'}
-for name in sorted({x.strip() for x in managed_file.read_text(encoding='utf-8').splitlines() if x.strip()}):
-    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,31}',name): raise SystemExit(f'invalid managed profile name: {name!r}')
-    path=root/'profiles'/name/'config.yaml'
-    if not path.is_file():
-        if path.parent.exists(): raise SystemExit(f"managed profile '{name}' exists but has no config.yaml")
-        continue
-    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}
-    if not isinstance(cfg,dict): raise SystemExit(f"managed profile '{name}' config.yaml is not a mapping")
-    gateway=cfg.get('gateway') or {}
-    if not isinstance(gateway,dict): raise SystemExit(f"managed profile '{name}' gateway settings are malformed")
-    if gateway.get('standalone') is not True: expected.add(name)
-for name in sorted(expected): print(name)
-PY_MANAGED_MULTIPLEX_PROFILES
-}
-
-verify_live_multiplex_gateway_manage() {
-  local profiles_text s6_status s6_pid s6_status_after s6_pid_after
-  local -a profiles=()
-  if ! profiles_text="$(managed_multiplex_profiles_manage)"; then
-    echo 'Unable to determine the complete managed gateway profile set.' >&2
-    return 1
-  fi
-  if [[ -n "$profiles_text" ]]; then mapfile -t profiles <<< "$profiles_text"; fi
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || {
-    echo "Could not read default gateway s6 status: $s6_status" >&2
-    return 1
-  }
-  if [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]]; then
-    s6_pid="${BASH_REMATCH[1]}"
-  else
-    echo "Default gateway s6 slot is not up: $s6_status" >&2
-    return 1
-  fi
-  if ! timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "$s6_pid" "${profiles[@]}" < gateway-multiplex-verify.py; then
-    return 1
-  fi
-  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || {
-    echo "Could not recheck default gateway s6 status: $s6_status_after" >&2
-    return 1
-  }
-  if [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]]; then
-    s6_pid_after="${BASH_REMATCH[1]}"
-  else
-    echo "Default gateway s6 slot stopped during verification: $s6_status_after" >&2
-    return 1
-  fi
-  if [[ "$s6_pid_after" != "$s6_pid" ]]; then
-    echo "Default gateway s6 PID changed during verification ($s6_pid to $s6_pid_after)." >&2
-    return 1
-  fi
-  return 0
-}
-
 start_selected_matrix_profile_gateways() {
   local name info secret state
   local -a names=()
@@ -1187,47 +1127,23 @@ PY_UNOWNED_GATEWAY_CANDIDATES
         return 1
       fi
     done
-    local multiplex_profiles_text migration_manifest_rc=0 migration_rc=0 migration_verified=false gateway_status
-    local -a multiplex_profiles=()
-    if ! multiplex_profiles_text="$(managed_multiplex_profiles_manage)"; then
-      echo 'Unable to determine the complete managed gateway profile set; preserving Hermes migration state.' >&2
+    timeout --foreground --kill-after=5s 90s docker exec -u hermes hermes-agent hermes gateway migrate --multiplex -y || {
+      echo 'WARNING: Hermes gateway multiplex migration did not complete; preserving all profile state for Resume / repair.' >&2
       return 1
-    fi
-    if [[ -n "$multiplex_profiles_text" ]]; then mapfile -t multiplex_profiles <<< "$multiplex_profiles_text"; fi
-    timeout --foreground --kill-after=5s 10s docker exec -u hermes hermes-agent sh -c 'if [ -f /opt/data/gateway_migration.json ]; then exit 0; else exit 10; fi' >/dev/null 2>&1 || migration_manifest_rc=$?
-    if (( migration_manifest_rc != 0 && migration_manifest_rc != 10 )); then
-      echo "Could not determine whether Hermes has a pending gateway migration record (status $migration_manifest_rc); preserving state." >&2
-      return 1
-    fi
-    if [[ -e .installer-gateway-multiplex-owned || "$migration_manifest_rc" -eq 0 ]]; then
-      if verify_live_multiplex_gateway_manage; then
-        migration_verified=true
-        if [[ ! -e .installer-gateway-multiplex-owned ]]; then
-          echo 'The live default gateway is verified as converged; recording LatticeVale ownership and preserving Hermes migration state without another restart.'
-        fi
-      fi
-    fi
-    if [[ "$migration_verified" != true ]]; then
-      if timeout --foreground --kill-after=5s 90s docker exec -u hermes hermes-agent hermes gateway migrate --multiplex -y 2>&1 | tee; then
-        :
-      else
-        migration_rc=$?
-        echo "Hermes gateway migration exited with status $migration_rc; checking the live default gateway before failing." >&2
-      fi
-      if (( migration_rc != 0 )); then
-        if ! verify_live_multiplex_gateway_manage; then
-          echo 'Live gateway verification failed; preserving Hermes migration state for Resume / repair.' >&2
-          return 1
-        fi
-        migration_verified=true
-        echo "Hermes migrate exited $migration_rc, but fresh live state confirms the default s6 gateway serves all managed non-standalone profiles; continuing without another restart."
-      else
-        gateway_status="$(timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes gateway status 2>&1)" || {
-          echo 'Hermes gateway migration returned success, but gateway status could not be read; Resume / repair will verify again.' >&2
-          return 1
-        }
-        if ((${#multiplex_profiles[@]})); then
-          if ! timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "${multiplex_profiles[@]}" <<'PY_VERIFY_SERVED_PROFILES'
+    }
+    mapfile -t multiplex_profiles < <(python3 - data/hermes .installer-managed-profiles <<'PY_EXPECT_MULTIPLEX_PROFILES'
+from pathlib import Path
+import sys,yaml
+root=Path(sys.argv[1]); managed=Path(sys.argv[2])
+for name in sorted({x.strip() for x in managed.read_text(encoding='utf-8').splitlines() if x.strip()}):
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file(): continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
+PY_EXPECT_MULTIPLEX_PROFILES
+)
+    if ((${#multiplex_profiles[@]})); then
+      if ! timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "${multiplex_profiles[@]}" <<'PY_VERIFY_SERVED_PROFILES'
 import json,sys
 from pathlib import Path
 state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
@@ -1237,11 +1153,9 @@ if missing:
     print('Missing from live Hermes served_profiles record: '+', '.join(missing),file=sys.stderr)
     raise SystemExit(1)
 PY_VERIFY_SERVED_PROFILES
-          then
-            echo 'Hermes gateway status did not confirm every non-standalone managed profile is served; preserving state for Resume / repair.' >&2
-            return 1
-          fi
-        fi
+      then
+        echo 'WARNING: Hermes gateway migration did not serve every managed profile; preserving state for Resume / repair.' >&2
+        return 1
       fi
     fi
     : > .installer-gateway-multiplex-owned
