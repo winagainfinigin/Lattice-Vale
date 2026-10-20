@@ -45,7 +45,7 @@ Before publishing v14.6.4:
 
 - version/schema/policy/fixture-count documentation must agree with source;
 - all 148 deterministic fixtures across the six current shards and both resume simulations must pass in their supported environments;
-- v14.6.4 must preserve existing Synapse identity, validate remote Tailscale reachability with a unique static-text path before relay/app checks, clean up only that path, and migrate managed Hermes profiles without changing user-owned standalone settings; gateway migration recovery must accept nonzero Hermes results only when fresh state, the matching default s6 PID, and the expected managed-profile set prove convergence;
+- v14.6.4 must preserve existing Synapse identity, validate remote Tailscale reachability with a unique static-text path before relay/app checks, clean up only that path, and migrate managed Hermes profiles without changing user-owned standalone settings; startup must skip redundant manifest resumption only after live convergence is proved, and gateway migration recovery must accept nonzero Hermes results only when fresh state, the matching default s6 PID, and the expected managed-profile set prove convergence;
 - Bash/Python/static checks and Windows PowerShell parse/manifest checks must pass in CI;
 - `installer/SOURCE-SHA256SUMS.txt` must be regenerated after the final source/documentation change;
 - both ZIPs must have the required `Lattice-Vale/` root, valid CRCs, portable paths, no duplicate/case-colliding members, and byte-for-byte source equivalence; and
