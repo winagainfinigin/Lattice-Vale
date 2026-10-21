@@ -2,6 +2,16 @@
 
 ## 14.6.4 - 2026-10-15
 
+### 14.6.4 corrective hotfix — 2026-10-20
+
+- Makes the shared-gateway steady state idempotent: default `gateway.multiplex_profiles: true` is valid, while top-level/worker/disabled/malformed overrides remain repair findings.
+- Makes the ownership marker advisory rather than authoritative. Repair/start require matching and stable default s6 PID, fresh gateway heartbeat, and the complete managed non-standalone `served_profiles` set before skipping migration or recreating a missing marker.
+- Fixes Matrix-profile topology reporting so shared profiles are reported as served by the host multiplexer and only explicit `gateway.standalone: true` profiles are reported as independent. Live Matrix adapter checks use the shared gateway's namespaced `<profile>:matrix` state for shared profiles.
+- Preserves explicit standalone gateways during final lifecycle reconciliation and keeps pending-manual Matrix activation retryable through the appropriate shared or standalone path.
+- Preserves already healthy Matrix gateways during same-version repair and ordinary `manage.sh start`: the default gateway is recycled only when its exact fresh runtime record does not show the Matrix adapter connected.
+- Makes final gateway verification route-aware: shared named profiles require a connected `<profile>:matrix` adapter on the default host gateway, while explicit standalone profiles require a connected `matrix` adapter on their own exact s6 gateway.
+- Extends the existing 148-fixture contract with same-version idempotency, marker-proof, shared/standalone routing, and audit assertions without changing schema 24 or runtime-policy schema 13.
+
 - Advances the release identity to v14.6.4 while retaining the qualified v14.6.3 installer behavior and compatibility contracts.
 - Fixes reconcile handling when Hermes reports a migration error after the live gateway has already converged: recovery now requires the default s6 slot, matching PID, fresh gateway-state heartbeat, and all expected managed non-standalone profiles. Failed checks remain failures with diagnostics; verified convergence avoids another restart and retains Hermes migration state.
 - Fixes a gateway-topology audit false positive after successful migration: the default profile's `gateway.multiplex_profiles: true` is recognized as the expected Hermes host-multiplexer setting. Misplaced top-level keys, managed worker-profile overrides, and disabled or unrecognized values remain repair findings, while explicit standalone-profile checks are unchanged.

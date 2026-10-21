@@ -45,7 +45,9 @@ assert '/run/service/gateway-default' in default
 selected=manage[manage.index('start_selected_matrix_profile_gateways()'):manage.index('refresh_adaptive_resource_policy()')]
 assert selected.index('ensure_matrix_runtime_online_manage') < selected.index('reconcile_default_gateway_manage')
 assert 'reconcile_profile_gateway_exact_manage "$name"' in selected
-assert 'Profile gateway running with Matrix backend verified' in selected
+assert 'Standalone profile gateway running with Matrix adapter verified' in selected
+assert 'Matrix profile served by verified shared gateway with Matrix adapter connected' in selected
+assert 'profile_gateway_is_explicit_standalone_manage "$name"' in selected
 
 # Fresh install + repair final reconciliation both use configure-stack.sh. It must start
 # Synapse first, then prove in-container reachability and recycle the default gateway.
@@ -62,8 +64,8 @@ assert "reconcile) printf '5'" in checkpoint  # v14.4.85 advances to revision 5 
 # Audit must stop claiming RUNNING when only the gateway process is alive.
 assert 'matrix_backend_reachable_from_hermes' in audit
 assert "Synapse is not reachable from inside hermes-agent" in audit
-assert 'gateway process is running but Synapse is unreachable from inside hermes-agent' in audit
-assert 'gateway_running and matrix_internal_ready' in audit
+assert 'is running but Synapse is unreachable from inside hermes-agent' in audit
+assert 'gateway_running and adapter_connected and matrix_internal_ready' in audit
 assert 'matrix_status == "STARTING" or is_settling(hermes_state)' in audit
 assert '"${2:-}" == synapse || "${2:-}" == synapse-db' in manage
 

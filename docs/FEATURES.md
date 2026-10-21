@@ -7,7 +7,7 @@
 
 ## v14.6.4 gateway migration recovery
 
-A failed Hermes migration command no longer forces reconcile to fail when the shared gateway has already converged. The verifier accepts that state only when the default s6 slot is up, the s6 and Hermes gateway-state PIDs match, the state heartbeat is fresh, and every installer-managed non-standalone profile is served. A missing profile, stale or malformed state, PID mismatch, or ambiguous standalone ownership remains a hard failure. Verified convergence avoids another restart and preserves the migration manifest for repair/resume.
+Resume/repair and normal stack start first test whether the shared gateway is already converged before asking Hermes to migrate it again. The verifier accepts shared state only when the default s6 slot is up, the s6 and Hermes gateway-state PIDs match, the state heartbeat is fresh, every installer-managed non-standalone profile is present in `served_profiles`, and the s6 PID remains stable through verification. For Matrix-enabled routes, the default `matrix`, shared `<profile>:matrix`, or standalone `matrix` adapter must also report `connected`; an already connected gateway is preserved without an unnecessary restart. The LatticeVale ownership marker is never health proof by itself. A nonzero migration result is recoverable only after the same proof; missing profiles, stale or malformed state, PID mismatch, disconnected adapters, or ambiguous ownership remain failures. The default host's nested `gateway.multiplex_profiles: true` is expected steady state, while worker/top-level/disabled overrides remain repair findings.
 
 ## v14.6.3 installer progress, run-level skips, and remote Matrix continuity
 
@@ -335,7 +335,7 @@ Each selected Matrix-enabled named profile can receive:
 - E2EE/recovery state
 - room/user allowlists
 - its own encrypted room, or an explicitly adopted existing encrypted room when allowed
-- its own independently supervised Hermes gateway
+- service through the shared Hermes host gateway by default, with live state recorded under `<profile>:matrix`; an explicitly user-owned `gateway.standalone: true` profile keeps its own exact supervised gateway and `matrix` runtime state
 
 Profile Matrix routing follows the **actual profile name and verified model**, not a hard-coded `assistant` profile.
 
@@ -349,7 +349,7 @@ Pending activation alone is not grounds to rebuild a valid identity.
 
 ## 3.9 Windows Tailscale private remote access
 
-**Inherited v14.6.1 remote-health contract:** LatticeVale now separates host-local readiness from real remote proof. It verifies client policy/preferences, MagicDNS/HTTPS prerequisites, the Windows-native relay, deterministic Serve listeners, direct-100.x HTTPS/TLS, and the Matrix client path. A current-run second-device HTTPS token is required for `PASS`; skipping it is `PARTIAL`.
+**Current v14.6.4 remote-health contract:** installation verifies Windows Tailscale client/authentication prerequisites, the Windows-native relay, deterministic Serve listeners, and the Matrix client/API path locally. It deliberately does **not** require or create a second-device page challenge, so installer `PASS` means the managed local Tailscale/Serve path is configured and responding; actual reachability from another tailnet device remains a separate integration qualification test.
 
 
 **Prompt:** Use Windows Tailscale for private remote access?

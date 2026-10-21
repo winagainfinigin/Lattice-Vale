@@ -1007,6 +1007,108 @@ ensure_matrix_runtime_online_manage() {
   wait_matrix_backend_from_hermes_manage
 }
 
+managed_multiplex_profiles_manage() {
+  python3 - data/hermes .installer-managed-profiles <<'PY_MANAGED_MULTIPLEX_PROFILES'
+from pathlib import Path
+import re,sys,yaml
+root=Path(sys.argv[1]); managed_file=Path(sys.argv[2])
+if not managed_file.is_file(): raise SystemExit('Installer-managed profile roster is missing')
+expected={'default'}
+for name in sorted({x.strip() for x in managed_file.read_text(encoding='utf-8').splitlines() if x.strip()}):
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,31}',name): raise SystemExit(f'invalid managed profile name: {name!r}')
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file():
+        if path.parent.exists(): raise SystemExit(f"managed profile '{name}' exists but has no config.yaml")
+        continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    if not isinstance(cfg,dict): raise SystemExit(f"managed profile '{name}' config.yaml is not a mapping")
+    gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict): raise SystemExit(f"managed profile '{name}' gateway settings are malformed")
+    if gateway.get('standalone') is not True: expected.add(name)
+for name in sorted(expected): print(name)
+PY_MANAGED_MULTIPLEX_PROFILES
+}
+
+verify_live_multiplex_gateway_manage() {
+  local profiles_text s6_status s6_pid s6_status_after s6_pid_after
+  local -a profiles=()
+  profiles_text="$(managed_multiplex_profiles_manage)" || return 1
+  [[ -n "$profiles_text" ]] && mapfile -t profiles <<< "$profiles_text"
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
+  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  s6_pid="${BASH_REMATCH[1]}"
+  timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "$s6_pid" "${profiles[@]}" < gateway-multiplex-verify.py || return 1
+  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
+  [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  s6_pid_after="${BASH_REMATCH[1]}"
+  [[ "$s6_pid_after" == "$s6_pid" ]]
+}
+
+wait_live_multiplex_gateway_manage() {
+  local attempts="${1:-15}" i
+  for i in $(seq 1 "$attempts"); do
+    verify_live_multiplex_gateway_manage >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
+profile_gateway_is_explicit_standalone_manage() {
+  local name="$1"
+  python3 - "data/hermes/profiles/$name/config.yaml" <<'PY_PROFILE_STANDALONE_MANAGE'
+from pathlib import Path
+import sys,yaml
+p=Path(sys.argv[1])
+if not p.is_file(): raise SystemExit(1)
+cfg=yaml.safe_load(p.read_text(encoding='utf-8')) or {}
+gateway=cfg.get('gateway') if isinstance(cfg,dict) else None
+raise SystemExit(0 if isinstance(gateway,dict) and gateway.get('standalone') is True else 1)
+PY_PROFILE_STANDALONE_MANAGE
+}
+
+verify_matrix_adapter_runtime_manage() {
+  local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
+  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  s6_pid="${BASH_REMATCH[1]}"
+  python3 - "$state_path" "$s6_pid" "$platform_key" <<'PY_MATRIX_ADAPTER_RUNTIME_MANAGE' || return 1
+from datetime import datetime,timezone
+from pathlib import Path
+import json,sys
+path=Path(sys.argv[1]); expected_pid=int(sys.argv[2]); key=sys.argv[3]
+try: record=json.loads(path.read_text(encoding='utf-8'))
+except Exception: raise SystemExit(1)
+if not isinstance(record,dict) or record.get('gateway_state')!='running': raise SystemExit(1)
+try: pid=int(record.get('pid'))
+except (TypeError,ValueError): raise SystemExit(1)
+if pid != expected_pid: raise SystemExit(1)
+stamp=record.get('updated_at')
+if not isinstance(stamp,str) or not stamp.strip(): raise SystemExit(1)
+try:
+    heartbeat=datetime.fromisoformat(stamp.replace('Z','+00:00'))
+except ValueError: raise SystemExit(1)
+if heartbeat.tzinfo is None: raise SystemExit(1)
+age=(datetime.now(timezone.utc)-heartbeat.astimezone(timezone.utc)).total_seconds()
+if age > 120 or age < -30: raise SystemExit(1)
+platforms=record.get('platforms')
+row=platforms.get(key) if isinstance(platforms,dict) else None
+if not isinstance(row,dict) or str(row.get('state') or '').strip().lower()!='connected': raise SystemExit(1)
+PY_MATRIX_ADAPTER_RUNTIME_MANAGE
+  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
+  [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  s6_pid_after="${BASH_REMATCH[1]}"
+  [[ "$s6_pid_after" == "$s6_pid" ]]
+}
+
+wait_matrix_adapter_runtime_manage() {
+  local service_name="$1" state_path="$2" platform_key="$3" attempts="${4:-15}" i
+  for i in $(seq 1 "$attempts"); do
+    verify_matrix_adapter_runtime_manage "$service_name" "$state_path" "$platform_key" >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
 finish_matrix_profile() {
   local name="$1" secret info pdir penv state token user_id room_id live_user joined host_once recovery i setup_status
   [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || { echo 'Profile name is invalid.' >&2; return 2; }
@@ -1027,13 +1129,24 @@ finish_matrix_profile() {
   ensure_matrix_runtime_online_manage
   live_user="$(curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0.1:${MATRIX_HOST_PORT}/_matrix/client/v3/account/whoami" | jq -r '.user_id // empty')" || true
   [[ "$live_user" == "$user_id" ]] || { echo "Matrix token for profile '$name' no longer authenticates as '$user_id'. No credentials were replaced." >&2; return 1; }
-  start_profile_gateway_exact_manage "$name" || { echo "Profile '$name' exact gateway service could not be activated; protected Matrix state remains pending-manual." >&2; return 1; }
+  local shared_gateway=false
+  if profile_gateway_is_explicit_standalone_manage "$name"; then
+    start_profile_gateway_exact_manage "$name" || { echo "Standalone profile '$name' exact gateway service could not be activated; protected Matrix state remains pending-manual." >&2; return 1; }
+    wait_matrix_adapter_runtime_manage "$name" "data/hermes/profiles/$name/gateway_state.json" matrix 30 || { echo "Standalone profile '$name' Matrix adapter did not become connected; protected Matrix state remains pending-manual." >&2; return 1; }
+  elif [[ -e .installer-gateway-multiplex-owned ]]; then
+    wait_live_multiplex_gateway_manage 15 || { echo "Shared Hermes gateway does not currently serve every managed non-standalone profile; protected Matrix state remains pending-manual." >&2; return 1; }
+    wait_matrix_adapter_runtime_manage default data/hermes/gateway_state.json "$name:matrix" 30 || { echo "Shared Hermes gateway serves '$name', but its Matrix adapter did not become connected; protected Matrix state remains pending-manual." >&2; return 1; }
+    shared_gateway=true
+  else
+    echo "Profile '$name' is configured for the shared gateway but multiplex ownership is not established. Run Resume / repair; protected Matrix state remains pending-manual." >&2
+    return 1
+  fi
   echo "Waiting for '$name' to accept its existing Matrix invitation..."
   joined=false
   for i in $(seq 1 60); do
     if ! matrix_client_api_ready_manage; then
-      stop_profile_gateway_exact_manage "$name"
-      echo 'Matrix became unavailable while finishing the profile; the exact profile gateway was stopped and state remains pending-manual.' >&2
+      [[ "$shared_gateway" == true ]] || stop_profile_gateway_exact_manage "$name"
+      echo 'Matrix became unavailable while finishing the profile; protected state remains pending-manual.' >&2
       return 1
     fi
     joined="$(curl -fsS --max-time 5 -H "Authorization: Bearer $token" "http://127.0.0.1:${MATRIX_HOST_PORT}/_matrix/client/v3/joined_rooms" 2>/dev/null | jq -r --arg r "$room_id" '.joined_rooms | index($r) != null' || true)"
@@ -1041,8 +1154,8 @@ finish_matrix_profile() {
     sleep 2
   done
   if [[ "$joined" != true ]]; then
-    stop_profile_gateway_exact_manage "$name"
-    echo "Profile '$name' did not join room '$room_id'. The exact profile gateway was stopped; state remains pending-manual." >&2
+    [[ "$shared_gateway" == true ]] || stop_profile_gateway_exact_manage "$name"
+    echo "Profile '$name' did not join room '$room_id'; protected state remains pending-manual." >&2
     return 1
   fi
 
@@ -1066,8 +1179,8 @@ finish_matrix_profile() {
     fi
   fi
   if [[ -z "$recovery" ]]; then
-    stop_profile_gateway_exact_manage "$name"
-    echo "Profile '$name' joined successfully, but no recovery key was emitted yet. The exact profile gateway was stopped and state remains pending-manual so a later retry can finish E2EE persistence safely." >&2
+    [[ "$shared_gateway" == true ]] || stop_profile_gateway_exact_manage "$name"
+    echo "Profile '$name' joined successfully, but no recovery key was emitted yet. State remains pending-manual so a later retry can finish E2EE persistence safely." >&2
     return 1
   fi
   set_env_value "$secret" LATTICEVALE_PROVISIONING_STATE complete
@@ -1081,12 +1194,12 @@ finish_matrix_profile() {
 }
 
 start_selected_matrix_profile_gateways() {
-  local name info secret state
-  local -a names=()
+  local name info secret state migration_rc=0 unowned_profile unowned_gateway_state standalone_profile=false shared_gateway_ready=false shared_recycle_attempted=false
+  local -a names=() unowned_multiplex_candidates=()
 
-  # Resume legacy and interrupted migrations whenever the managed stack starts, even
+  # Resume legacy/interrupted migrations whenever the managed stack starts, even
   # when Matrix is disabled. Restore only standalone flags recorded as temporary by
-  # configure-stack; explicit user standalone choices remain for Hermes to honor.
+  # configure-stack; explicit user standalone choices remain untouched.
   if [[ -s .installer-managed-profiles ]]; then
     if [[ -s .installer-temporary-standalone-profiles.json ]]; then
       python3 - data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY_RESTORE_TEMP_GATEWAYS'
@@ -1106,15 +1219,24 @@ for name,original in state.items():
     cfg['gateway']=gateway; path.write_text(yaml.safe_dump(cfg,sort_keys=False),encoding='utf-8')
 PY_RESTORE_TEMP_GATEWAYS
     fi
-    # The ownership marker records a completed migration. Re-running Hermes'
-    # migration command on every shortcut start can restart the shared gateway
-    # before the Matrix backend is ready; only resume migration when it has not
-    # already completed.
-    if [[ ! -e .installer-gateway-multiplex-owned ]]; then
-    # Migration covers the complete Hermes profile home. Block it while an
-    # unowned non-standalone gateway is active so Resume / repair cannot fold the
-    # user's running profile topology into LatticeVale's shared host gateway.
-    mapfile -t unowned_multiplex_candidates < <(python3 - data/hermes .installer-managed-profiles <<'PY_UNOWNED_GATEWAY_CANDIDATES'
+
+    # The ownership marker is evidence, never health proof. Give a just-started
+    # gateway a short bounded chance to prove exact convergence before deciding a
+    # migration is necessary. This also recovers a backup that lost only the marker.
+    if wait_live_multiplex_gateway_manage 6; then
+      shared_gateway_ready=true
+      if [[ ! -e .installer-gateway-multiplex-owned ]]; then
+        echo 'Shared Hermes gateway is already converged; restoring the LatticeVale ownership marker without replaying migration.'
+      fi
+    else
+      if [[ -e .installer-gateway-multiplex-owned ]]; then
+        echo 'Existing shared-gateway ownership marker is not backed by current live convergence; retrying the bounded migration path.' >&2
+      fi
+
+      # Migration covers the complete Hermes profile home. Block it while an
+      # unowned non-standalone gateway is active so LatticeVale cannot fold a
+      # user-owned running topology into its shared host gateway.
+      mapfile -t unowned_multiplex_candidates < <(python3 - data/hermes .installer-managed-profiles <<'PY_UNOWNED_GATEWAY_CANDIDATES'
 from pathlib import Path
 import sys,yaml
 root=Path(sys.argv[1]); managed={x.strip() for x in Path(sys.argv[2]).read_text(encoding='utf-8').splitlines() if x.strip()}
@@ -1125,70 +1247,64 @@ for path in sorted((root/'profiles').glob('*/config.yaml')):
     if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
 PY_UNOWNED_GATEWAY_CANDIDATES
 )
-    for unowned_profile in "${unowned_multiplex_candidates[@]}"; do
-      unowned_gateway_state="$(profile_gateway_s6_state_exact "$unowned_profile" 2>/dev/null || true)"
-      if [[ "$unowned_gateway_state" == up || "$unowned_gateway_state" == unknown ]]; then
-        echo "WARNING: cannot migrate LatticeVale profiles automatically while unowned profile '$unowned_profile' has gateway state '$unowned_gateway_state'. Its topology was left unchanged; set gateway.standalone: true to opt out, or stop it before Resume / repair." >&2
+      for unowned_profile in "${unowned_multiplex_candidates[@]}"; do
+        unowned_gateway_state="$(profile_gateway_s6_state_exact "$unowned_profile" 2>/dev/null || true)"
+        if [[ "$unowned_gateway_state" == up || "$unowned_gateway_state" == unknown ]]; then
+          echo "WARNING: cannot migrate LatticeVale profiles automatically while unowned profile '$unowned_profile' has gateway state '$unowned_gateway_state'. Its topology was left unchanged; set gateway.standalone: true to opt out, or stop it before Resume / repair." >&2
+          return 1
+        fi
+      done
+
+      migration_rc=0
+      if timeout --foreground --kill-after=5s 90s docker exec -u hermes hermes-agent hermes gateway migrate --multiplex -y 2>&1 | tee; then
+        :
+      else
+        migration_rc=$?
+        echo "Hermes gateway migration exited with status $migration_rc; checking exact live convergence before failing startup." >&2
+      fi
+      if ! wait_live_multiplex_gateway_manage 15; then
+        echo 'WARNING: shared gateway failed exact live verification after migration; preserving all profile state for Resume / repair.' >&2
         return 1
       fi
-    done
-    timeout --foreground --kill-after=5s 90s docker exec -u hermes hermes-agent hermes gateway migrate --multiplex -y || {
-      echo 'WARNING: Hermes gateway multiplex migration did not complete; preserving all profile state for Resume / repair.' >&2
-      return 1
-    }
-    mapfile -t multiplex_profiles < <(python3 - data/hermes .installer-managed-profiles <<'PY_EXPECT_MULTIPLEX_PROFILES'
-from pathlib import Path
-import sys,yaml
-root=Path(sys.argv[1]); managed=Path(sys.argv[2])
-for name in sorted({x.strip() for x in managed.read_text(encoding='utf-8').splitlines() if x.strip()}):
-    path=root/'profiles'/name/'config.yaml'
-    if not path.is_file(): continue
-    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
-    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
-PY_EXPECT_MULTIPLEX_PROFILES
-)
-    if ((${#multiplex_profiles[@]})); then
-      if ! timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "${multiplex_profiles[@]}" <<'PY_VERIFY_SERVED_PROFILES'
-import json,sys
-from pathlib import Path
-state=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))
-served=state.get('served_profiles') if isinstance(state,dict) else None
-missing=sorted(set(sys.argv[2:])-set(served if isinstance(served,list) else []))
-if missing:
-    print('Missing from live Hermes served_profiles record: '+', '.join(missing),file=sys.stderr)
-    raise SystemExit(1)
-PY_VERIFY_SERVED_PROFILES
-      then
-        echo 'WARNING: Hermes gateway migration did not serve every managed profile; preserving state for Resume / repair.' >&2
-        return 1
+      shared_gateway_ready=true
+      if (( migration_rc != 0 )); then
+        echo "Hermes migrate exited $migration_rc, but exact s6 PID, fresh gateway state, stable PID, and served-profile evidence confirm convergence; continuing without another restart."
       fi
     fi
+
     : > .installer-gateway-multiplex-owned
     chmod 0600 .installer-gateway-multiplex-owned
-    fi
     rm -f .installer-temporary-standalone-profiles.json
   fi
 
   [[ "$(opt_bool matrix)" == true ]] || return 0
 
-  # A running s6 gateway process is not sufficient evidence of Matrix connectivity.
-  # After stack start/restart the gateway can race Docker DNS/Synapse, remain alive,
-  # and never reconnect. Require host + in-container Matrix reachability first, then
-  # recycle the default and selected profile gateways against the proven backend.
+  # A running gateway process is not sufficient evidence of Matrix connectivity.
+  # Bring Synapse up first. If the exact default gateway already has a fresh, connected
+  # Matrix adapter, preserve it; otherwise perform one bounded recycle and prove the
+  # adapter came back before touching any named-profile topology.
   ensure_matrix_runtime_online_manage
-  reconcile_default_gateway_manage
+  if wait_matrix_adapter_runtime_manage default data/hermes/gateway_state.json matrix 3; then
+    echo 'Default Hermes Matrix adapter is already connected; preserving the healthy gateway without an unnecessary restart.'
+  else
+    reconcile_default_gateway_manage || return 1
+    wait_matrix_adapter_runtime_manage default data/hermes/gateway_state.json matrix 30 || {
+      echo 'WARNING: default Hermes Matrix adapter did not reconnect after the bounded gateway recycle.' >&2
+      return 1
+    }
+    shared_recycle_attempted=true
+  fi
+
+  if [[ -s .installer-managed-profiles && -e .installer-gateway-multiplex-owned ]]; then
+    if ! wait_live_multiplex_gateway_manage 15; then
+      echo 'WARNING: shared Hermes gateway is not live-converged after Matrix readiness. Run Resume / repair.' >&2
+      return 1
+    fi
+    shared_gateway_ready=true
+  fi
 
   mapfile -t names < <(selected_matrix_profile_names)
   ((${#names[@]})) || return 0
-
-  if [[ -e .installer-gateway-multiplex-owned ]]; then
-    timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes gateway status >/dev/null || {
-      echo 'WARNING: shared Hermes host gateway did not report ready after migration.' >&2
-      return 1
-    }
-    echo 'Installer-managed Matrix profiles are served through the shared Hermes host gateway.'
-    return 0
-  fi
 
   for name in "${names[@]}"; do
     [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || {
@@ -1201,6 +1317,9 @@ PY_VERIFY_SERVED_PROFILES
       echo "Matrix-enabled profile '$name' is not fully provisioned. Rerun the Windows installer and choose Resume / repair." >&2
       return 1
     fi
+
+    standalone_profile=false
+    if profile_gateway_is_explicit_standalone_manage "$name"; then standalone_profile=true; fi
     state="$(sed -n 's/^LATTICEVALE_PROVISIONING_STATE=//p' "$secret" | head -n1)"
     [[ -n "$state" ]] || state="$(sed -n 's/^FOUNDRY_PROVISIONING_STATE=//p' "$secret" | head -n1)"
     if [[ "$state" == pending-manual ]]; then
@@ -1208,7 +1327,7 @@ PY_VERIFY_SERVED_PROFILES
       if finish_matrix_profile "$name"; then
         state=complete
       else
-        echo "WARNING: Matrix profile '$name' remains pending; leaving only that profile gateway stopped and continuing core stack startup." >&2
+        echo "WARNING: Matrix profile '$name' remains pending; preserving its identity/room state and continuing core stack startup." >&2
         continue
       fi
     fi
@@ -1216,11 +1335,41 @@ PY_VERIFY_SERVED_PROFILES
       echo "Matrix-enabled profile '$name' has incomplete provisioning state '$state'. Rerun Resume / repair." >&2
       return 1
     fi
-    if ! reconcile_profile_gateway_exact_manage "$name"; then
-      echo "WARNING: Matrix-enabled profile '$name' gateway remains unavailable; preserving that profile and continuing core stack startup. Resume / repair will retry it." >&2
-      continue
+
+    if [[ "$standalone_profile" == true ]]; then
+      if wait_matrix_adapter_runtime_manage "$name" "data/hermes/profiles/$name/gateway_state.json" matrix 3; then
+        echo "Standalone Matrix profile is already connected; preserving its exact gateway: $name"
+        continue
+      fi
+      if ! reconcile_profile_gateway_exact_manage "$name"; then
+        echo "WARNING: Matrix-enabled standalone profile '$name' gateway remains unavailable; preserving that profile and continuing core stack startup. Resume / repair will retry it." >&2
+        continue
+      fi
+      if ! wait_matrix_adapter_runtime_manage "$name" "data/hermes/profiles/$name/gateway_state.json" matrix 30; then
+        echo "WARNING: Matrix-enabled standalone profile '$name' gateway is up but its Matrix adapter is not connected; preserving that profile. Resume / repair will retry it." >&2
+        continue
+      fi
+      echo "Standalone profile gateway running with Matrix adapter verified: $name"
+    else
+      if [[ "$shared_gateway_ready" != true ]]; then
+        echo "WARNING: Matrix-enabled shared profile '$name' is not proven served by the shared gateway. Run Resume / repair." >&2
+        return 1
+      fi
+      if ! wait_matrix_adapter_runtime_manage default data/hermes/gateway_state.json "$name:matrix" 5; then
+        if [[ "$shared_recycle_attempted" != true ]]; then
+          echo "Shared Matrix adapter for '$name' is not connected; recycling the default gateway once after Synapse readiness." >&2
+          reconcile_default_gateway_manage || return 1
+          wait_matrix_adapter_runtime_manage default data/hermes/gateway_state.json matrix 30 || return 1
+          wait_live_multiplex_gateway_manage 15 || return 1
+          shared_recycle_attempted=true
+        fi
+        wait_matrix_adapter_runtime_manage default data/hermes/gateway_state.json "$name:matrix" 30 || {
+          echo "WARNING: shared Hermes gateway serves '$name', but its Matrix adapter did not become connected. Run Resume / repair." >&2
+          return 1
+        }
+      fi
+      echo "Matrix profile served by verified shared gateway with Matrix adapter connected: $name"
     fi
-    echo "Profile gateway running with Matrix backend verified: $name"
   done
   return 0
 }

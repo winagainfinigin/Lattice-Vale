@@ -231,6 +231,114 @@ def yaml_multiplex_enabled(path: Path) -> bool:
         return True
 
 
+def yaml_gateway_standalone(path: Path) -> bool:
+    """Return the explicit user-owned gateway.standalone=true choice."""
+    if not path.is_file():
+        return False
+    try:
+        import yaml  # type: ignore
+        cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        gateway = cfg.get("gateway") if isinstance(cfg, dict) else None
+        return isinstance(gateway, dict) and gateway.get("standalone") is True
+    except Exception:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        match = re.search(
+            r"(?ms)^gateway:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+standalone:\s*(true|yes|on|1)\s*(?:#.*)?$",
+            text,
+            re.I,
+        )
+        return bool(match)
+
+
+def gateway_heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
+    value = str(record.get("updated_at") or "").strip()
+    if not value:
+        return None
+    try:
+        if value.endswith("Z"):
+            value = value[:-1] + "+00:00"
+        dt = datetime.datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            return None
+        return (datetime.datetime.now(datetime.timezone.utc) - dt.astimezone(datetime.timezone.utc)).total_seconds()
+    except Exception:
+        return None
+
+
+def exact_gateway_s6_pid(name: str) -> int | None:
+    rc, out = run(["docker", "exec", "hermes-agent", "/command/s6-svstat", f"/run/service/gateway-{name}"], timeout=15)
+    if rc != 0:
+        return None
+    match = re.match(r"^up \(pid ([0-9]+) pgid [0-9]+\)", out.strip())
+    return int(match.group(1)) if match else None
+
+
+def verify_shared_gateway_runtime(root: Path, expected_profiles: set[str]) -> tuple[bool, str, dict[str, Any]]:
+    """Verify the live default s6 gateway against its authoritative runtime record."""
+    pid = exact_gateway_s6_pid("default")
+    if pid is None:
+        return False, "default gateway s6 slot is not up", {}
+    record = read_json(root / "data/hermes/gateway_state.json", {})
+    if not isinstance(record, dict) or record.get("gateway_state") != "running":
+        return False, "default gateway runtime record is missing or not running", record if isinstance(record, dict) else {}
+    try:
+        record_pid = int(record.get("pid"))
+    except (TypeError, ValueError):
+        return False, "gateway runtime PID is invalid", record
+    if record_pid != pid:
+        return False, f"gateway runtime PID {record_pid} does not match default s6 PID {pid}", record
+    age = gateway_heartbeat_age_seconds(record)
+    if age is None:
+        return False, "gateway heartbeat timestamp is missing or invalid", record
+    if age > 120:
+        return False, f"gateway heartbeat is stale ({int(age)}s old)", record
+    if age < -30:
+        return False, f"gateway heartbeat is {int(-age)}s in the future", record
+    served = record.get("served_profiles")
+    if not isinstance(served, list) or any(not isinstance(name, str) for name in served):
+        return False, "gateway served_profiles is missing or malformed", record
+    missing = sorted(expected_profiles - set(served))
+    if missing:
+        return False, "gateway is missing expected served profile(s): " + ", ".join(missing), record
+    pid_after = exact_gateway_s6_pid("default")
+    if pid_after != pid:
+        return False, "default gateway s6 PID changed during verification", record
+    return True, f"live default s6 gateway serves {', '.join(sorted(expected_profiles))}", record
+
+
+def verify_standalone_gateway_runtime(root: Path, name: str) -> tuple[bool, str, dict[str, Any]]:
+    """Verify an explicit standalone profile from its exact s6 slot and own runtime record."""
+    pid = exact_gateway_s6_pid(name)
+    if pid is None:
+        return False, f"standalone gateway s6 slot for {name} is not up", {}
+    record = read_json(root / "data/hermes/profiles" / name / "gateway_state.json", {})
+    if not isinstance(record, dict) or record.get("gateway_state") != "running":
+        return False, f"standalone gateway runtime record for {name} is missing or not running", record if isinstance(record, dict) else {}
+    try:
+        record_pid = int(record.get("pid"))
+    except (TypeError, ValueError):
+        return False, f"standalone gateway runtime PID for {name} is invalid", record
+    if record_pid != pid:
+        return False, f"standalone gateway runtime PID {record_pid} does not match {name} s6 PID {pid}", record
+    age = gateway_heartbeat_age_seconds(record)
+    if age is None:
+        return False, f"standalone gateway heartbeat for {name} is missing or invalid", record
+    if age > 120:
+        return False, f"standalone gateway heartbeat for {name} is stale ({int(age)}s old)", record
+    if age < -30:
+        return False, f"standalone gateway heartbeat for {name} is {int(-age)}s in the future", record
+    pid_after = exact_gateway_s6_pid(name)
+    if pid_after != pid:
+        return False, f"standalone gateway s6 PID for {name} changed during verification", record
+    return True, f"live standalone s6 gateway verified for {name}", record
+
+
+def gateway_platform_state(record: dict[str, Any], key: str) -> str:
+    platforms = record.get("platforms") if isinstance(record, dict) else None
+    row = platforms.get(key) if isinstance(platforms, dict) else None
+    return str(row.get("state") or "").strip().lower() if isinstance(row, dict) else ""
+
+
 def http_ok(url: str, headers: dict[str, str] | None = None, timeout: float = 3.0) -> bool:
     """True only for a successful application-level HTTP response."""
     try:
@@ -697,9 +805,9 @@ def main() -> int:
         })
     c["profiles"] = {"status": "DISABLED" if not selected("multiAgent") else ("CONFIGURED" if all(p["status"] == "CONFIGURED" for p in report["profiles"]) else "PARTIAL"), "detail": f"{len(report['profiles'])} managed profile(s)"}
 
-    # Explicit gateway.standalone choices are user-owned topology. Only retired
-    # multiplex overrides and flags recorded as temporary by this installer need
-    # automatic repair.
+    # Explicit gateway.standalone choices are user-owned topology. The default
+    # profile's gateway.multiplex_profiles=true is Hermes' canonical durable host-
+    # multiplexer setting; worker/top-level/disabled overrides remain repair findings.
     topology_paths = [("default", root / "data/hermes/config.yaml")]
     managed_names: set[str] = set()
     try:
@@ -709,6 +817,11 @@ def main() -> int:
     managed_names.update(p["name"] for p in report["profiles"] if p.get("name"))
     topology_paths.extend((name, root / "data/hermes/profiles" / name / "config.yaml") for name in sorted(managed_names))
     multiplex_profiles = [name for name, path in topology_paths if yaml_multiplex_enabled(path)]
+    expected_shared_profiles = {"default"}
+    for name in sorted(managed_names):
+        path = root / "data/hermes/profiles" / name / "config.yaml"
+        if path.is_file() and not yaml_gateway_standalone(path):
+            expected_shared_profiles.add(name)
     temporary_gateway_profiles: list[str] = []
     temporary_gateway_record_invalid = False
     temporary_gateway_record = root / ".installer-temporary-standalone-profiles.json"
@@ -719,32 +832,55 @@ def main() -> int:
     except Exception:
         temporary_gateway_record_invalid=temporary_gateway_record.exists()
     env_override_locations: list[str] = []
-    env_paths = [("container runtime", root / "secrets/hermes-runtime.env"), ("default", root / "data/hermes/.env")]
-    env_paths.extend((name, root / "data/hermes/profiles" / name / ".env") for name in sorted(managed_names))
-    for label, env_path in env_paths:
+    env_paths = [
+        ("container runtime", root / "secrets/hermes-runtime.env", True),
+        ("default", root / "data/hermes/.env", True),
+    ]
+    env_paths.extend((name, root / "data/hermes/profiles" / name / ".env", False) for name in sorted(managed_names))
+    for label, env_path, allow_true in env_paths:
         try:
             for line in env_path.read_text(encoding="utf-8").splitlines():
                 if not line.startswith("GATEWAY_MULTIPLEX_PROFILES="):
                     continue
                 value=line.split("=",1)[1].strip().lower()
-                # The current explicit `true` override is supported and already
-                # requests the shared topology. Only retired false/invalid values
-                # need repair; the installer removes false while preserving true.
+                if value == "true" and allow_true:
+                    continue
                 if value in {"false", "no", "off", "0"}:
-                    env_override_locations.append(label)
-                elif value != "true":
+                    env_override_locations.append(label + " (retired disabled value)")
+                elif value == "true":
+                    env_override_locations.append(label + " (worker override)")
+                else:
                     env_override_locations.append(label + " (invalid value)")
         except Exception:
             pass
-    if multiplex_profiles or temporary_gateway_profiles or env_override_locations or temporary_gateway_record_invalid:
-        detail_bits=[]
-        if multiplex_profiles: detail_bits.append("retired multiplex YAML settings: " + ", ".join(multiplex_profiles))
-        if temporary_gateway_profiles: detail_bits.append("installer-owned temporary standalone profiles: " + ", ".join(temporary_gateway_profiles))
-        if temporary_gateway_record_invalid: detail_bits.append("installer temporary standalone ownership record is invalid")
-        if env_override_locations: detail_bits.append("GATEWAY_MULTIPLEX_PROFILES override present in: " + ", ".join(env_override_locations))
-        c["gatewayTopology"] = {"status": "PARTIAL", "detail": "; ".join(detail_bits) + "; Resume / repair will remove retired settings and migrate installer-managed gateways while preserving explicit standalone choices"}
+
+    shared_gateway_live = False
+    shared_gateway_detail = "runtime not tested"
+    shared_gateway_record: dict[str, Any] = {}
+    marker_present = (root / ".installer-gateway-multiplex-owned").exists()
+    if docker_available and not args.offline and not runtime_stopped(hermes_state):
+        shared_gateway_live, shared_gateway_detail, shared_gateway_record = verify_shared_gateway_runtime(root, expected_shared_profiles)
+
+    topology_issues: list[str] = []
+    if multiplex_profiles: topology_issues.append("conflicting multiplex YAML settings: " + ", ".join(multiplex_profiles))
+    if temporary_gateway_profiles: topology_issues.append("installer-owned temporary standalone profiles: " + ", ".join(temporary_gateway_profiles))
+    if temporary_gateway_record_invalid: topology_issues.append("installer temporary standalone ownership record is invalid")
+    if env_override_locations: topology_issues.append("conflicting GATEWAY_MULTIPLEX_PROFILES override in: " + ", ".join(env_override_locations))
+    if managed_names and not marker_present: topology_issues.append("installer shared-gateway ownership marker is missing")
+
+    if topology_issues:
+        c["gatewayTopology"] = {"status": "PARTIAL", "detail": "; ".join(topology_issues) + "; Resume / repair will preserve explicit standalone choices and reconcile only installer-owned topology"}
+    elif managed_names and docker_available and not args.offline and not runtime_stopped(hermes_state):
+        if shared_gateway_live:
+            c["gatewayTopology"] = {"status": "CONFIGURED", "detail": "Hermes shared host gateway is durably configured and live-verified: " + shared_gateway_detail}
+        elif is_settling(hermes_state):
+            c["gatewayTopology"] = {"status": "STARTING", "detail": "Hermes container/shared gateway is still settling: " + shared_gateway_detail}
+        else:
+            c["gatewayTopology"] = {"status": "PARTIAL", "detail": "shared gateway failed live convergence verification: " + shared_gateway_detail + "; Resume / repair will verify before any migration retry"}
+    elif managed_names:
+        c["gatewayTopology"] = {"status": "CONFIGURED", "detail": "shared-gateway durable config/ownership is present; runtime not tested because the stack is stopped/offline"}
     else:
-        c["gatewayTopology"] = {"status": "CONFIGURED", "detail": "Hermes host gateway multiplexer is active"}
+        c["gatewayTopology"] = {"status": "CONFIGURED", "detail": "default gateway topology is configured; no installer-managed secondary profile requires shared-gateway ownership"}
 
     matrix_cfg = (root / "data/synapse/homeserver.yaml").is_file() and (root / "secrets/matrix-bot.env").is_file()
     matrix_run = False if args.offline else http_ok(f"http://127.0.0.1:{matrix_port}/health")
@@ -805,9 +941,9 @@ def main() -> int:
         matrix_detail += "; Synapse is not reachable from inside hermes-agent"
     c["matrix"] = {"status": matrix_status, "detail": matrix_detail if matrix_cfg else "Matrix bootstrap incomplete"}
 
-    # Matrix-enabled secondary profiles are intentionally distinct from ordinary workers:
-    # Kanban-only profiles are healthy while stopped, but a profile explicitly selected for
-    # Matrix must have its own identity/room/model binding and a resident profile gateway.
+    # Matrix-enabled secondary profiles keep independent identity/room/E2EE state,
+    # but non-standalone profiles are served by the verified default host multiplexer.
+    # Explicit gateway.standalone=true remains user-owned and uses its exact s6 slot.
     profile_matrix_rows: list[dict[str, Any]] = []
     for worker in opts.get("workers", []) if isinstance(opts.get("workers"), list) else []:
         if not isinstance(worker, dict):
@@ -845,6 +981,10 @@ def main() -> int:
         )
         live_identity = False
         gateway_running = False
+        adapter_connected = False
+        standalone = yaml_gateway_standalone(pdir / "config.yaml")
+        topology_label = "explicit standalone gateway" if standalone else "shared host gateway"
+        adapter_state = ""
         if configured and docker_available and not args.offline:
             whoami = http_json(
                 f"http://127.0.0.1:{matrix_port}/_matrix/client/v3/account/whoami",
@@ -852,18 +992,25 @@ def main() -> int:
             )
             live_identity = isinstance(whoami, dict) and whoami.get("user_id") == expected_user
             if provisioning_state != "pending-manual":
-                rc, gateway_out = run(["docker", "exec", "-u", "hermes", "hermes-agent", "hermes", "-p", name, "gateway", "status"], timeout=20)
-                gateway_running = rc == 0 and "running" in gateway_out.lower()
+                if standalone:
+                    gateway_running, _, standalone_record = verify_standalone_gateway_runtime(root, name)
+                    adapter_state = gateway_platform_state(standalone_record, "matrix")
+                    adapter_connected = gateway_running and adapter_state == "connected"
+                else:
+                    served = shared_gateway_record.get("served_profiles") if isinstance(shared_gateway_record, dict) else None
+                    gateway_running = bool(shared_gateway_live and isinstance(served, list) and name in served)
+                    adapter_state = gateway_platform_state(shared_gateway_record, f"{name}:matrix")
+                    adapter_connected = gateway_running and adapter_state == "connected"
         if not configured:
             status = "PARTIAL"
             detail = "profile model/Matrix identity-room binding is incomplete"
         elif provisioning_state == "pending-manual":
             if args.offline or not docker_available:
                 status = "CONFIGURED"
-                detail = f"{expected_user} -> {room_id}; model={model}; resources ready, Hermes activation incomplete; Resume / repair will retry; runtime not tested"
+                detail = f"{expected_user} -> {room_id}; model={model}; resources ready, Hermes activation incomplete; Resume / repair/start will retry; runtime not tested"
             elif live_identity:
                 status = "CONFIGURED"
-                detail = f"{expected_user} -> {room_id}; model={model}; resources ready, Hermes activation incomplete; Resume / repair will retry"
+                detail = f"{expected_user} -> {room_id}; model={model}; resources ready, Hermes activation incomplete; Resume / repair/start will retry"
             elif matrix_status == "STOPPED":
                 status = "STOPPED"
                 detail = f"{expected_user} -> {room_id}; model={model}; resources preserved, Matrix is stopped"
@@ -872,42 +1019,48 @@ def main() -> int:
                 detail = f"{expected_user} -> {room_id}; model={model}; incomplete activation token identity failed live verification"
         elif args.offline or not docker_available:
             status = "CONFIGURED"
-            detail = f"{expected_user} -> {room_id}; model={model}; runtime not tested"
-        elif live_identity and gateway_running and matrix_internal_ready and cross_signing_state == "pending":
+            detail = f"{expected_user} -> {room_id}; model={model}; topology={topology_label}; runtime not tested"
+        elif live_identity and gateway_running and adapter_connected and matrix_internal_ready and cross_signing_state == "pending":
             status = "CONFIGURED"
-            detail = f"{expected_user} -> {room_id}; model={model}; independent gateway running; E2EE cross-signing persistence pending; Resume / repair will retry"
-        elif live_identity and gateway_running and matrix_internal_ready:
+            detail = f"{expected_user} -> {room_id}; model={model}; {topology_label} running; Matrix adapter connected; E2EE cross-signing persistence pending; Resume / repair will retry"
+        elif live_identity and gateway_running and adapter_connected and matrix_internal_ready:
             status = "RUNNING"
-            detail = f"{expected_user} -> {room_id}; model={model}; independent gateway running; cross-signing persisted"
+            detail = f"{expected_user} -> {room_id}; model={model}; {topology_label} running; Matrix adapter connected; cross-signing persisted"
         elif matrix_status == "STARTING" or is_settling(hermes_state):
             status = "STARTING"
             detail = f"{expected_user} -> {room_id}; model={model}; Matrix/Hermes runtime is still starting"
         elif matrix_status == "STOPPED" or runtime_stopped(hermes_state):
             status = "STOPPED"
-            detail = f"{expected_user} -> {room_id}; model={model}; stack/profile gateway stopped"
+            detail = f"{expected_user} -> {room_id}; model={model}; Matrix/gateway runtime is stopped"
         else:
             status = "BROKEN"
-            if gateway_running and not matrix_internal_ready:
-                detail = f"{expected_user} -> {room_id}; model={model}; gateway process is running but Synapse is unreachable from inside hermes-agent"
+            if not standalone and not gateway_running:
+                detail = f"{expected_user} -> {room_id}; model={model}; profile is not proven served by the live shared gateway"
+            elif gateway_running and not adapter_connected:
+                detail = f"{expected_user} -> {room_id}; model={model}; {topology_label} is running but Matrix adapter state is {adapter_state or 'missing'}"
+            elif gateway_running and not matrix_internal_ready:
+                detail = f"{expected_user} -> {room_id}; model={model}; {topology_label} is running but Synapse is unreachable from inside hermes-agent"
             else:
-                detail = f"{expected_user} -> {room_id}; model={model}; identity or independent gateway failed live verification"
-        profile_matrix_rows.append({"name": name, "status": status, "detail": detail, "userId": expected_user, "roomId": room_id, "model": model, "crossSigningState": cross_signing_state})
+                detail = f"{expected_user} -> {room_id}; model={model}; identity or {topology_label} failed live verification"
+        profile_matrix_rows.append({"name": name, "status": status, "detail": detail, "userId": expected_user, "roomId": room_id, "model": model, "crossSigningState": cross_signing_state, "gatewayMode": "standalone" if standalone else "shared", "matrixAdapterState": adapter_state})
     report["profileMatrix"] = profile_matrix_rows
     if not selected("matrix") or not profile_matrix_rows:
         c["profileMatrix"] = {"status": "DISABLED", "detail": "no secondary profile selected for Matrix"}
     elif any(x["status"] == "BROKEN" for x in profile_matrix_rows):
-        c["profileMatrix"] = {"status": "BROKEN", "detail": "one or more Matrix-enabled profile gateways/identities failed live verification"}
+        c["profileMatrix"] = {"status": "BROKEN", "detail": "one or more Matrix-enabled profile identities/gateway routes failed live verification"}
     elif any(x["status"] == "PARTIAL" for x in profile_matrix_rows):
         c["profileMatrix"] = {"status": "PARTIAL", "detail": "one or more Matrix-enabled profiles are not fully provisioned"}
     elif any(x["status"] == "STARTING" for x in profile_matrix_rows):
-        c["profileMatrix"] = {"status": "STARTING", "detail": "one or more Matrix-enabled profile gateways are still starting"}
+        c["profileMatrix"] = {"status": "STARTING", "detail": "one or more Matrix-enabled profile routes are still starting"}
     elif any(x["status"] == "STOPPED" for x in profile_matrix_rows):
-        c["profileMatrix"] = {"status": "STOPPED", "detail": "Matrix-enabled profile configuration is preserved but its gateway is stopped"}
+        c["profileMatrix"] = {"status": "STOPPED", "detail": "Matrix-enabled profile configuration is preserved but its gateway route is stopped"}
     elif all(x["status"] in {"RUNNING", "CONFIGURED"} for x in profile_matrix_rows):
         pending_count = sum("Hermes activation incomplete" in x.get("detail", "") for x in profile_matrix_rows)
-        detail = f"{len(profile_matrix_rows)} independent profile Matrix identity/room binding(s)"
+        shared_count = sum(x.get("gatewayMode") == "shared" for x in profile_matrix_rows)
+        standalone_count = len(profile_matrix_rows) - shared_count
+        detail = f"{len(profile_matrix_rows)} profile Matrix identity/room binding(s); shared={shared_count}; explicit-standalone={standalone_count}"
         if pending_count:
-            detail += f"; {pending_count} profile(s) need automatic activation retry via Resume / repair"
+            detail += f"; {pending_count} profile(s) need automatic activation retry via Resume / repair/start"
         c["profileMatrix"] = {"status": "RUNNING" if any(x["status"] == "RUNNING" for x in profile_matrix_rows) else "CONFIGURED", "detail": detail}
     else:
         c["profileMatrix"] = {"status": "UNKNOWN", "detail": "profile Matrix state could not be classified"}

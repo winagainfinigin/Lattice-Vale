@@ -1,4 +1,4 @@
-# LatticeVale 14.6.2 Hotfix Architecture
+# LatticeVale 14.6.4 Corrective Hotfix Architecture
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -44,6 +44,10 @@ Windows host snapshot + live WSL probes
                   v
        Repair planner / diagnostics
 ```
+
+## Hermes gateway topology
+
+The canonical steady state has one default host gateway with `gateway.multiplex_profiles: true`. Installer-managed named profiles without an explicit `gateway.standalone: true` opt-out are served by that process and appear in the default gateway's live `served_profiles` record. Explicit standalone profiles retain their exact `/run/service/gateway-<profile>` s6 slot. `.installer-gateway-multiplex-owned` records LatticeVale ownership only; repair/start/audit verify live PID, heartbeat freshness, served-profile membership, PID stability, and enabled Matrix adapter connectivity independently before treating the topology as healthy. A healthy connected gateway is preserved rather than restarted or remigrated merely because a lifecycle command was invoked again.
 
 ## Ownership
 

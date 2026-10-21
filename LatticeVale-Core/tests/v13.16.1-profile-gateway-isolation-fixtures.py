@@ -20,14 +20,14 @@ assert "cfg.pop('multiplex_profiles',None)" in cfg
 clone=cfg[cfg.index("PY_PROFILE_SAFE_CLONE"):cfg.index("PY_PROFILE_SAFE_CLONE", cfg.index("PY_PROFILE_SAFE_CLONE")+1)]
 assert "cfg.pop('multiplex_profiles',None)" in clone
 assert "gateway['standalone']=True" in clone
-assert "line.startswith('GATEWAY_MULTIPLEX_PROFILES=') and line.split('=',1)[1].strip().lower() in {'false','no','off','0'}" in clone
+assert "not line.startswith('GATEWAY_MULTIPLEX_PROFILES=')" in clone
 
 # Read-only audit must surface either YAML or runtime-env opt-in as a repair condition.
 assert 'yaml_multiplex_enabled' in audit
 assert 'GATEWAY_MULTIPLEX_PROFILES' in audit
 assert 'env_override_locations' in audit
 assert 'gatewayTopology' in audit
-assert 'Hermes host gateway multiplexer is active' in audit
+assert 'Hermes shared host gateway is durably configured and live-verified' in audit
 
 # Current documentation states that managed profiles converge to shared multiplexing.
 assert 'multiplex' in readme.lower()

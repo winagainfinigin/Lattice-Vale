@@ -60,8 +60,8 @@ Run public entry points from the repository root using `./installer/...` as show
 
 When adaptive container resource limits are enabled, current policy v13:
 
-- CPU ceilings scale from processors actually visible to WSL (`nproc` semantics): Hermes about 75%, managed Ollama 100%, medium services about 50%, light stores about 25%, with a one-CPU minimum. Hermes may rise toward 100% when additional persistent Matrix profile gateways or Kanban concurrency above 3 increase in-container workload.
-- Memory minima are computed only from enabled services and configured Hermes topology. The 1024 MiB Hermes baseline covers the default gateway plus up to one secondary Matrix gateway and Kanban concurrency up to 3; each additional persistent secondary Matrix gateway adds 192 MiB and each Kanban slot above 3 adds 96 MiB, capped at a 4096 MiB topology floor. If those minima cannot fit inside the post-reserve container budget, policy v9 refuses the plan instead of proportionally shrinking containers into implausibly small hard limits.
+- CPU ceilings scale from processors actually visible to WSL (`nproc` semantics): Hermes about 75%, managed Ollama 100%, medium services about 50%, light stores about 25%, with a one-CPU minimum. Hermes may rise toward 100% when additional Matrix-enabled profile workload or Kanban concurrency above 3 increases in-container work; this workload signal does not imply one resident gateway process per shared profile.
+- Memory minima are computed only from enabled services and configured Hermes workload. The compatibility-named `MATRIX_PROFILE_GATEWAYS` policy input counts Matrix-enabled secondary profile workload, including adapters served by the shared host gateway; it is not a count of independent resident gateway processes. The 1024 MiB Hermes baseline covers the common profile load and Kanban concurrency up to 3; additional profile/Kanban pressure adds bounded headroom, capped at a 4096 MiB topology floor. If those minima cannot fit inside the post-reserve container budget, policy refuses the plan instead of shrinking containers into implausibly small hard limits.
 - Clean/repair/start reconciliation verifies effective Compose `mem_limit` and `cpus` against live Docker `HostConfig.Memory` and `HostConfig.NanoCpus`; user `compose.override.yaml` remains final and authoritative.
 
 
@@ -249,7 +249,7 @@ When Matrix and named profiles are enabled, each selected Matrix-enabled profile
 - installer-created rooms pinned and verified at Matrix room version **10**
 - its own E2EE/recovery state
 - its own room/user allowlists
-- its own independently supervised Hermes Docker/s6 gateway
+- routing through the shared Hermes host gateway by default, verified through `served_profiles` plus the namespaced `<profile>:matrix` adapter state; an explicit user-owned `gateway.standalone: true` choice retains its own exact Docker/s6 gateway and `matrix` adapter state
 
 Existing Matrix identities, including `@hermes:hermes.local`, are preserved. Fresh local-only installs use `hermes.local`; fresh remote-capable installs resolve the authenticated Tailscale hostname before creating accounts. Element's homeserver URL remains a separate client setting, and existing `.local` identities require manual URL entry for remote clients. If an older LatticeVale release created a managed room at another version, Resume / repair preserves that room and creates a replacement encrypted v10 room; it does not attempt an in-place downgrade. LatticeVale does not use an invented `matrix2` configuration namespace. Installer-managed Hermes profiles converge to the shared host gateway after provisioning while preserving explicit standalone choices.
 

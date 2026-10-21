@@ -1,6 +1,6 @@
 # LatticeVale v14.6.4
 
-> **v14.6.4 release:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge, and keeps exact matching Serve routes in place. Installer-managed Hermes profiles converge to the shared gateway multiplexer; after a migration error, reconcile accepts live convergence only when the default s6 PID, fresh gateway state, and expected non-standalone served profiles agree. Existing-stack runs include backup progress and a per-run backup skip; planned Ubuntu APT refresh includes elapsed progress and a per-run skip. Schema 24 remains compatible.
+> **v14.6.4 corrective hotfix:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge, and keeps exact matching Serve routes in place. Installer-managed non-standalone Hermes profiles converge to the shared host gateway while explicit `gateway.standalone: true` profiles remain independent. Repair and normal start preserve an already healthy gateway instead of restarting or remigrating it, but only after exact s6 PID, fresh gateway state, complete `served_profiles`, stable-PID, and Matrix-adapter checks pass. Existing-stack runs include backup progress and a per-run backup skip; planned Ubuntu APT refresh includes elapsed progress and a per-run skip. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
@@ -191,7 +191,7 @@ Windows 11
 Depending on the selected installation options, LatticeVale can provide:
 
 - Hermes installation, configuration, gateways, providers/models, skills, and memory integration
-- multi-profile Hermes with independent gateways and Matrix identities
+- multi-profile Hermes with shared host-gateway service by default, explicit standalone gateway opt-outs, and independent Matrix identities
 - Kanban triage, decomposition, dispatch, review, dependencies, and concurrency controls
 - Matrix/Synapse provisioning and cross-signing persistence
 - Honcho local contextual-memory infrastructure

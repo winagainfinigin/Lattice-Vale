@@ -87,9 +87,10 @@ assert '.matrix-registration-secret-installer-managed' in cfg
 assert 'if [[ "$matrix_registration_secret_managed" == true ]]' in cfg
 assert "cfg.pop('registration_shared_secret', None)" in cfg
 
-# Matrix-enabled workers run a profile gateway; ordinary Kanban-only workers stay non-resident.
+# Matrix-enabled workers use the shared host gateway by default; explicit standalone remains independent.
 assert "select(.matrix.enabled == true) | .name" in cfg
-assert 'Named profiles' in cfg and 'remain stopped unless' in cfg
+assert 'non-standalone profiles are served by that host gateway after convergence' in cfg
+assert 'profile_gateway_is_explicit_standalone_configure' in cfg
 
 # Backups/audits include the new profile-Matrix metadata without exposing it as ordinary public state.
 assert '.matrix-profiles' in manage
