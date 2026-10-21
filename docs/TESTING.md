@@ -37,3 +37,7 @@ The Windows Obsidian check now verifies an executable through registered Windows
 ## 14.6.5 follow-up fixtures
 
 `LatticeVale-Core/tests/v14.6.5-preservation-hotfix-fixtures.py` executes the installer-embedded Windows-state Python writer against temporary state files: installed Obsidian/live Windows metadata, Linux checkpoint preservation, repeatable writes, optional event-log failure, malformed existing JSON, and atomic temporary-file cleanup. It also simulates OOM/no-OOM Docker inspect outputs for the bounded, non-mutating warning path. The deterministic fixture count remains **149**. These tests do not substitute for PowerShell/WSL end-to-end execution or measuring actual QMD memory usage on the target PC.
+
+### QMD allocation correction regression (14.6.5)
+
+`tests/v14.6.5-qmd-resource-floor-fixtures.py` exercises minimum-fit, full multi-service budget conservation, monotonic service allocations, disabled-service identity, under-budget refusal, and the shipping generator/verifier's shared canonical resource formula. Verify that Resume / repair changes stale 304 MiB QMD indexer ceilings rather than concluding an unchanged policy fingerprint is current. Live WSL/Docker verification of the actual default QMD embedding workload remains necessary; fixture results do not prove `qmd embed` succeeds under every container/runtime environment.

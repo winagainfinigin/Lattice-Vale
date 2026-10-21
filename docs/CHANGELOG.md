@@ -1,5 +1,10 @@
 # Changelog
 
+#### 14.6.5 QMD memory-floor hotfix (same release version)
+
+Raised the canonical adaptive minimum for the QMD MCP/search role and CPU embedding indexer to 1024 MiB each, within the existing conserved container budget. This addresses repeated cgroup OOM kills during `embeddinggemma-300M-Q8_0` loading under a 304 MiB indexer ceiling. The existing canonical verifier invalidates undersized same-version allocations so Resume / repair applies changed Compose limits, while respecting user-owned overrides and refusing unsupported low-memory combinations. Added model-aware floor regression checks without touching existing identities or persisted QMD data.
+
+
 ## 14.6.5 same-version hotfix - 2026-10-20
 
 

@@ -101,3 +101,107 @@ for value, expected in [('true',0),('false',1)]:
     assert result.returncode==expected,(result.returncode,result.stderr)
     assert ('hermes-qmd-indexer records an OOM event' in result.stderr)==(expected==0)
 print('14.6.5 Windows-state and OOM-observability regression fixtures passed')
+
+# QMD CPU embedding/OOM corrective: test the canonical planner used both by the
+# overlay generator and runtime-policy verifier, not a fixture-local allocator.
+# 304 MiB repeatedly killed the default GGUF model on a live 12 GiB WSL host;
+# the model artifact alone is about 300 MB, before runtime/context buffers.
+from itertools import product
+import hashlib
+
+selected = {'matrix': True, 'searxng': True, 'qmd': True, 'honcho': True}
+mem_mib = 11964
+budget = arch.host_memory_budget(mem_mib, 'cpu', True, False)['containerBudgetMiB']
+
+def plan(budget_mib, *, qmd=True, floor=5200):
+    return arch.service_memory_plan(
+        budget_mib, matrix=True, searxng=True, qmd=qmd, ollama=True,
+        honcho=True, hermes_floor=1024, ollama_floor=floor,
+    )
+
+current = plan(budget)
+assert budget < mem_mib and sum(current.values()) <= budget
+assert current['qmd-indexer'] >= 1024 and current['qmd'] >= 1024, current
+assert current['ollama'] >= 5200 and current['hermes'] >= 1024
+assert set(current) == set(arch.SERVICE_ORDER)
+assert 'qmd-indexer' not in plan(budget, qmd=False)
+assert 'qmd' not in plan(budget, qmd=False)
+
+# Across enabled combinations, neither worker nor MCP service can shrink under
+# their model-aware floor; tiny budgets fail closed rather than stealing RAM.
+for matrix, searxng, qmd, honcho in product((False, True), repeat=4):
+    opts = dict(matrix=matrix, searxng=searxng, qmd=qmd, honcho=honcho)
+    allocation = arch.service_memory_plan(16384, ollama=False,
+        hermes_floor=1024, ollama_floor=0, **opts)
+    assert sum(allocation.values()) <= 16384
+    if qmd:
+        assert allocation['qmd-indexer'] >= 1024 and allocation['qmd'] >= 1024
+    else:
+        assert 'qmd-indexer' not in allocation and 'qmd' not in allocation
+
+# The minimum-capacity full-stack shape must reject one MiB less than the
+# canonical sum of service minima, while conserving CPU/Ollama priorities.
+low, high = 384, budget
+while low < high:
+    mid = (low + high) // 2
+    try:
+        plan(mid)
+    except ValueError:
+        low = mid + 1
+    else:
+        high = mid
+threshold = low
+assert threshold > 384 and sum(plan(threshold).values()) <= threshold
+try:
+    plan(threshold - 1)
+except ValueError as exc:
+    assert 'cannot safely fit selected services' in str(exc)
+else:
+    raise AssertionError('QMD workload floors were bypassed by the planner')
+previous = None
+for extra in (0, 137, 971, 2997):
+    allocation = plan(threshold + extra)
+    if previous:
+        assert all(allocation[k] >= previous[k] for k in allocation)
+    previous = allocation
+
+# In-place same-version repair must reject the old allocation rather than
+# accepting an obsolete policy only because its SHA-256 fingerprint is valid.
+# The canonical validator, not a separate shell-only test, owns this decision.
+compat = arch.parse_compatibility(ROOT / 'compatibility.conf')
+memory = arch.host_memory_budget(mem_mib, 'cpu', True, False)
+state = {
+    'POLICY_VERSION': '13', 'RESOURCE_POLICY_MODE': 'adaptive',
+    'MEM_MIB': str(mem_mib), 'CPUS': '8', 'OLLAMA_ACCELERATION': 'cpu',
+    'MANAGED_OLLAMA_SELECTED': 'true', 'DIRECTML_SELECTED': 'false',
+    'RESERVE_MIB': str(memory['reserveMiB']),
+    'DIRECTML_HOST_RESERVE_MIB': str(memory['directmlHostReserveMiB']),
+    'BUDGET_MIB': str(memory['containerBudgetMiB']),
+    'HERMES_MIN_MIB': '1024', 'MATRIX_PROFILE_GATEWAYS': '1',
+    'KANBAN_CONCURRENCY': '3', 'OLLAMA_MODEL_FLOOR_MIB': '5200',
+}
+for service, amount in current.items():
+    state['LIMIT_' + service.upper().replace('-', '_') + '_MIB'] = str(amount)
+
+def seal(payload):
+    material = ''.join(f'{k}={v}\n' for k, v in sorted(payload.items()) if k != 'POLICY_FINGERPRINT')
+    payload['POLICY_FINGERPRINT'] = hashlib.sha256(material.encode()).hexdigest()
+    return payload
+
+valid = arch.validate_runtime_policy_state(seal(state.copy()), compat, options=selected)
+assert valid['services']['qmd-indexer'] >= 1024
+old = state.copy()
+old['LIMIT_QMD_INDEXER_MIB'] = '304'
+try:
+    arch.validate_runtime_policy_state(seal(old), compat, options=selected)
+except ValueError as exc:
+    assert 'service memory plan mismatch' in str(exc)
+else:
+    raise AssertionError('same-version verifier accepted undersized QMD indexer')
+
+sh = (ROOT/'stack/configure-stack.sh').read_text()
+assert 'runtime-policy.py service-plan' in sh
+assert 'runtime-policy.py verify' in sh
+assert 'state_mark infrastructure pending' in sh and 'state_mark reconcile pending' in sh
+assert 'QMD adaptive memory ceilings:' in sh
+print('14.6.5 QMD adaptive memory/repair regression fixtures passed')

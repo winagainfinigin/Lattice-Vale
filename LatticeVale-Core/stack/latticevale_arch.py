@@ -1318,7 +1318,14 @@ def _service_specs(
     if searxng:
         base += [("searxng-valkey", 1, 64, 2048), ("searxng", 2, 192, 3072)]
     if qmd:
-        base += [("qmd", 2, 192, 4096), ("qmd-indexer", 2, 192, 4096)]
+        # QMD's default CPU embedding model is approximately 300 MB on disk,
+        # *before* node-llama-cpp model/context buffers, SQLite, and Bun runtime.
+        # The previous 192 MiB indexer floor produced 304 MiB live ceilings on
+        # otherwise capable WSL hosts and repeatedly OOM-killed `qmd embed`.
+        # Protect both the background embedding worker and the MCP/search daemon
+        # within the SAME conserved Docker budget; never overcommit the envelope.
+        # An explicit user Compose override remains authoritative downstream.
+        base += [("qmd", 2, 1024, 4096), ("qmd-indexer", 3, 1024, 4096)]
     if honcho:
         base += [
             ("honcho-db", 2, 192, 4096), ("honcho-redis", 1, 64, 2048),

@@ -50,12 +50,24 @@ assert "resource_policy[CPU_OLLAMA_MILLI]" in emit and "resource_policy[LIMIT_OL
 assert '"$ollama_cpu" "${mem_limits[ollama]}"' not in emit
 assert '"$hermes_cpu" "${mem_limits[hermes]}"' not in emit
 
-# Compact 8 GiB WSL target: service allocation is owned by the canonical engine.
+# Compact 8 GiB WSL: all optional services plus a 4 GiB Ollama model floor
+# cannot fit once both QMD model-backed roles receive adequate memory. Refuse
+# this *unsafe selection*, not silently reduce the QMD/Ollama memory ceilings.
+try:
+    service_memory_plan(7373, matrix=True, searxng=True, qmd=True,
+                        ollama=True, honcho=True, hermes_floor=1024, ollama_floor=4096)
+except ValueError as exc:
+    assert 'cannot safely fit selected services' in str(exc)
+else:
+    raise AssertionError('compact full-stack plan overcommitted the 8 GiB host')
+# The same workload is admitted once its actual conserved container budget can
+# fit all role minima; a lighter choice remains available on compact hosts.
 alloc = service_memory_plan(
-    7373, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True,
+    9000, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True,
     hermes_floor=1024, ollama_floor=4096,
 )
-assert sum(alloc.values()) <= 7373, alloc
+assert sum(alloc.values()) <= 9000, alloc
+assert alloc['qmd'] >= 1024 and alloc['qmd-indexer'] >= 1024
 assert alloc["hermes"] >= 1024 and alloc["ollama"] >= 4096, alloc
 
 # Diverse single/multi-GPU coordination remains per-device, not aggregate VRAM.

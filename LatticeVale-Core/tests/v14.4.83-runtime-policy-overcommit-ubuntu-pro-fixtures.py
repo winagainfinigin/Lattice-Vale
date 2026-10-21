@@ -41,7 +41,9 @@ assert 'state_mark infrastructure pending' in cfg and 'state_mark reconcile pend
 sys.path.insert(0, str(ROOT / 'stack'))
 from latticevale_arch import service_memory_plan
 required_services = ('hermes','synapse-db','synapse','searxng-valkey','searxng','qmd','qmd-indexer','honcho-db','honcho-redis','honcho-api','honcho-deriver','ollama')
-for budget in (2048, 3077, 4099, 5123, 6149, 7001, 8001):
+# The QMD model-backed roles now carry a protected 1024 MiB each, so the
+# former 8953 MiB full-stack sample must be refused rather than overcommitted.
+for budget in (2048, 3077, 4099, 5123, 6149, 7001, 8001, 8953):
     try:
         service_memory_plan(budget, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, hermes_floor=1024, ollama_floor=5120)
     except ValueError as exc:
@@ -49,12 +51,12 @@ for budget in (2048, 3077, 4099, 5123, 6149, 7001, 8001):
     else:
         raise AssertionError(f'unsafe full-stack budget unexpectedly admitted: {budget}')
 observed_alloc = None
-for budget in (8953, 10243, 12293):
+for budget in (10243, 12293):
     alloc = service_memory_plan(budget, matrix=True, searxng=True, qmd=True, ollama=True, honcho=True, hermes_floor=1024, ollama_floor=5120)
     assert sum(alloc.values()) <= budget, (sum(alloc.values()), budget, alloc)
     for required in required_services:
         assert required in alloc and alloc[required] > 0, (required, budget, alloc)
-    if budget == 8953:
+    if budget == 10243:
         observed_alloc = alloc
 assert observed_alloc is not None
 assert observed_alloc['ollama'] >= 5120, observed_alloc

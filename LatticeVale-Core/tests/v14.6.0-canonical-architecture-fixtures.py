@@ -235,7 +235,9 @@ for mem in ram_samples:
             if searxng:
                 minimum += 64 + 192
             if qmd:
-                minimum += 192 + 192
+                # Default QMD embedding worker and MCP/search role need their
+                # protected CPU-model runtime budgets, not the pre-hotfix 192 MiB.
+                minimum += 1024 + 1024
             if honcho:
                 minimum += 192 + 64 + 384 + 256
             if ollama:

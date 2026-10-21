@@ -1,6 +1,13 @@
 # Current v14.6.5 patch notes
 
 ## v14.6.5 same-version public-installer hotfix
+
+### 14.6.5 same-version QMD CPU embedding resource allocation correction
+
+- The canonical shared resource planner now assigns each enabled QMD role a 1024 MiB minimum: both QMD MCP/search and the background indexer. On a reported 12 GiB WSL host the previous 304 MiB indexer cgroup repeatedly killed default CPU embedding during model initialization; a successful Markdown update did not mean its ten pending vectors had been generated.
+- Both floors are included in the existing conserved aggregate Docker memory budget. If a service selection cannot fit, policy generation fails explicitly rather than stealing from the Ollama model floor, Hermes or the host reserve. The resource calculator, canonical verifier, generated Compose overlay, live-limit audit, and automatic repair consume the same planner. Same-version Resume / repair detects stale service allocations and reconciles containers when policy changes.
+- No policy/schema/version increment, automatic hardware tuning, user override overwrite, new package refresh, credential change, vault reset, or Tailscale authentication modification. QMD errors still need a real post-repair embedding retry to prove success.
+
 ### 14.6.5 same-version recovery-state and OOM-observability correction
 
 - Windows integration outcomes are transported as UTF-8/base64 JSON to the existing WSL user context. The state writer reads and preserves existing Linux checkpoints, atomically replaces only the verified `windows` snapshot, and confirms it by reading the saved JSON. Unreadable existing state is not reset or overwritten.
