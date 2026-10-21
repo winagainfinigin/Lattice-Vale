@@ -1223,7 +1223,7 @@ PY_RESTORE_TEMP_GATEWAYS
     # The ownership marker is evidence, never health proof. Give a just-started
     # gateway a short bounded chance to prove exact convergence before deciding a
     # migration is necessary. This also recovers a backup that lost only the marker.
-    if wait_live_multiplex_gateway_manage 6; then
+    if wait_live_multiplex_gateway_manage 12; then
       shared_gateway_ready=true
       if [[ ! -e .installer-gateway-multiplex-owned ]]; then
         echo 'Shared Hermes gateway is already converged; restoring the LatticeVale ownership marker without replaying migration.'

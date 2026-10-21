@@ -53,3 +53,8 @@ Diagnostics are derived state and must not contain user secrets. Do not publish 
 ## Confidence levels
 
 LatticeVale distinguishes static/source checks, deterministic fixtures, WSL integration, Docker integration, GPU/backend integration, and complete live Windows installer qualification. A passing static/fixture suite is strong regression evidence but is not represented as proof that every physical GPU/driver combination has been exercised live.
+
+
+### 14.6.5 Obsidian diagnostics
+
+The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.

@@ -5986,7 +5986,7 @@ PY_RESTORE_TEMP_GATEWAYS
   mapfile -t managed_profiles < <(grep -E '^[a-z0-9][a-z0-9_-]{0,31}$' .installer-managed-profiles | sort -u)
   if ((${#managed_profiles[@]})); then
     gateway_converged=false
-    if wait_live_multiplex_gateway_configure 6; then
+    if wait_live_multiplex_gateway_configure 12; then
       gateway_converged=true
       echo 'Hermes shared gateway is already live and serves every managed non-standalone profile; preserving it without replaying migration.'
     fi

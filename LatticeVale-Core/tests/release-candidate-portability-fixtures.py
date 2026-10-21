@@ -15,9 +15,9 @@ assert (root/'VERSION.txt').read_text().strip() in {'14.3.0','14.3.1','14.3.2','
 
 # The release runner is deterministic, sharded, and refuses generated tree contamination.
 for token in (
-    'EXPECTED_FIXTURE_COUNT = 148', '("01-core", 1, 25)', '("02-installer", 26, 50)',
+    'EXPECTED_FIXTURE_COUNT = 149', '("01-core", 1, 25)', '("02-installer", 26, 50)',
     '("03-repair-update", 51, 75)', '("04-resource-policy", 76, 100)',
-    '("05-gpu-directml", 101, 120)', '("06-release", 121, 148)',
+    '("05-gpu-directml", 101, 120)', '("06-release", 121, 149)',
     'PYTHONDONTWRITEBYTECODE', '__pycache__', '.pyc', '.pyo', '.tmp', '.bak', '.swp',
     '.DS_Store', 'Thumbs.db', 'skipped": 0',
 ):

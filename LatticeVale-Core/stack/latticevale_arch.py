@@ -1758,6 +1758,28 @@ def validate_runtime_policy_state(
     }
 
 
+# Only durable choices capable of changing the runtime resource envelope.
+# Transaction controls (backup, resume/update, APT refresh, shortcuts, etc.) are
+# deliberately excluded. Actual hardware and selected backend have separate hashes.
+RESOURCE_OPTION_KEYS = (
+    'dashboard', 'multiAgent', 'multiAgentEnabled', 'kanban', 'matrix', 'searxng', 'qmd',
+    'honcho', 'ollama', 'useGpuAcceleration', 'useHermesLocalAi',
+    'localTextBackend', 'ollamaBackend', 'ollamaAcceleration',
+    'inferenceBackendPreference', 'directmlFallbackPolicy',
+    'directmlVramMiB', 'directmlAdapterName', 'directmlGpuVendor',
+    'gpuPreferenceMode', 'gpuPreferenceId', 'gpuPreferencePnpDeviceId',
+    'gpuPreferenceName', 'gpuPreferenceVendor', 'ollamaTextModel',
+    'ollamaModel', 'localTextModel', 'localEmbeddingModel', 'directmlTextModel', 'honchoEmbeddingModel',
+    'kanbanWorkerLimit', 'kanbanMaxInProgress', 'kanbanMaxInProgressPerProfile', 'kanbanWorkersPerProfile', 'kanbanMaxWorkers',
+    'kanbanMaxWorkersPerProfile', 'adaptiveContainerLimits',
+    'profileCount', 'profiles', 'gatewayTopology', 'matrixProfiles',
+)
+
+
+def resource_options_projection(options: dict[str, Any]) -> dict[str, Any]:
+    return {key: options[key] for key in RESOURCE_OPTION_KEYS if key in options}
+
+
 def build_runtime_policy_document(state: dict[str, str], hardware: dict[str, Any], backends: dict[str, Any], compat: dict[str, str], options: dict[str, Any]) -> dict[str, Any]:
     validation = validate_runtime_policy_state(state, compat, options, hardware, backends)
     gpu = {
@@ -1799,12 +1821,12 @@ def build_runtime_policy_document(state: dict[str, str], hardware: dict[str, Any
         "provenance": {
             "hardwareFingerprint": hardware.get("hardwareFingerprint", ""),
             "backendFingerprint": backends.get("backendFingerprint", ""),
-            "sourceOptionsFingerprint": fingerprint(options),
+            "sourceOptionsFingerprint": fingerprint(resource_options_projection(options)),
         },
         # Retain top-level compatibility fields for older state-audit/repair readers.
         "hardwareFingerprint": hardware.get("hardwareFingerprint", ""),
         "backendFingerprint": backends.get("backendFingerprint", ""),
-        "sourceOptionsFingerprint": fingerprint(options),
+        "sourceOptionsFingerprint": fingerprint(resource_options_projection(options)),
         "policyFingerprint": validation["policyFingerprint"],
         # runtime-policy.json captures resource-relevant selection only. Transient
         # active fallback/health lives in backend-capabilities.json and must not make
@@ -1843,8 +1865,16 @@ def validate_runtime_policy_document(document: Any, state: dict[str, str], hardw
         raise ValueError("runtime-policy.json hardware fingerprint is stale")
     if document.get("backendFingerprint") != expected.get("backendFingerprint"):
         raise ValueError("runtime-policy.json backend fingerprint is stale")
-    if document.get("sourceOptionsFingerprint") != expected.get("sourceOptionsFingerprint"):
-        raise ValueError("runtime-policy.json source options fingerprint is stale")
+    old_fingerprint = document.get("sourceOptionsFingerprint")
+    canonical_fingerprint = expected.get("sourceOptionsFingerprint")
+    if old_fingerprint != canonical_fingerprint:
+        if old_fingerprint == fingerprint(options):
+            # Legacy identity is accepted only when its own document integrity
+            # is valid. The write entry point performs optional canonicalization.
+            actual_document_hash = fingerprint({k: v for k, v in document.items() if k not in ("generatedAt", "documentFingerprint")})
+            if document.get("documentFingerprint") == actual_document_hash:
+                return expected
+        raise ValueError("runtime-policy.json resource options fingerprint is stale")
     if document.get("documentFingerprint") != expected.get("documentFingerprint"):
         raise ValueError("runtime-policy.json canonical document fingerprint mismatch")
     return expected

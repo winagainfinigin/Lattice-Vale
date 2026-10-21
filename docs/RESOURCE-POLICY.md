@@ -60,3 +60,8 @@ The verifier recomputes and checks `RESERVE_MIB`, `DIRECTML_HOST_RESERVE_MIB`, a
 ## Runtime health versus resource topology
 
 Backend runtime-health records are diagnostic/transient evidence and carry a separate runtime-health fingerprint. A DirectML request falling back to Ollama does not change the resource-policy fingerprint when the configured DirectML host reserve, selected adapter/admission envelope, and fallback resource envelope are unchanged. Material hardware topology, durable user intent, or resource-relevant Ollama acceleration changes still invalidate and regenerate dependent policy. DirectML capacity is derived hardware state; a legacy saved `directmlVramMiB` is migration fallback only, not authoritative durable intent.
+
+
+### 14.6.5 canonical fingerprint
+
+The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.

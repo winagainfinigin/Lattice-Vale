@@ -71,7 +71,7 @@ assert 'if ! "$verifier" >/dev/null' not in post_verify
 
 # Same-version Resume/repair must prove an already-converged live gateway before migration.
 reconcile = CONFIGURE[CONFIGURE.index("stage_reconcile() {"):CONFIGURE.index("stage_kanban_gateway() {")]
-first_live_check = reconcile.index("wait_live_multiplex_gateway_configure 6")
+first_live_check = reconcile.index("wait_live_multiplex_gateway_configure 12")
 migration_call = reconcile.index("hermes gateway migrate --multiplex -y")
 assert first_live_check < migration_call
 assert "already live and serves every managed non-standalone profile" in reconcile[:migration_call]
@@ -92,7 +92,7 @@ assert "verify_matrix_adapter_runtime_configure default data/hermes/gateway_stat
 
 # Ordinary start treats the marker as evidence, not health proof, and only migrates after a failed live proof.
 startup = MANAGE[MANAGE.index("start_selected_matrix_profile_gateways() {"):MANAGE.index("refresh_adaptive_resource_policy() {")]
-assert startup.index("wait_live_multiplex_gateway_manage 6") < startup.index("hermes gateway migrate --multiplex -y")
+assert startup.index("wait_live_multiplex_gateway_manage 12") < startup.index("hermes gateway migrate --multiplex -y")
 assert "ownership marker is not backed by current live convergence" in startup
 assert "restoring the LatticeVale ownership marker without replaying migration" in startup
 assert "if ! wait_live_multiplex_gateway_manage 15; then" in startup

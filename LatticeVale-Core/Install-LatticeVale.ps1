@@ -6624,6 +6624,64 @@ function Test-WingetPackageInstalled([string]$Id) {
     } catch { return $null }
 }
 
+# Resolve Windows application identity from live, executable-backed evidence. Registry
+# labels alone are insufficient: old uninstall entries often outlive the binary.
+function Get-ObsidianInstallState {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    $registrations = 0
+    foreach ($hive in @('HKCU:', 'HKLM:')) {
+        foreach ($subkey in @('Software\Microsoft\Windows\CurrentVersion\Uninstall', 'Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall')) {
+            foreach ($item in @(Get-ChildItem -LiteralPath "$hive\$subkey" -ErrorAction SilentlyContinue)) {
+                $app = Get-ItemProperty -LiteralPath $item.PSPath -ErrorAction SilentlyContinue
+                if (-not $app -or [string]$app.DisplayName -notmatch '(?i)^Obsidian(?:\s|$)') { continue }
+                $registrations++
+                if ($app.InstallLocation) { $candidates.Add((Join-Path ([string]$app.InstallLocation) 'Obsidian.exe')) }
+                if ($app.DisplayIcon) {
+                    $icon = ([string]$app.DisplayIcon).Trim('"') -replace ',\s*-?\d+$', ''
+                    if ($icon -match '(?i)Obsidian\.exe$') { $candidates.Add($icon) }
+                }
+            }
+        }
+        foreach ($key in @("$hive\Software\Microsoft\Windows\CurrentVersion\App Paths\Obsidian.exe", "$hive\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\App Paths\Obsidian.exe")) {
+            $appPath = Get-Item -LiteralPath $key -ErrorAction SilentlyContinue
+            if ($appPath) {
+                $registrations++
+                $value = $appPath.GetValue('')
+                if ($value) { $candidates.Add([string]$value) }
+            }
+        }
+    }
+    foreach ($base in @($env:LOCALAPPDATA, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if (-not [string]::IsNullOrWhiteSpace($base)) {
+            $candidates.Add((Join-Path $base 'Obsidian\Obsidian.exe'))
+            $candidates.Add((Join-Path $base 'Programs\Obsidian\Obsidian.exe'))
+        }
+    }
+    $cmd = Get-Command Obsidian.exe -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source) { $candidates.Add([string]$cmd.Source) }
+    foreach ($candidate in @($candidates | Select-Object -Unique)) {
+        $path = [Environment]::ExpandEnvironmentVariables(([string]$candidate).Trim('"'))
+        if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            try {
+                $leaf = Get-Item -LiteralPath $path -ErrorAction Stop
+                if ($leaf.Name -ieq 'Obsidian.exe' -and $leaf.Length -gt 0) {
+                    return [pscustomobject]@{ State='CONFIGURED'; Detail="verified executable: $($leaf.FullName)" }
+                }
+            } catch { }
+        }
+    }
+    $winget = Test-WingetPackageInstalled 'Obsidian.Obsidian'
+    # A negative Winget list does not disprove a standalone installation. A
+    # positive entry with no executable is also insufficient to claim success.
+    if ($registrations -gt 0 -or $winget -eq $true) {
+        return [pscustomobject]@{ State='UNKNOWN'; Detail='registration/inventory exists but executable could not be verified' }
+    }
+    if ($null -eq $winget) {
+        return [pscustomobject]@{ State='UNKNOWN'; Detail='Winget inventory unavailable and no executable-backed installation found' }
+    }
+    return [pscustomobject]@{ State='NOT_INSTALLED'; Detail='no executable, Windows registration, or Winget package found' }
+}
+
 function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Options) {
     Write-Host "`n== Windows-side live audit ==" -ForegroundColor Cyan
 
@@ -6631,10 +6689,8 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
         @{ Label = 'Obsidian'; Id = 'Obsidian.Obsidian'; Selected = [bool](Get-OptionValue $Options 'obsidian' $false) }
     )) {
         if (-not $pkg.Selected) { Write-Info "$($pkg.Label): DISABLED"; continue }
-        $present = Test-WingetPackageInstalled $pkg.Id
-        if ($present -eq $true) { Write-Info "$($pkg.Label): CONFIGURED" }
-        elseif ($present -eq $false) { Write-Info "$($pkg.Label): NOT_INSTALLED" }
-        else { Write-Info "$($pkg.Label): UNKNOWN (winget inventory unavailable)" }
+        $appState = Get-ObsidianInstallState
+        Write-Info "$($pkg.Label): $($appState.State) ($($appState.Detail))"
     }
 
     $taskExpected = [bool](Get-OptionValue $Options 'autoStart' $false)
@@ -6846,7 +6902,7 @@ $registration = $selectedDistro.Registration
 Write-Step 'Checking selected distro storage'
 $existingVolume = Assert-LatticeValeStorageVolume $registration.BasePath -AllowManagedRepair:$selectedDistro.ManagedRepairEligible -AllowManagedCleanup:$selectedDistro.ManagedCleanupEligible
 $DistroStoragePath = $registration.BasePath
-Write-Info "Selected '$DistroName' is stored on $($existingVolume.Drive): $([math]::Round($existingVolume.Size / 1GB,1)) GB total, $([math]::Round($existingVolume.Free / 1GB,1)) GB free."
+Write-Info "Selected '$DistroName' is stored on $($existingVolume.Drive.TrimEnd(':')): $([math]::Round($existingVolume.Size / 1GB,1)) GB total, $([math]::Round($existingVolume.Free / 1GB,1)) GB free."
 Write-Info "Registered WSL storage path: $DistroStoragePath"
 
 $linuxUser = Select-ExistingLinuxUser $DistroName
@@ -8710,27 +8766,29 @@ $windowsAppsDetail = if ($obsidian) { 'Selected Windows add-on has not yet been 
 # applications installed as a side effect of a partial run.
 if ($obsidian) {
     Write-Step 'Installing selected Windows applications'
-    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-    if (-not $winget) {
-        Write-Warning 'winget is not installed. The selected Obsidian Windows add-on will be skipped; the Linux stack remains installed.'
+    $appState = Get-ObsidianInstallState
+    if ($appState.State -eq 'CONFIGURED') {
+        Write-Info "Obsidian is already installed ($($appState.Detail)); preserving the existing application."
+        $windowsAppsState = 'CONFIGURED'
+        $windowsAppsDetail = $appState.Detail
+    } elseif ($appState.State -eq 'UNKNOWN') {
+        Write-Warning "Obsidian presence is uncertain ($($appState.Detail)); not reinstalling over a potentially existing application."
+        $windowsAppsState = 'UNKNOWN'
+        $windowsAppsDetail = $appState.Detail
+    } elseif (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+        Write-Warning 'winget is unavailable; Obsidian was not installed.'
         $windowsAppsState = 'PARTIAL'
-        $windowsAppsDetail = 'winget unavailable; the selected Windows add-on was skipped.'
+        $windowsAppsDetail = 'Winget unavailable and no Obsidian installation detected.'
     } else {
-        $windowsAppsOk = $true
-        $present = Test-WingetPackageInstalled 'Obsidian.Obsidian'
-        if ($present -eq $true) {
-            Write-Info 'Obsidian is already installed; treating the requested Windows add-on as configured.'
-        } else {
-            $appProbe = Invoke-NativeProcessPassthrough 'winget.exe' @('install','--exact','--id','Obsidian.Obsidian','--accept-package-agreements','--accept-source-agreements','--silent','--disable-interactivity') 1200
-            $presentAfter = Test-WingetPackageInstalled 'Obsidian.Obsidian'
-            if (-not $appProbe.Success -and $presentAfter -ne $true) { $windowsAppsOk = $false; Write-Warning 'Obsidian is still not present after the bounded WinGet install attempt; install it manually if desired.' }
-        }
-        if ($windowsAppsOk) {
+        $appProbe = Invoke-NativeProcessPassthrough 'winget.exe' @('install','--exact','--id','Obsidian.Obsidian','--accept-package-agreements','--accept-source-agreements','--silent','--disable-interactivity') 1200
+        $appState = Get-ObsidianInstallState
+        if ($appState.State -eq 'CONFIGURED') {
             $windowsAppsState = 'CONFIGURED'
-            $windowsAppsDetail = 'Selected Windows add-on is present/configured according to live WinGet inventory.'
+            $windowsAppsDetail = $appState.Detail
         } else {
             $windowsAppsState = 'PARTIAL'
-            $windowsAppsDetail = 'The selected Windows add-on did not complete.'
+            $windowsAppsDetail = "Obsidian installation not independently verified: $($appState.Detail)"
+            Write-Warning $windowsAppsDetail
         }
     }
 }

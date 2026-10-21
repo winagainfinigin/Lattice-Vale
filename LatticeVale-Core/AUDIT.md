@@ -271,3 +271,8 @@ Historical patch/version audit details are consolidated in the `../docs/CHANGELO
 - Policy v9 fingerprints managed-Ollama text/embedding artifact sizes, effective context, and the derived model floor. Clean install can use a provisional floor only until the models are downloaded; the infrastructure stage then regenerates/reconciles before inference verification.
 - Honcho request timeout is adaptive and ownership-aware: root `timeout` is updated only when absent or equal to the prior LatticeVale-owned value; explicit user values are preserved.
 - Runtime memory-pressure reporting uses short `memory.events` deltas so lifetime `memory.max` counts are not mistaken for active pressure.
+
+
+### 14.6.5 preservation audit
+
+The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.

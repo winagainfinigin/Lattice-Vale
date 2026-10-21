@@ -2382,3 +2382,8 @@ v14.3.8 is a preservation-first Matrix reliability/room-version hotfix layered o
 `tests/v14.3.8-matrix-v10-online-order-fixtures.py` verifies the fixed v10 policy, Client-Server readiness ordering, preserved-room migration markers, absence of raw pre-E2EE `/join` calls, and executable bounded join behavior for both Matrix-offline and joined cases.
 
 The broader deterministic/static suite retains all prior v14.3.1–v14.3.7 hotfix fixtures. Real Windows/WSL/Element behavior remains a platform smoke-test boundary and is not represented as proven by Linux-only fixture execution.
+
+
+### 14.6.5 preservation correction
+
+The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.
