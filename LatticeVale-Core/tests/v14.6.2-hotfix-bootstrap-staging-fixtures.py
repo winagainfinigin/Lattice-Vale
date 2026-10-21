@@ -4,7 +4,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
-assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "14.6.4"
+assert (ROOT / "VERSION.txt").read_text(encoding="ascii").strip() == "14.6.5"
 bootstrap_path = ROOT / "linux/bootstrap.sh"
 bootstrap = bootstrap_path.read_text(encoding="utf-8")
 

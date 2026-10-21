@@ -9,7 +9,7 @@ backup_text=backup.read_text()
 
 # Every mutating managed repair/update mode takes the bundle-owned backup before staging.
 # v14.6.3 moved this shared safety gate ahead of the mode-specific bootstrap path.
-if (ROOT/'VERSION.txt').read_text().strip() == '14.6.4':
+if (ROOT/'VERSION.txt').read_text().strip() in {'14.6.4','14.6.5'}:
     backup_start=ps.index("if ($repairMaintenance -and -not $skipPreInstallBackup) {")
     backup_end=ps.index("if ($repairMaintenance -and $skipPreInstallBackup) {", backup_start)
     backup_block=ps[backup_start:backup_end]

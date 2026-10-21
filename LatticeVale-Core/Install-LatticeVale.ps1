@@ -20,7 +20,7 @@ function Start-LatticeValeRemoteAccessLog {
         New-Item -ItemType Directory -Path $base -Force | Out-Null
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $script:RemoteAccessLogPath = Join-Path $base "remote-access-$stamp.log"
-        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.4 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.5 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
         return $script:RemoteAccessLogPath
     } catch {
         $script:RemoteAccessLogPath = ''
