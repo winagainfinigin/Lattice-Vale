@@ -1119,7 +1119,7 @@ write_latticevale_compose_overlay() {
     } > .latticevale-resource-state
     chmod 0600 .latticevale-resource-state
     python3 runtime-policy.py write --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json || { echo 'Canonical runtime-policy.json generation/validation failed.' >&2; return 1; }
-    echo "Adaptive container ceilings (policy v13): WSL CPUs=${resource_policy[CPUS]} (${resource_policy[CPU_PROFILE]}), CPU scheduler headroom=${resource_policy[CPU_SYSTEM_HEADROOM_MILLI]}m, DirectML host reserve=${resource_policy[CPU_DIRECTML_RESERVE_MILLI]}m, aggregate Docker envelope=${resource_policy[CPU_DOCKER_ENVELOPE_MILLI]}m (allocated=${resource_policy[CPU_DOCKER_ALLOCATED_MILLI]}m), RAM=${resource_policy[MEM_MIB]}MiB (${resource_policy[RAM_PROFILE]}), reserved=${resource_policy[RESERVE_MIB]}MiB (DirectML host reserve=${resource_policy[DIRECTML_HOST_RESERVE_MIB]}MiB), container budget=${resource_policy[BUDGET_MIB]}MiB across ${active_count} enabled services; Hermes topology floor=${resource_policy[HERMES_MIN_MIB]}MiB for ${resource_policy[MATRIX_PROFILE_GATEWAYS]} secondary Matrix gateway(s) and Kanban concurrency ${resource_policy[KANBAN_CONCURRENCY]}; managed Ollama model-aware floor=${resource_policy[OLLAMA_MODEL_FLOOR_MIB]}MiB (text artifact=${resource_policy[OLLAMA_TEXT_ARTIFACT_MIB]}MiB, embedding artifact=${resource_policy[OLLAMA_EMBED_ARTIFACT_MIB]}MiB, context=${resource_policy[OLLAMA_CONTEXT_LENGTH]}); Linux-native Ollama GPU inventory=${resource_policy[GPU_COUNT]} adapter(s), min/max/aggregate=${resource_policy[GPU_MIN_MIB]}/${resource_policy[GPU_MAX_MIB]}/${resource_policy[GPU_TOTAL_MIB]}MiB, heterogeneous=${resource_policy[GPU_HETEROGENEOUS]}, DirectML admission=${resource_policy[DIRECTML_ADMISSION_MIB]}MiB source=${resource_policy[DIRECTML_ADMISSION_SOURCE]} confidence=${resource_policy[DIRECTML_ADMISSION_CONFIDENCE]}, OLLAMA_GPU_OVERHEAD=${resource_policy[OLLAMA_GPU_OVERHEAD_MIB]}MiB per GPU, DirectML VRAM limit=${resource_policy[DIRECTML_VRAM_LIMIT_PCT]}%, shared-vendor=${resource_policy[GPU_SHARED_WITH_DIRECTML]}; hardware fingerprint=${resource_policy[HARDWARE_FINGERPRINT]}; policy fingerprint=${resource_policy[POLICY_FINGERPRINT]}; user compose.override.yaml is applied last."
+    echo "Adaptive container ceilings (policy v13): WSL CPUs=${resource_policy[CPUS]} (${resource_policy[CPU_PROFILE]}), CPU scheduler headroom=${resource_policy[CPU_SYSTEM_HEADROOM_MILLI]}m, DirectML host reserve=${resource_policy[CPU_DIRECTML_RESERVE_MILLI]}m, aggregate Docker envelope=${resource_policy[CPU_DOCKER_ENVELOPE_MILLI]}m (allocated=${resource_policy[CPU_DOCKER_ALLOCATED_MILLI]}m), RAM=${resource_policy[MEM_MIB]}MiB (${resource_policy[RAM_PROFILE]}), reserved=${resource_policy[RESERVE_MIB]}MiB (DirectML host reserve=${resource_policy[DIRECTML_HOST_RESERVE_MIB]}MiB), container budget=${resource_policy[BUDGET_MIB]}MiB across ${active_count} enabled services; Hermes topology floor=${resource_policy[HERMES_MIN_MIB]}MiB for ${resource_policy[MATRIX_PROFILE_GATEWAYS]} secondary Matrix profile workload(s) and Kanban concurrency ${resource_policy[KANBAN_CONCURRENCY]}; managed Ollama model-aware floor=${resource_policy[OLLAMA_MODEL_FLOOR_MIB]}MiB (text artifact=${resource_policy[OLLAMA_TEXT_ARTIFACT_MIB]}MiB, embedding artifact=${resource_policy[OLLAMA_EMBED_ARTIFACT_MIB]}MiB, context=${resource_policy[OLLAMA_CONTEXT_LENGTH]}); Linux-native Ollama GPU inventory=${resource_policy[GPU_COUNT]} adapter(s), min/max/aggregate=${resource_policy[GPU_MIN_MIB]}/${resource_policy[GPU_MAX_MIB]}/${resource_policy[GPU_TOTAL_MIB]}MiB, heterogeneous=${resource_policy[GPU_HETEROGENEOUS]}, DirectML admission=${resource_policy[DIRECTML_ADMISSION_MIB]}MiB source=${resource_policy[DIRECTML_ADMISSION_SOURCE]} confidence=${resource_policy[DIRECTML_ADMISSION_CONFIDENCE]}, OLLAMA_GPU_OVERHEAD=${resource_policy[OLLAMA_GPU_OVERHEAD_MIB]}MiB per GPU, DirectML VRAM limit=${resource_policy[DIRECTML_VRAM_LIMIT_PCT]}%, shared-vendor=${resource_policy[GPU_SHARED_WITH_DIRECTML]}; hardware fingerprint=${resource_policy[HARDWARE_FINGERPRINT]}; policy fingerprint=${resource_policy[POLICY_FINGERPRINT]}; user compose.override.yaml is applied last."
   else
     rm -f .latticevale-resource-state
     echo 'Adaptive container ceilings: disabled; any existing user compose.override.yaml remains authoritative.'
@@ -1774,6 +1774,15 @@ verify_live_multiplex_gateway_configure() {
   [[ "$s6_pid_after" == "$s6_pid" ]]
 }
 
+wait_live_multiplex_gateway_configure() {
+  local attempts="${1:-15}" i
+  for i in $(seq 1 "$attempts"); do
+    verify_live_multiplex_gateway_configure >/dev/null 2>&1 && return 0
+    sleep 2
+  done
+  return 1
+}
+
 profile_gateway_is_explicit_standalone_configure() {
   local name="$1"
   python3 - "data/hermes/profiles/$name/config.yaml" <<'PY_PROFILE_STANDALONE_CONFIGURE'
@@ -2336,17 +2345,20 @@ run_stage() {
   CURRENT_STAGE="$stage"
   RUN_STAGE_MIGRATION_REQUIRED=false
 
-  # Explicit recovery requests always win over checkpoints. Older same-version
-  # Reconfigure runs could otherwise skip provider/profile actions entirely.
+  # Pre-stage verification is speculative: failure means the stage should run, not
+  # that the installer has failed. Keep those probes quiet so verifier diagnostics
+  # are reserved for authoritative post-stage failures. This matters especially for
+  # a deliberately stopped stack, where API/gateway readiness is expected to fail
+  # before the reconcile action starts services.
   if ! checkpoint_bypass_requested "$stage"; then
-    if state_stage_current "$stage" && "$verifier"; then
+    if state_stage_current "$stage" && "$verifier" >/dev/null 2>&1; then
       printf '%-28s %s\n' "$description" 'OK - already complete'
       return 0
     fi
 
     # One-time migration from pre-v13.16.7 checkpoint hashes. A newer ZIP no longer
     # justifies replaying a healthy stage; live state is authoritative in Resume mode.
-    if resume_adoption_allowed && state_stage_legacy_adoptable "$stage" && "$verifier"; then
+    if resume_adoption_allowed && state_stage_legacy_adoptable "$stage" && "$verifier" >/dev/null 2>&1; then
       state_mark "$stage" done 'adopted live-verified legacy checkpoint without replaying stage action'
       printf '%-28s %s\n' "$description" 'OK - live state verified; checkpoint migrated'
       return 0
@@ -5974,7 +5986,7 @@ PY_RESTORE_TEMP_GATEWAYS
   mapfile -t managed_profiles < <(grep -E '^[a-z0-9][a-z0-9_-]{0,31}$' .installer-managed-profiles | sort -u)
   if ((${#managed_profiles[@]})); then
     gateway_converged=false
-    if verify_live_multiplex_gateway_configure >/dev/null 2>&1; then
+    if wait_live_multiplex_gateway_configure 6; then
       gateway_converged=true
       echo 'Hermes shared gateway is already live and serves every managed non-standalone profile; preserving it without replaying migration.'
     fi
@@ -6007,13 +6019,19 @@ PY_UNOWNED_GATEWAY_CANDIDATES
         :
       else
         migration_rc=$?
-        echo "Hermes gateway migration exited with status $migration_rc; checking exact live convergence before failing." >&2
+        if (( migration_rc == 124 )); then
+          echo 'Hermes gateway migration reached its 90-second safety timeout; allowing a bounded settle window and checking exact live convergence before deciding repair failed.' >&2
+        else
+          echo "Hermes gateway migration exited with status $migration_rc; allowing a bounded settle window and checking exact live convergence before deciding repair failed." >&2
+        fi
       fi
-      if ! verify_live_multiplex_gateway_configure; then
-        echo 'Live gateway verification failed; preserving Hermes migration/profile state for Resume / repair.' >&2
+      if ! wait_live_multiplex_gateway_configure 15; then
+        echo 'Live gateway verification failed after the bounded settle window; preserving Hermes migration/profile state for Resume / repair.' >&2
         return 1
       fi
-      if (( migration_rc != 0 )); then
+      if (( migration_rc == 124 )); then
+        echo 'Hermes migration command timed out after the gateway had converged; exact s6 PID, fresh gateway state, stable PID, and served-profile evidence are healthy, so repair is continuing without another restart.'
+      elif (( migration_rc != 0 )); then
         echo "Hermes migrate exited $migration_rc, but exact s6 PID, fresh gateway state, stable PID, and served-profile evidence confirm convergence; continuing without another restart."
       fi
     fi

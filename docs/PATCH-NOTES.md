@@ -1,5 +1,16 @@
 # Current v14.6.5 patch notes
 
+## v14.6.5 same-version public-installer hotfix
+
+- Keeps release identity **14.6.5** and schema 24; no data-layout, provider, Matrix identity, credential, or user-owned configuration migration is introduced.
+- Makes `run_stage` checkpoint/adoption probes quiet. A failed speculative verifier now means only that the stage must run; authoritative post-stage verification still emits diagnostics and fails the installer normally. This prevents an intentionally stopped or still-settling Hermes API from printing a misleading `Reconcile verification failed` line before reconciliation starts.
+- Gives the installer reconciliation path the same bounded shared-gateway settle behavior already used by normal stack start: six two-second attempts before deciding migration is necessary, then fifteen two-second attempts after migration before declaring live convergence failed. Exact s6 PID, fresh heartbeat, complete managed `served_profiles`, stable PID, and route-specific Matrix adapter checks remain authoritative.
+- Classifies upstream Hermes migration exit `124` as the command's 90-second safety timeout and explains the bounded live-convergence fallback. Timeout/nonzero status is never accepted by itself; repair/start continue only if strict live convergence succeeds afterward.
+- Corrects current resource-policy diagnostics to call `MATRIX_PROFILE_GATEWAYS` a secondary Matrix **profile workload** signal rather than implying that every Matrix-enabled profile owns a resident gateway process. The persisted compatibility key and policy fingerprint schema remain unchanged.
+- Extends the existing 148-fixture gateway regression without changing fixture count.
+- Clears the longer APT activity-indicator line before printing completion so Windows/PowerShell log capture no longer leaves a stray `indicator)` suffix after successful package-index refresh.
+
+
 ### 14.6.5 corrective hotfix — shared-gateway idempotency and audit
 
 The default Hermes host's nested `gateway.multiplex_profiles: true` is now treated as the valid post-migration steady state instead of a repair condition. Integration verification accepts that exact default setting while still rejecting top-level, worker-profile, disabled, malformed, and worker environment overrides. Resume/repair and normal startup prove the live default s6 PID, fresh `gateway_state.json`, complete managed non-standalone `served_profiles`, stable PID, and the expected Matrix adapter connection before treating a route as healthy; a stale/missing marker cannot substitute for that proof. A healthy connected default gateway is preserved without an unnecessary restart, while a disconnected adapter triggers the bounded recycle path only after Synapse is proven reachable. Shared named profiles require their namespaced `<profile>:matrix` adapter on the host gateway; explicit `gateway.standalone: true` profiles retain their own exact s6 gateway and `matrix` adapter. Matrix-profile audit reports those topologies distinctly. Existing profile data—including profile directories and a user-created skills symlink—is not recreated by same-version repair. The patch also retains the post-release QMD host-bind/allowed-host correction already present in current v14.6.5 source.

@@ -1,5 +1,15 @@
 # Changelog
 
+## 14.6.5 same-version hotfix - 2026-10-20
+
+- Suppresses diagnostics from speculative pre-stage checkpoint verifiers while preserving full post-stage failure diagnostics.
+- Adds bounded shared-gateway settle verification before migration and after migration in installer reconciliation, reducing unnecessary remigration on slower WSL/Docker hosts without weakening live-state proof.
+- Makes Hermes migration timeout (`124`) messaging explicit and accepts it only when exact live convergence succeeds afterward.
+- Corrects current resource-policy terminology from secondary Matrix gateways to secondary Matrix profile workload under the shared-multiplexer architecture.
+- Clears residual APT progress text so completion lines no longer end with a stale `indicator)` suffix in captured installer output.
+- Retains version 14.6.5, options schema 24, runtime-policy schema 13, existing Matrix identities/credentials, profile filesystem state, explicit standalone profiles, and the 148-fixture deterministic contract.
+
+
 ## 14.6.5 - 2026-10-20
 
 ### 14.6.5 corrective hotfix — shared-gateway idempotency and audit

@@ -1260,14 +1260,20 @@ PY_UNOWNED_GATEWAY_CANDIDATES
         :
       else
         migration_rc=$?
-        echo "Hermes gateway migration exited with status $migration_rc; checking exact live convergence before failing startup." >&2
+        if (( migration_rc == 124 )); then
+          echo 'Hermes gateway migration reached its 90-second safety timeout; allowing a bounded settle window and checking exact live convergence before deciding startup failed.' >&2
+        else
+          echo "Hermes gateway migration exited with status $migration_rc; allowing a bounded settle window and checking exact live convergence before deciding startup failed." >&2
+        fi
       fi
       if ! wait_live_multiplex_gateway_manage 15; then
-        echo 'WARNING: shared gateway failed exact live verification after migration; preserving all profile state for Resume / repair.' >&2
+        echo 'WARNING: shared gateway failed exact live verification after the bounded settle window; preserving all profile state for Resume / repair.' >&2
         return 1
       fi
       shared_gateway_ready=true
-      if (( migration_rc != 0 )); then
+      if (( migration_rc == 124 )); then
+        echo 'Hermes migration command timed out after the gateway had converged; exact s6 PID, fresh gateway state, stable PID, and served-profile evidence are healthy, so startup is continuing without another restart.'
+      elif (( migration_rc != 0 )); then
         echo "Hermes migrate exited $migration_rc, but exact s6 PID, fresh gateway state, stable PID, and served-profile evidence confirm convergence; continuing without another restart."
       fi
     fi

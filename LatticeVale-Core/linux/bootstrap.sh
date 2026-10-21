@@ -41,7 +41,7 @@ run_apt_update_with_progress() {
     sleep 1
   done
   wait "$pid" || rc=$?
-  printf '\rAPT index refresh [==========] complete (%s; %ss elapsed)\n' "$label" "$((SECONDS - started))"
+  # Pad the completion line so carriage-return rendering fully overwrites the longer\n  # activity-indicator text in terminals/log captures instead of leaving a stale suffix.\n  printf '\rAPT index refresh [==========] complete (%s; %ss elapsed)%*s\n' "$label" "$((SECONDS - started))" 32 ''
   cat "$log"
   rm -f -- "$log"
   if (( rc != 0 )); then return "$rc"; fi

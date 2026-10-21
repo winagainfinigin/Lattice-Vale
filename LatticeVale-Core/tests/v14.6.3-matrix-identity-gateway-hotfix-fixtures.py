@@ -24,6 +24,7 @@ checks = {
     "APT preflight includes required DirectML packages": 'directml="$4"' in installer and 'python3-venv libblas3 libomp5 liblapack3' in installer,
     "APT preflight follows the bootstrap NVIDIA device probe": '/usr/lib/wsl/lib/nvidia-smi' in installer,
     "APT index refresh displays elapsed activity progress": "APT index refresh [%-10s] %ss elapsed (%s; activity indicator)" in (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8"),
+    "APT completion clears the longer activity-indicator suffix": "complete (%s; %ss elapsed)%*s\\n' \"$label\" \"$((SECONDS - started))\" 32 ''" in (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8"),
     "APT refresh prompt appears only when a refresh is planned or uncertain": "Ubuntu package-index refresh is not planned for this run" in installer and "if ($aptRefreshNeeded)" in installer,
     "healthy repair skips unnecessary pre-maintenance cache and staging cleanup": "root_free_kib >= 2097152" in (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8") and "skipped disposable-cache purge and stale staging scan" in (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8"),
     "cleanup streams helper output while it runs": "LatticeVale cleanup / reclaim disk space" in installer and "Invoke-NativeProcessCapture 'wsl.exe' $wslArgs 1800 $cleanupScript" in installer,

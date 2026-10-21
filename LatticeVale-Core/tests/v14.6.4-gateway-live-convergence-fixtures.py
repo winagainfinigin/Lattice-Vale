@@ -59,15 +59,27 @@ for roster in (configure_roster, manage_roster):
     assert "exists but has no config.yaml" in roster
     assert "continue" in roster
 
+# Speculative checkpoint verification must be silent. A stopped/settling service is
+# a reason to run its stage, not a user-visible installer failure. Post-stage verification
+# remains unsuppressed and therefore retains authoritative diagnostics.
+run_stage = CONFIGURE[CONFIGURE.index("run_stage() {"):CONFIGURE.index("http_status_ok() {")]
+assert 'state_stage_current "$stage" && "$verifier" >/dev/null 2>&1' in run_stage
+assert 'state_stage_legacy_adoptable "$stage" && "$verifier" >/dev/null 2>&1' in run_stage
+post_verify = run_stage[run_stage.index('"$action"'):]
+assert 'if ! "$verifier"; then' in post_verify
+assert 'if ! "$verifier" >/dev/null' not in post_verify
+
 # Same-version Resume/repair must prove an already-converged live gateway before migration.
 reconcile = CONFIGURE[CONFIGURE.index("stage_reconcile() {"):CONFIGURE.index("stage_kanban_gateway() {")]
-first_live_check = reconcile.index("verify_live_multiplex_gateway_configure")
+first_live_check = reconcile.index("wait_live_multiplex_gateway_configure 6")
 migration_call = reconcile.index("hermes gateway migrate --multiplex -y")
 assert first_live_check < migration_call
 assert "already live and serves every managed non-standalone profile" in reconcile[:migration_call]
-assert "if ! verify_live_multiplex_gateway_configure; then" in reconcile[migration_call:]
+assert "if ! wait_live_multiplex_gateway_configure 15; then" in reconcile[migration_call:]
+assert "90-second safety timeout" in reconcile
+assert "timed out after the gateway had converged" in reconcile
 assert ": > .installer-gateway-multiplex-owned" in reconcile
-assert reconcile.index(": > .installer-gateway-multiplex-owned") > reconcile.index("verify_live_multiplex_gateway_configure", migration_call)
+assert reconcile.index(": > .installer-gateway-multiplex-owned") > reconcile.index("wait_live_multiplex_gateway_configure 15", migration_call)
 assert "Default Hermes Matrix adapter is already connected; preserving the healthy gateway without an unnecessary restart." in reconcile
 assert reconcile.index("wait_matrix_adapter_runtime_configure default data/hermes/gateway_state.json matrix 3") < reconcile.index("start_or_restart_default_gateway_exact")
 
@@ -85,6 +97,8 @@ assert "ownership marker is not backed by current live convergence" in startup
 assert "restoring the LatticeVale ownership marker without replaying migration" in startup
 assert "if ! wait_live_multiplex_gateway_manage 15; then" in startup
 assert startup.index(": > .installer-gateway-multiplex-owned") > startup.index("hermes gateway migrate --multiplex -y")
+assert "90-second safety timeout" in startup
+assert "timed out after the gateway had converged" in startup
 
 # Explicit standalone named profiles stay independent; non-standalone Matrix profiles stay shared.
 assert "profile_gateway_is_explicit_standalone_manage" in startup
@@ -165,4 +179,9 @@ existing_branch = profile_stage.index("  else", clone_block)
 assert create_guard < clone_block < existing_branch
 assert 'rm -rf "data/hermes/profiles/$name/skills"' not in profile_stage
 
-print("PASS shared-gateway convergence, same-version idempotency, marker proof, Matrix routing, explicit standalone preservation, audit live-state semantics, and existing-profile filesystem preservation")
+# Policy key remains compatibility-named, but user-visible current diagnostics must not
+# imply that every Matrix-enabled secondary profile owns a resident gateway process.
+assert "secondary Matrix profile workload(s)" in CONFIGURE
+assert "secondary Matrix gateway(s)" not in CONFIGURE
+
+print("PASS shared-gateway convergence, quiet speculative verification, bounded settle windows, same-version idempotency, timeout convergence, Matrix routing, explicit standalone preservation, audit live-state semantics, and existing-profile filesystem preservation")
