@@ -58,3 +58,9 @@ LatticeVale distinguishes static/source checks, deterministic fixtures, WSL inte
 ### 14.6.5 Obsidian diagnostics
 
 The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.
+
+## 14.6.5 Windows state and OOM evidence
+
+At the final Windows follow-up, `WINDOWS_STATE_WRITTEN` is the internal acknowledgement of an atomically saved and reread `.installer-state.json` Windows snapshot. A reported `STATE_WRITE_ERROR` means this acknowledgement failed and the diagnostic now includes the exit status and bounded error type/message; live state remains authoritative. A reported `EVENT_LOG_WARNING` means the snapshot was already persisted, but appending `logs/installer-events.jsonl` was unsuccessful. The two outcomes must not be conflated.
+
+For QMD indexer OOM findings, compare `docker inspect` live `State.OOMKilled`, `State.StartedAt`, `HostConfig.Memory` and the current cgroup/memory usage against `./manage.sh audit`. The OOM flag establishes only that an event was recorded within the running container's current lifecycle; it does not provide event recency. An unchanged adaptive policy fingerprint is not evidence that such memory pressure was fixed.

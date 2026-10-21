@@ -2,6 +2,10 @@
 
 ## 14.6.5 same-version hotfix - 2026-10-20
 
+
+**14.6.5 corrective follow-up (same release identity):** Windows integration recovery hints now save atomically with read-back verification and preserve Linux installer checkpoints. Optional event-log failures are reported separately from state-write failures. Active Docker containers retaining an OOM marker now produce an explicit post-repair warning rather than allowing a current resource-policy fingerprint to imply memory health. Memory ceilings, credentials, Matrix identities, and Tailscale authentication are unchanged.
+
+
 - Suppresses diagnostics from speculative pre-stage checkpoint verifiers while preserving full post-stage failure diagnostics.
 - Adds bounded shared-gateway settle verification before migration and after migration in installer reconciliation, reducing unnecessary remigration on slower WSL/Docker hosts without weakening live-state proof.
 - Makes Hermes migration timeout (`124`) messaging explicit and accepts it only when exact live convergence succeeds afterward.

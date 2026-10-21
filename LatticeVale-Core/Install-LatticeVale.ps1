@@ -3492,29 +3492,79 @@ function Invoke-BundledStackAudit([string]$Name, [string]$User, [string]$LinuxHo
 function Set-InstallerWindowsState([string]$Name, [string]$User, [string]$LinuxHome, [hashtable]$WindowsState) {
     if (-not $LinuxHome -or $null -eq $WindowsState) { return }
     try {
+        # Base64 is transport encoding, not a secret: avoid WSL/Windows quoting changes
+        # to JSON quotes and backslashes when passing this small state snapshot as argv.
         $payload = $WindowsState | ConvertTo-Json -Depth 6 -Compress
+        $payloadBase64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($payload))
         $code = @'
 from pathlib import Path
-import json,sys,datetime
-p=Path(sys.argv[1]); payload=json.loads(sys.argv[2])
+import base64, datetime, json, os, sys, tempfile
+
+p = Path(sys.argv[1])
 try:
-    d=json.loads(p.read_text(encoding='utf-8')) if p.exists() else {}
-except Exception:
-    d={}
-d.setdefault('schema',1)
-now=datetime.datetime.now(datetime.timezone.utc).isoformat()
-d['windows']=payload
-d['windows']['verifiedAt']=now
-p.write_text(json.dumps(d,indent=2)+'\n',encoding='utf-8')
-p.chmod(0o600)
-log=p.parent/'logs'/'installer-events.jsonl'; log.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
-summary={k:(v.get('status') if isinstance(v,dict) else 'UNKNOWN') for k,v in payload.items()}
-with log.open('a',encoding='utf-8') as f:
-    f.write(json.dumps({'at':now,'stage':'windows','status':'verified','components':summary},separators=(',',':'))+'\n')
-log.chmod(0o600)
+    payload = json.loads(base64.b64decode(sys.argv[2], validate=True).decode('utf-8'))
+    if not isinstance(payload, dict):
+        raise ValueError('Windows integration snapshot must be an object')
+    if p.exists():
+        # Managed checkpoints and Linux-stage state must never be discarded merely
+        # because the Windows follow-up was unable to read the original state.
+        state = json.loads(p.read_text(encoding='utf-8'))
+        if not isinstance(state, dict):
+            raise ValueError('Existing installer state is not a JSON object')
+    else:
+        state = {'schema': 1}
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    state['windows'] = dict(payload)
+    state['windows']['verifiedAt'] = now
+    name = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=p.parent,
+                prefix='.installer-windows-', delete=False) as f:
+            name = f.name
+            json.dump(state, f, indent=2)
+            f.write('\n')
+            f.flush()
+            os.fchmod(f.fileno(), 0o600)
+            os.fsync(f.fileno())
+        os.replace(name, p)
+        name = None
+    finally:
+        if name is not None:
+            try:
+                os.unlink(name)
+            except OSError:
+                pass
+    verified = json.loads(p.read_text(encoding='utf-8'))
+    if verified.get('windows') != state['windows']:
+        raise RuntimeError('Windows integration state read-back verification failed')
+except Exception as exc:
+    print('STATE_WRITE_ERROR: ' + type(exc).__name__ + ': ' + str(exc), file=sys.stderr)
+    sys.exit(1)
+
+print('WINDOWS_STATE_WRITTEN')
+# A failed event-log append must not turn an already committed state update into
+# a false PARTIAL. Report it separately so the owner can repair log permissions.
+try:
+    log = p.parent / 'logs' / 'installer-events.jsonl'
+    log.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    summary = {k: (v.get('status') if isinstance(v, dict) else 'UNKNOWN') for k, v in payload.items()}
+    with log.open('a', encoding='utf-8') as f:
+        f.write(json.dumps({'at': now, 'stage':'windows', 'status': 'verified',
+            'components': summary}, separators=(',', ':')) + '\n')
+    log.chmod(0o600)
+except Exception as exc:
+    print('EVENT_LOG_WARNING: ' + type(exc).__name__ + ': ' + str(exc))
 '@
-        $probe = Invoke-WslDirectCapture $Name $User 'python3' @('-c', $code, "$LinuxHome/hermes-stack/.installer-state.json", $payload)
-        if (-not $probe.Success) { Write-Warning 'Could not record Windows recovery hints in the installer state file; live state will still be checked on the next run.' }
+        $probe = Invoke-WslDirectCapture $Name $User 'python3' @('-c', $code, "$LinuxHome/hermes-stack/.installer-state.json", $payloadBase64)
+        if (-not $probe.Success) {
+            $detail = Get-SafeDiagnosticExcerpt $probe.Text 350
+            $reason = if ($probe.TimedOut) { 'timed out' } else { "exit $($probe.ExitCode)" }
+            Write-Warning "Could not record Windows recovery hints ($reason): $detail. Live Windows state will be checked on the next run."
+        } elseif ($probe.StdOut -notmatch '(^|\n)WINDOWS_STATE_WRITTEN(\r?\n|$)') {
+            Write-Warning 'Windows recovery state-write command returned without read-back confirmation; live state will be rechecked on the next run.'
+        } elseif ($probe.StdOut -match 'EVENT_LOG_WARNING: ([^\r\n]+)') {
+            Write-Warning "Windows recovery state was saved and verified, but the optional event log failed: $($Matches[1])"
+        }
     } catch {
         Write-Warning "Could not record Windows recovery hints: $($_.Exception.Message)"
     }

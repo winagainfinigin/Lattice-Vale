@@ -113,7 +113,7 @@ for marker in (
     'oom_candidates = [("Hermes", "hermes-agent")]',
     'live_state.get("running") and live_state.get("oomKilled")',
     'container recorded an OOM kill in its current lifecycle',
-    'Resume / repair will recalculate/reconcile the adaptive resource policy',
+    'Resume / repair verifies the resource configuration; the OOM event timing and continuing pressure require separate runtime evidence',
     'memoryLimitBytes',
     'live memory ceiling is',
     'effective_compose_resource_limits(root)',

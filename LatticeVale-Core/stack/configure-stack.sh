@@ -1265,6 +1265,30 @@ refresh_canonical_architecture_state() {
   python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json || return 1
 }
 
+# Docker's OOMKilled flag can remain set while a container is running. It
+# identifies an event within that container lifecycle, not its time or whether
+# pressure persists. Preserve current policy and services; expose the unresolved
+# signal for a subsequent live audit rather than fabricating a successful repair.
+report_unresolved_container_oom() {
+  local container running oom inspection found=false
+  local -a candidates=(hermes-agent)
+  [[ "$(opt_bool matrix)" == true ]] && candidates+=(hermes-synapse-db hermes-synapse)
+  [[ "$(opt_bool searxng)" == true ]] && candidates+=(hermes-searxng-valkey hermes-searxng)
+  [[ "$(opt_bool qmd)" == true ]] && candidates+=(hermes-qmd hermes-qmd-indexer)
+  managed_ollama_enabled && candidates+=(hermes-ollama)
+  [[ "$(opt_bool honcho)" == true ]] && candidates+=(hermes-honcho-db hermes-honcho-redis hermes-honcho-api hermes-honcho-deriver)
+  # One bounded read-only inspection, not a separate timeout per service: an
+  # unresponsive Docker daemon must not stall the completion path repeatedly.
+  inspection="$(timeout --foreground --kill-after=2s 8s docker inspect --format '{{.Name}}|{{.State.Running}}|{{.State.OOMKilled}}' "${candidates[@]}" 2>/dev/null || true)"
+  while IFS='|' read -r container running oom; do
+    if [[ "$running" == true && "$oom" == true ]]; then
+      echo "WARNING: ${container#/} records an OOM event in its running container lifecycle; timing and current memory pressure are not established. Resource configuration alone cannot certify recovery." >&2
+      found=true
+    fi
+  done <<< "$inspection"
+  [[ "$found" == true ]]
+}
+
 repair_runtime_policy_reconcile() {
   # Resume/repair must refresh machine-derived state even when prepare_config has a
   # valid checkpoint.  The README's canonical dependency chain is options -> hardware
@@ -6291,6 +6315,11 @@ if ! verify_adaptive_runtime_policy; then
   state_mark repair_runtime_policy broken 'adaptive runtime/RAM policy is still stale or incomplete after repair'
   echo 'Final repair verification failed: adaptive runtime/RAM policy is still stale or incomplete. The installer will not report success while runtimePolicy remains PARTIAL.' >&2
   exit 1
+fi
+# This is intentionally advisory rather than an implicit resource-policy rewrite
+# or restart. A current fingerprint does not prove an earlier OOM is resolved.
+if report_unresolved_container_oom; then
+  echo 'WARNING: Runtime OOM evidence remains unresolved after repair. No running container was restarted merely to clear its OOM flag; review live memory pressure and the subsequent audit.' >&2
 fi
 state_finish
 

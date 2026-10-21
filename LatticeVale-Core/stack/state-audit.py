@@ -1301,11 +1301,11 @@ def main() -> int:
             live_state = runtime(container_name)
             if live_state.get("running") and live_state.get("oomKilled"):
                 if limits_selected:
-                    remedy = "Resume / repair will recalculate/reconcile the adaptive resource policy"
+                    remedy = "Resume / repair verifies the resource configuration; the OOM event timing and continuing pressure require separate runtime evidence"
                 else:
                     remedy = "LatticeVale ceilings are disabled; inspect user Compose overrides or global WSL/container memory pressure"
                 policy_issues.append(
-                    f"{label} container recorded an OOM kill in its current lifecycle; "
+                    f"{label} container recorded an OOM kill in its current lifecycle (event recency unknown); "
                     f"a configured memory limit or workload pressure exhausted its cgroup; {remedy}"
                 )
 

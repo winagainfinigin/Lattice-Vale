@@ -1,6 +1,13 @@
 # Current v14.6.5 patch notes
 
 ## v14.6.5 same-version public-installer hotfix
+### 14.6.5 same-version recovery-state and OOM-observability correction
+
+- Windows integration outcomes are transported as UTF-8/base64 JSON to the existing WSL user context. The state writer reads and preserves existing Linux checkpoints, atomically replaces only the verified `windows` snapshot, and confirms it by reading the saved JSON. Unreadable existing state is not reset or overwritten.
+- The optional Windows installer event-log append is no longer allowed to misclassify a successfully saved Windows state as failed. Distinct bounded `STATE_WRITE_ERROR` and `EVENT_LOG_WARNING` diagnostics replace the previous uninformative warning.
+- A running container's Docker `OOMKilled` flag is historical evidence **within that running container lifecycle**, not a timestamp or measurement of ongoing pressure. Resume/repair retains valid resource ceilings, warns explicitly when the OOM signal remains, and does not restart containers merely to erase the flag. Post-repair audit must be used to evaluate unresolved OOM findings; no automatic RAM increase or schema bump is introduced.
+- Includes execution-based deterministic Windows-state tests and OOM reporting fixtures. Existing Tailscale authentication, Serve mappings, gateway lifecycle, Matrix identity, profiles, data and user-owned configuration are not changed.
+
 
 - Keeps release identity **14.6.5** and schema 24; no data-layout, provider, Matrix identity, credential, or user-owned configuration migration is introduced.
 - Makes `run_stage` checkpoint/adoption probes quiet. A failed speculative verifier now means only that the stage must run; authoritative post-stage verification still emits diagnostics and fails the installer normally. This prevents an intentionally stopped or still-settling Hermes API from printing a misleading `Reconcile verification failed` line before reconciliation starts.
