@@ -2,6 +2,13 @@ from pathlib import Path
 root=Path(__file__).resolve().parents[1]
 ps=(root/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
 assert "'-WindowStyle','Hidden'" in ps, 'relay PowerShell must be launched hidden'
+bridge = ps[ps.index('function Register-LatticeValeBridgeRefreshTask'):ps.index('function Remove-LatticeValeBridgeSupport')]
+assert "'System32\\wscript.exe'" in bridge and 'LatticeVale-HiddenWslRelay-$relayKey.vbs' in bridge, 'persistent relay must start with windowless WSH'
+assert 'shell.Run(command, 0, True)' in bridge, 'background task must hide the console and stay running'
+assert "[string]$Paths.Script,[string]$Paths.Config" in bridge, 'scheduled task must retain ownership markers'
+assert '-RunLevel Limited' in bridge and '-RunLevel Highest' not in bridge, 'security privileges must remain limited'
+assert 'New-ScheduledTaskAction -Execute $wscript' in bridge, 'long-running relay must not be a direct pwsh task action'
+
 assert 'The native relay is intentionally long-running' in ps
 assert "($tailscaleDashboard -or $tailscaleMatrix) -and -not $keepWslServicesRunning" in ps
 ver=(root/'VERSION.txt').read_text().strip()

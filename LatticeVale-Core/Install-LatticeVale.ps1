@@ -5950,8 +5950,27 @@ function Register-LatticeValeBridgeRefreshTask([object]$Paths, [bool]$StartAtLog
         # no administrator token is necessary for this passive Tailscale relay. PowerShell 7
         # is preferred when available; Windows PowerShell 5.1 is accepted only when
         # this exact relay/config passes a bounded self-test under that engine.
-        $argLine = (((Get-LatticeValeRelayArguments $Paths $EnsureStackRunning) | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }) -join ' ')
-        $action = New-ScheduledTaskAction -Execute $powershell -Argument $argLine -WorkingDirectory $Paths.Directory
+        # A long-running pwsh.exe scheduled action can leave a visible console even
+        # with -WindowStyle Hidden. Launch it with SW_HIDE from the windowless WSH
+        # process instead; keep the existing Limited principal and relay arguments.
+        $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
+        if (-not (Test-Path -LiteralPath $wscript -PathType Leaf)) { throw 'Windows Script Host is unavailable for the hidden relay task.' }
+        $relayKey = [IO.Path]::GetFileNameWithoutExtension([string]$Paths.Config) -replace '^bridge-', ''
+        $hiddenLauncher = Join-Path $Paths.Directory ("LatticeVale-HiddenWslRelay-$relayKey.vbs")
+        $launcherCode = @'
+Option Explicit
+If WScript.Arguments.Count <> 4 Then WScript.Quit 2
+Dim q, command, shell
+q = Chr(34)
+command = q & WScript.Arguments(0) & q & " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & q & WScript.Arguments(1) & q & " -ConfigPath " & q & WScript.Arguments(2) & q & " -WaitSeconds 120 -RefreshSeconds 15"
+If WScript.Arguments(3) = "1" Then command = command & " -EnsureDistroRunning"
+Set shell = CreateObject("WScript.Shell")
+WScript.Quit shell.Run(command, 0, True)
+'@
+        [System.IO.File]::WriteAllText($hiddenLauncher, ($launcherCode + "`r`n"), [System.Text.UTF8Encoding]::new($false))
+        $taskArgv = @('//B','//Nologo',$hiddenLauncher,$powershell,[string]$Paths.Script,[string]$Paths.Config, $(if ($EnsureStackRunning) { '1' } else { '0' }))
+        $taskArgLine = (($taskArgv | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }) -join ' ')
+        $action = New-ScheduledTaskAction -Execute $wscript -Argument $taskArgLine -WorkingDirectory $Paths.Directory
         $windowsIdentity = Get-CurrentWindowsIdentityName
         $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
@@ -5965,7 +5984,7 @@ function Register-LatticeValeBridgeRefreshTask([object]$Paths, [bool]$StartAtLog
             Register-ScheduledTask -TaskName $Paths.TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
         }
         $mode = if ($StartAtLogon -and $EnsureStackRunning) { 'at-logon stack recovery' } elseif ($StartAtLogon) { 'at-logon passive relay' } else { 'on-demand passive relay' }
-        Add-Content -LiteralPath (Join-Path $Paths.Directory 'native-relay.log') -Value ("{0} Registered relay task '{1}' using {2} at Limited run level ({3})." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Paths.TaskName,$powershell,$mode) -Encoding UTF8
+        Add-Content -LiteralPath (Join-Path $Paths.Directory 'native-relay.log') -Value ("{0} Registered relay task '{1}' using windowless WSH -> {2} at Limited run level ({3})." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Paths.TaskName,$powershell,$mode) -Encoding UTF8
         Write-Info "Registered Windows-native relay task '$($Paths.TaskName)' using $powershell ($mode mode)."
         return $true
     } catch {
@@ -6007,7 +6026,10 @@ function Remove-LatticeValeBridgeSupport([string]$Name, [switch]$PreserveArtifac
         Write-Info "Preserved failed relay script/config for diagnostics: $($paths.Script) ; $($paths.Config)"
         return
     }
+    [void](Stop-LatticeValeOwnedBridgeProcesses $paths)
     Remove-Item -LiteralPath $paths.Config,$paths.Script -Force -ErrorAction SilentlyContinue
+    $relayKey = [IO.Path]::GetFileNameWithoutExtension([string]$paths.Config) -replace '^bridge-', ''
+    Remove-Item -LiteralPath (Join-Path $paths.Directory ("LatticeVale-HiddenWslRelay-$relayKey.vbs")) -Force -ErrorAction SilentlyContinue
     # Remove the old v13.12 helper only from LatticeVale's own application-data directory.
     Remove-Item -LiteralPath (Join-Path $paths.Directory 'Refresh-HermesWslBridge.ps1') -Force -ErrorAction SilentlyContinue
 }
