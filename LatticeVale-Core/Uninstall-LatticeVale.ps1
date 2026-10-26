@@ -228,13 +228,14 @@ function Get-ArtifactPaths([string]$Name,[string]$User,[string]$StackLinuxPath) 
     $identity="$(Get-CurrentWindowsIdentityName)`n$Name`n$User`n$StackLinuxPath"; $sha=[Security.Cryptography.SHA256]::Create()
     try { $hash=$sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($identity)); $suffix=-join($hash[0..5] | ForEach-Object {$_.ToString('x2')}) } finally {$sha.Dispose()}
     $dir=Join-Path $env:LOCALAPPDATA 'LatticeVale'; $desktop=[Environment]::GetFolderPath('Desktop')
+    $nativeDir=Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)) 'LatticeVale-PrivilegedRelay'
     $nativeTask=$base -replace '^LatticeVale Stack - ','LatticeVale Native Windows Bridge - '
     $relayTask=$base -replace '^LatticeVale Stack - ','LatticeVale Tailscale Relay - '
     $nativeKey=([regex]::Replace($nativeTask,'[^A-Za-z0-9._-]','_')).Trim('_'); if ($nativeKey.Length -gt 96) {$nativeKey=$nativeKey.Substring(0,96)}
     $relayKey=([regex]::Replace($relayTask,'[^A-Za-z0-9._-]','_')).Trim('_'); if ($relayKey.Length -gt 96) {$relayKey=$relayKey.Substring(0,96)}
     return [pscustomobject]@{
-        Directory=$dir; StackTask=$base; RelayTask=$relayTask; NativeTask=$nativeTask; NativeKey=$nativeKey; RelayKey=$relayKey
-        RelayConfig=(Join-Path $dir "bridge-$relayKey.json"); NativeConfig=(Join-Path $dir "native-services-$nativeKey.json"); DirectState=(Join-Path $dir "ollama-wsl-direct-$nativeKey.json")
+        Directory=$dir; NativeDirectory=$nativeDir; StackTask=$base; RelayTask=$relayTask; NativeTask=$nativeTask; NativeKey=$nativeKey; RelayKey=$relayKey
+        RelayConfig=(Join-Path $dir "bridge-$relayKey.json"); NativeConfig=(Join-Path $nativeDir "native-services-$nativeKey.json"); NativeConfigLegacy=(Join-Path $dir "native-services-$nativeKey.json"); DirectState=(Join-Path $dir "ollama-wsl-direct-$nativeKey.json")
         ShortcutConfig=(Join-Path $dir "shortcut-$safeName-$safeUser-$suffix.json"); ShortcutHelper=(Join-Path $dir "LatticeVale-Shortcut-$safeName-$safeUser-$suffix.ps1"); ShortcutLog=(Join-Path $dir "shortcut-$safeName-$safeUser-$suffix.log")
         StartShortcut=(Join-Path $desktop "Start LatticeVale - $safeName ($safeUser).lnk"); ShutdownShortcut=(Join-Path $desktop "Shut Down LatticeVale - $safeName ($safeUser).lnk")
     }
@@ -556,12 +557,28 @@ chmod 0600 "$stack/.latticevale-uninstalled"
     if (-not $r.Success) { Write-Warning "Could not mark the preserved stack as uninstalled: $($r.Text)" }
 }
 function Cleanup-AppData([object]$Paths) {
-    foreach ($ownedConfig in @($Paths.RelayConfig,$Paths.NativeConfig)) {
+    foreach ($ownedConfig in @($Paths.RelayConfig,$Paths.NativeConfig,$Paths.NativeConfigLegacy)) {
         if (-not (Test-Path -LiteralPath $ownedConfig -PathType Leaf)) { continue }
         if (Test-AnyScheduledTaskReferencesPath $ownedConfig) {
             Write-Warning "A scheduled task still references '$ownedConfig', so that installer-owned config was preserved instead of breaking the remaining task."
         } else {
             Remove-Item -LiteralPath $ownedConfig -Force -ErrorAction SilentlyContinue
+        }
+    }
+    # Privileged Ollama relay moved to Program Files; uninstall only exact
+    # installer-owned artifacts when no other distro/task still uses them.
+    if (Test-Path -LiteralPath $Paths.NativeDirectory -PathType Container) {
+        $remainingNative = @(Get-ChildItem -LiteralPath $Paths.NativeDirectory -Filter 'native-services-*.json' -File -ErrorAction SilentlyContinue)
+        if ($remainingNative.Count -eq 0) {
+            foreach ($nativeShared in @('LatticeVale-WindowsNativeServiceRelay.ps1','windows-native-service-relay.log')) {
+                $file = Join-Path $Paths.NativeDirectory $nativeShared
+                if ((Test-Path -LiteralPath $file -PathType Leaf) -and -not (Test-AnyScheduledTaskReferencesPath $file)) {
+                    Remove-Item -LiteralPath $file -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+        if (@(Get-ChildItem -LiteralPath $Paths.NativeDirectory -Force -ErrorAction SilentlyContinue).Count -eq 0) {
+            Remove-Item -LiteralPath $Paths.NativeDirectory -Force -ErrorAction SilentlyContinue
         }
     }
     if (Test-Path -LiteralPath $Paths.Directory -PathType Container) {
@@ -643,6 +660,9 @@ Write-Step 'Removing installer-owned Windows integrations'
 Remove-TaskIfOwned $paths.StackTask @('wsl.exe',$DistroName,'hermes-stack-start')
 Remove-TaskIfOwned $paths.RelayTask @($paths.RelayConfig)
 Remove-TaskIfOwned $paths.NativeTask @($paths.NativeConfig)
+# A pre-hardening task's AppData path is only cleaned if the newly protected task
+# was not present and the legacy task action proves the old config was its own.
+Remove-TaskIfOwned $paths.NativeTask @($paths.NativeConfigLegacy)
 Remove-Shortcuts $paths
 Remove-TailscaleServe $tailscaleInfo
 Restore-DirectOllamaState $paths

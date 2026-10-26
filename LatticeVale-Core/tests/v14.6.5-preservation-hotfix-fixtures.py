@@ -205,3 +205,35 @@ assert 'runtime-policy.py verify' in sh
 assert 'state_mark infrastructure pending' in sh and 'state_mark reconcile pending' in sh
 assert 'QMD adaptive memory ceilings:' in sh
 print('14.6.5 QMD adaptive memory/repair regression fixtures passed')
+
+
+# Security-only 14.6.5 overlay: privilege, origin and ownership boundaries.
+# These source contracts are deliberately additive to the 149 historical fixtures.
+installer=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='utf-8-sig')
+uninstall=(ROOT/'Uninstall-LatticeVale.ps1').read_text(encoding='utf-8-sig')
+bridge=installer[installer.index('function Register-LatticeValeBridgeRefreshTask'):installer.index('function Remove-LatticeValeBridgeSupport')]
+autostart=installer[installer.index("if ($autoStart) {\n    Write-Step 'Registering selected stack to start at Windows logon'"):]
+native=installer[installer.index('function Get-LatticeValeNativeServicePaths'):installer.index('function Remove-LegacyV14BridgeSupport')]
+serve=installer[installer.index('function Get-WindowsTailscaleServePortState'):installer.index('function Disable-WindowsTailscaleServe')]
+assert '-RunLevel Limited' in bridge and '-RunLevel Highest' not in bridge
+assert '-RunLevel Limited' in autostart.split('$task = Get-ScheduledTask',1)[0]
+assert "LatticeVale-PrivilegedRelay" in native
+assert 'SetOwner($admins)' in native and 'SetAccessRuleProtection($true' in native
+assert 'S-1-5-32-544' in native and 'S-1-5-18' in native
+assert 'GetOwner([System.Security.Principal.SecurityIdentifier])' in native
+assert 'FileAttributes]::ReparsePoint' in native
+assert 'Protect-LatticeValePrivilegedRelayFile $paths.Script $paths.Directory' in installer
+assert 'Protect-LatticeValePrivilegedRelayFile $paths.Config $paths.Directory' in installer
+assert 'Protect-LatticeValePrivilegedRelayFile $Paths.Script $Paths.Directory' in installer
+assert 'NativeConfigLegacy=' in uninstall and 'NativeDirectory=' in uninstall
+assert 'Test-AnyScheduledTaskReferencesPath $file' in uninstall
+assert '$result.MatchesExpected = ($hasExpectedRoot -and $allTargetsOwned)' in serve
+assert 'foreach ($target in $result.Targets)' in serve
+assert 'if (-not (Test-WindowsTailscaleBackendTarget' in serve
+# Keep live services/credentials/storage untouched while narrowing privilege.
+compose=(ROOT/'stack/compose.yaml').read_text()
+assert 'hermes-qmd-indexer' in compose and 'qmd-index-cycle' in compose
+assert 'tailscale/tailscale' not in compose
+assert 'registration_shared_secret' in (ROOT/'stack/configure-stack.sh').read_text()
+assert 'maxConnections=512' in installer
+print('14.6.5 stealth security boundaries: PASS')

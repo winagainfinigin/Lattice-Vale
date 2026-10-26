@@ -1,3 +1,12 @@
+## v14.6.5 security-only preservation hotfix (unchanged release identity)
+
+- Reduced privileges for Tailscale's passive Windows WSL relay and optional WSL autostart tasks (`RunLevel Limited`).
+- Protected the elevated native Windows Ollama relay script and configuration in an administrator-controlled Program Files directory with explicit owner and ACL verification, including reparse-point rejection.
+- Preserved direct-WSL Ollama state paths and existing user credentials; the uninstaller understands the protected native-bridge artifact location and the legacy path.
+- Refused to adopt or disable a Tailscale Serve HTTPS listener if any observed handler forwards to an unowned backend.
+- Retained the 14.6.5 resource-policy/QMD memory correction, Matrix identities, Tailscale authentication, user overrides and all selected application service configurations.
+- Live Windows native relay, NTFS ACL, Tailscale devices and LAN reachability have **not** been tested in this non-Windows execution environment; complete manual validation before deployment.
+
 # Current v14.6.5 patch notes
 
 ## v14.6.5 same-version public-installer hotfix

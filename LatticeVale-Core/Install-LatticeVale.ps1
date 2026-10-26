@@ -1649,8 +1649,11 @@ function Get-WindowsHostIpv4ForWsl([string]$Name) {
 
 function Get-LatticeValeNativeOllamaDirectPaths([string]$Name) {
     $native = Get-LatticeValeNativeServicePaths $Name
+    # Non-executable legacy state stays at its original per-user path to avoid
+    # changing direct-WSL transport identity during a security-only repair.
+    $stateDir = Join-Path $env:LOCALAPPDATA 'LatticeVale'
     return [pscustomobject]@{
-        State = (Join-Path $native.Directory ("ollama-wsl-direct-$($native.RuleKey).json"))
+        State = (Join-Path $stateDir ("ollama-wsl-direct-$($native.RuleKey).json"))
         RulePrefix = ("LatticeValeOllamaWslDirect-$($native.RuleKey)")
     }
 }
@@ -2606,7 +2609,12 @@ function Get-LatticeValeNativeServicePaths([string]$Name) {
     $taskName = Get-LatticeValeNativeServiceTaskName $Name
     $key = ([regex]::Replace($taskName, '[^A-Za-z0-9._-]', '_')).Trim('_')
     if ($key.Length -gt 96) { $key = $key.Substring(0, 96) }
-    $dir = Join-Path $env:LOCALAPPDATA 'LatticeVale'
+    # This scheduled task needs elevation for narrowly scoped firewall refreshes.
+    # Its executable script/configuration must not live in user-writable AppData:
+    # that combination would permit unelevated same-user script replacement.
+    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    if ([string]::IsNullOrWhiteSpace($programFiles)) { throw 'Protected Program Files directory is unavailable for the elevated native bridge.' }
+    $dir = Join-Path $programFiles 'LatticeVale-PrivilegedRelay'
     return [pscustomobject]@{
         Directory = $dir
         Script = (Join-Path $dir 'LatticeVale-WindowsNativeServiceRelay.ps1')
@@ -2614,6 +2622,81 @@ function Get-LatticeValeNativeServicePaths([string]$Name) {
         Log = (Join-Path $dir 'windows-native-service-relay.log')
         RuleKey = $key
         TaskName = $taskName
+    }
+}
+
+function Protect-LatticeValePrivilegedRelayDirectory([string]$Directory) {
+    # The elevated scheduled task must never run an AppData-writable script.
+    # Use a dedicated Program Files directory; do not modify neighboring app ACLs.
+    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+    $expected = Join-Path $programFiles 'LatticeVale-PrivilegedRelay'
+    if (-not $Directory.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing to stage the elevated native-service relay outside its protected installation directory.'
+    }
+    if (Test-Path -LiteralPath $Directory) {
+        $existing = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
+        if (-not $existing.PSIsContainer -or (($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+            throw 'The protected native-service relay location is not an ordinary directory.'
+        }
+    } else {
+        New-Item -ItemType Directory -Path $Directory -Force -ErrorAction Stop | Out-Null
+    }
+    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+    $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
+    $propagation = [System.Security.AccessControl.PropagationFlags]::None
+    $allow = [System.Security.AccessControl.AccessControlType]::Allow
+    $full = [System.Security.AccessControl.FileSystemRights]::FullControl
+    $acl = Get-Acl -LiteralPath $Directory -ErrorAction Stop
+    $acl.SetAccessRuleProtection($true, $false)
+    foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
+    $acl.SetOwner($admins)
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($admins,$full,$inheritance,$propagation,$allow)))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system,$full,$inheritance,$propagation,$allow)))
+    Set-Acl -LiteralPath $Directory -AclObject $acl -ErrorAction Stop
+    # Fail closed if the ACL/owner could not actually be enforced.
+    $checked = Get-Acl -LiteralPath $Directory -ErrorAction Stop
+    if ($checked.Owner -notin @('BUILTIN\Administrators', $admins.Value)) {
+        try { if ($checked.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $admins.Value) { throw 'Unexpected privileged relay directory owner.' } }
+        catch { throw 'Could not verify the privileged relay directory owner.' }
+    }
+    foreach ($rule in @($checked.Access)) {
+        if ($rule.AccessControlType -ne 'Allow') { continue }
+        $sid = ''
+        try { $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+        if ($sid -notin @($admins.Value,$system.Value)) { throw 'Unexpected write-capable principal on privileged relay directory.' }
+    }
+}
+
+function Protect-LatticeValePrivilegedRelayFile([string]$FilePath, [string]$Directory) {
+    Protect-LatticeValePrivilegedRelayDirectory $Directory
+    if (-not $FilePath.StartsWith(($Directory.TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Refusing to trust a privileged relay file outside the protected directory.'
+    }
+    $file = Get-Item -LiteralPath $FilePath -Force -ErrorAction Stop
+    if ($file.PSIsContainer -or (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
+        throw 'Refusing a redirected or non-file privileged relay artifact.'
+    }
+    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
+    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
+    $rights = [System.Security.AccessControl.FileSystemRights]::FullControl
+    $allow = [System.Security.AccessControl.AccessControlType]::Allow
+    $acl = Get-Acl -LiteralPath $FilePath -ErrorAction Stop
+    $acl.SetAccessRuleProtection($true,$false)
+    foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
+    $acl.SetOwner($admins)
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($admins,$rights,$allow)))
+    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system,$rights,$allow)))
+    Set-Acl -LiteralPath $FilePath -AclObject $acl -ErrorAction Stop
+    $checked = Get-Acl -LiteralPath $FilePath -ErrorAction Stop
+    if ($checked.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $admins.Value) {
+        throw 'Privileged relay file owner verification failed.'
+    }
+    foreach ($rule in @($checked.Access)) {
+        if ($rule.AccessControlType -ne 'Allow') { continue }
+        $sid = ''
+        try { $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }
+        if ($sid -notin @($admins.Value,$system.Value)) { throw 'Unexpected privileged relay file access rule.' }
     }
 }
 
@@ -5863,14 +5946,14 @@ function Register-LatticeValeBridgeRefreshTask([object]$Paths, [bool]$StartAtLog
     try {
         $powershell = Select-LatticeValeRelayPowerShell $Paths $EnsureStackRunning
         if ([string]::IsNullOrWhiteSpace($powershell)) { return $false }
-        # This task is intentionally long-running. Use the same elevated interactive
-        # user context that proved reliable during live troubleshooting. PowerShell 7
+        # Only loopback TCP sockets and the user's existing WSL distro are needed;
+        # no administrator token is necessary for this passive Tailscale relay. PowerShell 7
         # is preferred when available; Windows PowerShell 5.1 is accepted only when
         # this exact relay/config passes a bounded self-test under that engine.
         $argLine = (((Get-LatticeValeRelayArguments $Paths $EnsureStackRunning) | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }) -join ' ')
         $action = New-ScheduledTaskAction -Execute $powershell -Argument $argLine -WorkingDirectory $Paths.Directory
         $windowsIdentity = Get-CurrentWindowsIdentityName
-        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Highest
+        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
         if ($StartAtLogon) {
             $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $windowsIdentity
@@ -5882,7 +5965,7 @@ function Register-LatticeValeBridgeRefreshTask([object]$Paths, [bool]$StartAtLog
             Register-ScheduledTask -TaskName $Paths.TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
         }
         $mode = if ($StartAtLogon -and $EnsureStackRunning) { 'at-logon stack recovery' } elseif ($StartAtLogon) { 'at-logon passive relay' } else { 'on-demand passive relay' }
-        Add-Content -LiteralPath (Join-Path $Paths.Directory 'native-relay.log') -Value ("{0} Registered relay task '{1}' using {2} at Highest run level ({3})." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Paths.TaskName,$powershell,$mode) -Encoding UTF8
+        Add-Content -LiteralPath (Join-Path $Paths.Directory 'native-relay.log') -Value ("{0} Registered relay task '{1}' using {2} at Limited run level ({3})." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Paths.TaskName,$powershell,$mode) -Encoding UTF8
         Write-Info "Registered Windows-native relay task '$($Paths.TaskName)' using $powershell ($mode mode)."
         return $true
     } catch {
@@ -5934,7 +6017,7 @@ function Write-LatticeValeNativeOllamaBridgeConfig([string]$Name, [int]$BridgePo
     if ($TargetPort -lt 1 -or $TargetPort -gt 65535) { throw "Invalid native Ollama target port: $TargetPort" }
     if ([string]::IsNullOrWhiteSpace($TargetAddress)) { throw 'Native Ollama target address is empty.' }
     $paths = Get-LatticeValeNativeServicePaths $Name
-    New-Item -ItemType Directory -Path $paths.Directory -Force | Out-Null
+    Protect-LatticeValePrivilegedRelayDirectory $paths.Directory
     $source = Join-Path $PSScriptRoot 'windows\LatticeVale-WindowsNativeServiceRelay.ps1'
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Native Windows service relay source is missing: $source" }
     Copy-Item -LiteralPath $source -Destination $paths.Script -Force
@@ -5956,6 +6039,8 @@ function Write-LatticeValeNativeOllamaBridgeConfig([string]$Name, [int]$BridgePo
     }
     $json = $config | ConvertTo-Json -Depth 8
     [System.IO.File]::WriteAllText($paths.Config, ($json + "`r`n"), [System.Text.UTF8Encoding]::new($false))
+    Protect-LatticeValePrivilegedRelayFile $paths.Script $paths.Directory
+    Protect-LatticeValePrivilegedRelayFile $paths.Config $paths.Directory
     return $paths
 }
 
@@ -5984,6 +6069,8 @@ function Select-LatticeValeNativeServicePowerShell([object]$Paths) {
 
 function Register-LatticeValeNativeServiceTask([object]$Paths, [bool]$StartAtLogon) {
     try {
+        Protect-LatticeValePrivilegedRelayFile $Paths.Script $Paths.Directory
+        Protect-LatticeValePrivilegedRelayFile $Paths.Config $Paths.Directory
         Stop-ScheduledTask -TaskName $Paths.TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $Paths.TaskName -Confirm:$false -ErrorAction SilentlyContinue
         $powershell = Select-LatticeValeNativeServicePowerShell $Paths
@@ -6487,12 +6574,18 @@ function Get-WindowsTailscaleServePortState(
     $result.Targets = @($targets | Select-Object -Unique)
     $result.RootTargets = @($rootTargets | Select-Object -Unique)
     if ($ExpectedBackendPort -gt 0 -and $result.InUse) {
+        # A matching root route is not proof of exclusive ownership when other
+        # handlers on the same Serve listener point to unrelated backends.
+        # Never adopt/disable such a mixed user-managed Serve configuration.
+        $hasExpectedRoot = $false
+        $allTargetsOwned = ($result.Targets.Count -gt 0)
         foreach ($target in $result.RootTargets) {
-            if (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort) {
-                $result.MatchesExpected = $true
-                break
-            }
+            if (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort) { $hasExpectedRoot = $true }
         }
+        foreach ($target in $result.Targets) {
+            if (-not (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort)) { $allTargetsOwned = $false; break }
+        }
+        $result.MatchesExpected = ($hasExpectedRoot -and $allTargetsOwned)
     }
     return [pscustomobject]$result
 }
@@ -9218,7 +9311,7 @@ if ($autoStart) {
         $action = New-ScheduledTaskAction -Execute $wslExe -Argument $taskArgs
         $windowsIdentity = Get-CurrentWindowsIdentityName
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $windowsIdentity
-        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Highest
+        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
     } catch {
