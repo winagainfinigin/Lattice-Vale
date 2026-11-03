@@ -178,7 +178,6 @@ compat_file="$bundle_root/compatibility.conf"
 
 repair_refresh_days="${MANAGED_REPAIR_REFRESH_DAYS:-30}"
 [[ "$repair_refresh_days" =~ ^[0-9]+$ && "$repair_refresh_days" -ge 1 && "$repair_refresh_days" -le 365 ]] || { echo 'Invalid MANAGED_REPAIR_REFRESH_DAYS in compatibility.conf.' >&2; exit 3; }
-repair_refresh_interval_seconds=$((repair_refresh_days * 86400))
 repair_refresh_revision="${MANAGED_REPAIR_REFRESH_REVISION:-1}"
 [[ "$repair_refresh_revision" =~ ^[0-9]+$ && "$repair_refresh_revision" -ge 1 ]] || { echo 'Invalid MANAGED_REPAIR_REFRESH_REVISION in compatibility.conf.' >&2; exit 3; }
 repair_refresh_state="$stack_dir/.repair-package-refresh"
@@ -201,26 +200,18 @@ if [[ "$repair_run" == true ]]; then
     fi
     unset pending_refresh_revision pending_refresh_installer_version
   else
-    last_refresh_epoch="$(sed -n 's/^LAST_SUCCESS_EPOCH=//p' "$repair_refresh_state" 2>/dev/null | head -n1 || true)"
-    last_refresh_revision="$(sed -n 's/^POLICY_REVISION=//p' "$repair_refresh_state" 2>/dev/null | head -n1 || true)"
-    last_refresh_installer_version="$(sed -n 's/^INSTALLER_VERSION=//p' "$repair_refresh_state" 2>/dev/null | head -n1 || true)"
-    now_epoch="$(date +%s)"
+    # v14.6.6: the periodic date/age gate is retired. Option 1 has already
+    # checked live package, image, QMD and Honcho availability in Windows before
+    # bootstrap and passes force_managed_update=true only for detected drift.
+    # Options 2/4/5 remain local-first. Explicit Option 6, a proven cumulative
+    # migration and interrupted refreshes still use the existing safe handoff.
     if [[ "$force_managed_update" == true ]]; then
       repair_refresh_pending=true
       repair_root_refresh_needed=true
-      echo "Explicit Update / repair requested: forcing a latest-supported installer-managed package/image/source refresh now; the ${repair_refresh_days}-day periodic gate is bypassed for this run."
-    elif [[ ! "$last_refresh_epoch" =~ ^[0-9]+$ ]] || [[ "$last_refresh_revision" != "$repair_refresh_revision" ]] || (( now_epoch - last_refresh_epoch >= repair_refresh_interval_seconds )); then
-      repair_refresh_pending=true
-      repair_root_refresh_needed=true
-      if [[ "$last_refresh_revision" != "$repair_refresh_revision" ]]; then
-        echo "Managed repair package/image refresh is due because the installer refresh policy revision changed (saved: ${last_refresh_revision:-none}; required: $repair_refresh_revision)."
-      else
-        echo "Managed repair package/image refresh is due (interval: ${repair_refresh_days} days; legacy installs without a refresh marker refresh once)."
-      fi
-    elif [[ -n "$last_refresh_installer_version" && "$last_refresh_installer_version" != "$installer_version" ]]; then
-      echo "LatticeVale bundle changed since the last managed component refresh (saved refresh: $last_refresh_installer_version; current bundle: $installer_version), but managed-refresh policy revision $repair_refresh_revision is unchanged and the age gate is not due. Resume / repair remains local-first; stage migrations and live verifiers still apply. Choose Update / repair installer-managed software to force a latest-supported package/image/source refresh now."
+      echo 'A supported managed update was explicitly requested or confirmed by the v14.6.6 Option 1 availability check; performing compatibility-bounded refresh.'
+    else
+      echo 'No managed software refresh was requested or confirmed; preserving installed application images/sources without a time-gated pull or rebuild.'
     fi
-    unset last_refresh_epoch last_refresh_revision last_refresh_installer_version now_epoch
   fi
   unset marker
 fi
@@ -246,7 +237,7 @@ if [[ "$repair_root_refresh_needed" == true ]]; then
   run_apt_update_with_progress 'LatticeVale prerequisites' -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
   lv_apt_install -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y --no-install-recommends "${prereq_packages[@]}"
 elif [[ "$repair_run" == true && ${#missing_prereqs[@]} -eq 0 ]]; then
-  echo 'Repair prerequisite check: required Ubuntu packages are already installed and the periodic managed-package refresh is not due.'
+  echo 'Repair prerequisite check: required Ubuntu packages are installed; no confirmed managed-software refresh requested.'
 else
   run_apt_update_with_progress 'LatticeVale prerequisites' -o DPkg::Lock::Timeout=60 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30
   if [[ "$repair_run" == true ]]; then

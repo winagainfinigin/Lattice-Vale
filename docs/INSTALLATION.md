@@ -1,14 +1,19 @@
 # LatticeVale Installation Guide
 
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
+
+> **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.
+
+
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.5 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 
 ## Historical v14.6.1 Tailscale remote-access behavior
 
-Earlier releases required a second-device proof even after local service checks passed. Current v14.6.5 test builds remove that page challenge. They verify the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
+Earlier releases required a second-device proof even after local service checks passed. Current v14.6.6 test builds remove that page challenge. They verify the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
 
 No second-device challenge is requested during v14.6.5 installation. Local route checks establish installer status; permitted remote devices use the displayed service URL after installation.
 
@@ -21,7 +26,7 @@ For a recognized older installer-managed stack, cumulative migration is not tied
 
 Same-version Resume / repair also treats stale canonical runtime-policy state, transient DirectML gateway readiness, and missing ephemeral Hermes s6 gateway slots as recoverable installer-owned drift when the underlying preserved configuration is intact.
 
-## v14.6.5 current schema-24 local-AI choices (inherited from v14.6.0)
+## v14.6.6 current schema-24 local-AI choices (inherited from v14.6.0)
 
 Local-AI setup now records whether GPU acceleration is wanted before backend selection. CPU-only is fully supported. DirectML users explicitly choose native-Windows Ollama fallback, managed WSL/Docker Ollama fallback, or no text fallback. These choices are durable and are preserved during Resume / repair. Honcho embeddings can use Ollama independently of the DirectML text-fallback choice.
 

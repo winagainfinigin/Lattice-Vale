@@ -3,7 +3,7 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.5 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.6 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 This document describes the LatticeVale **v14.6.5** repository/release contract for GitHub.
@@ -51,6 +51,6 @@ Before publishing v14.6.5:
 - both ZIPs must have the required `Lattice-Vale/` root, valid CRCs, portable paths, no duplicate/case-colliding members, and byte-for-byte source equivalence; and
 - no individual repository file may exceed 100 MiB.
 
-The current full release is built from the qualified `main` commit. The `14.6.5` tag must identify that exact commit before publication; do not publish a ZIP against an older tag target.
+The current full release is built from the qualified `main` commit. The `14.6.6` tag must identify that exact commit before publication; do not publish a ZIP against an older tag target.
 
 GitHub's community-health checklist is a recommendation rather than a special LatticeVale runtime requirement. LatticeVale keeps its existing README, MIT license, contribution, security, support, issue-template, pull-request, and CI metadata synchronized so repository users receive current guidance.

@@ -1,5 +1,10 @@
 # Changelog
 
+## 14.6.6 — update-on-availability repair and Tailscale validation (2026-11-03)
+
+Existing-install Option 1 checks supported managed software versions every run, without relying on the legacy 30-day refresh window. It performs managed refresh only on demonstrated upstream or package drift; unknown availability is reported and does not automatically trigger updates. Option 6 remains the explicit force-refresh path. Preserves full 14.6.5 Tailscale IPv4/IPv6 verified-HTTPS correction, including proxy bypass and non-destructive handling of false-negative Windows listener checks. Maintains schema 24, policy 13, persistent data, user overrides, and previous Windows/WSL integration.
+
+
 #### 14.6.5 QMD memory-floor hotfix (same release version)
 
 Raised the canonical adaptive minimum for the QMD MCP/search role and CPU embedding indexer to 1024 MiB each, within the existing conserved container budget. This addresses repeated cgroup OOM kills during `embeddinggemma-300M-Q8_0` loading under a 304 MiB indexer ceiling. The existing canonical verifier invalidates undersized same-version allocations so Resume / repair applies changed Compose limits, while respecting user-owned overrides and refusing unsupported low-memory combinations. Added model-aware floor regression checks without touching existing identities or persisted QMD data.
