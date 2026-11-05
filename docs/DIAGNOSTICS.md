@@ -73,3 +73,13 @@ For QMD indexer OOM findings, compare `docker inspect` live `State.OOMKilled`, `
 ### 14.6.5 QMD embedding CPU out-of-memory
 
 A QMD indexer that reports `Indexed: ... unchanged` followed by `Run 'qmd embed' ... need vectors`, `Model: embeddinggemma-300M-Q8_0.gguf`, and `Killed` has **not** finished semantic embedding. An `OOMKilled=true` Docker flag together with repeatable killed embedding attempts is evidence of cgroup memory exhaustion. The 14.6.5 QMD resource correction raises both managed QMD-role minima; run normal Resume / repair to generate and apply a new Compose memory limit. Confirm the effective value with `docker inspect -f '{{.HostConfig.Memory}}' hermes-qmd-indexer` inside the selected WSL distro and check `docker logs --tail 100 hermes-qmd-indexer` for a later successful embed. Docker OOM markers without timestamps do not establish whether an event occurred before or after reconciliation. A user-owned Compose override can supersede installer allocations. Do not remove indexes, models, vault notes or authentication data just to recover from this memory ceiling.
+
+### Bounded resource-burst diagnostics
+
+A live Docker limit differing from Compose is valid only when
+`resource-burst-controller.py --verify --stack ~/hermes-stack` confirms the
+policy fingerprint, exact service ownership, container IDs, and transaction
+snapshot. Otherwise the normal static policy mismatch remains reportable.
+The timer and service journal distinguish static fallback, sustained demand,
+contention-aware holds, and a safely applied rebalance. Read-only audits
+verify the snapshot without mutating it. See `RESOURCE-POLICY.md`.

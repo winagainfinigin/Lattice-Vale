@@ -1173,6 +1173,16 @@ def main() -> int:
                     if not effective_limits:
                         policy_issues.append("effective Compose CPU/RAM policy could not be rendered for live-limit verification")
                     else:
+                        # v14 bounded borrowing is a separate transient layer.
+                        # Trust it only if the controller validates its full live
+                        # ID/limit snapshot; user Compose overlays retain priority.
+                        burst_valid = False
+                        burst_path = root / 'resource-burst-controller.py'
+                        if burst_path.is_file() and not (root / 'compose.override.yaml').exists():
+                            burst_rc, _burst_msg = run(
+                                [sys.executable, str(burst_path), '--verify', '--stack', str(root)],
+                                cwd=root, timeout=22)
+                            burst_valid = (burst_rc == 0)
                         for service_name, container_name in live_limit_pairs:
                             expected_bytes, expected_nano = effective_limits.get(service_name, (0, 0))
                             expected_bytes = int(expected_bytes or 0)
@@ -1188,11 +1198,11 @@ def main() -> int:
                                 continue
                             actual_bytes = int(live_state.get("memoryLimitBytes") or 0)
                             actual_nano = int(live_state.get("cpuLimitNanoCpus") or 0)
-                            if actual_bytes != expected_bytes:
+                            if actual_bytes != expected_bytes and not burst_valid:
                                 policy_issues.append(
                                     f"{container_name} live memory ceiling is {actual_bytes} bytes but effective Compose requires {expected_bytes} bytes; Resume / repair must reconcile Compose"
                                 )
-                            if actual_nano != expected_nano:
+                            if actual_nano != expected_nano and not burst_valid:
                                 policy_issues.append(
                                     f"{container_name} live CPU ceiling is {actual_nano} NanoCPUs but effective Compose requires {expected_nano} NanoCPUs; Resume / repair must reconcile Compose"
                                 )

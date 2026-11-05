@@ -1,5 +1,12 @@
 # LatticeVale v14.6.6
 
+> **14.6.6 resource-usage hotfix:** Optional bounded-burst controller
+> reallocates unused CPU and memory headroom among selected LatticeVale
+> containers using live Docker/cgroup/WSL pressure evidence. Canonical
+> conservative fallback, QMD/model safety floors, DirectML host reserves, and
+> `compose.override.yaml` ownership are preserved. Installer Option 1
+> reconciles it; see [Resource Policy](docs/RESOURCE-POLICY.md).
+
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 > **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.

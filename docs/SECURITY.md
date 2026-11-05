@@ -265,3 +265,13 @@ Static/container tests cannot fully emulate Windows Task Scheduler, a real WSL V
 ## Global WSL configuration changes
 
 Global `.wslconfig` changes remain exceptional. v14.4.81 may offer only the documented mirrored→NAT compatibility recovery after persistent `E_UNEXPECTED`; it backs up the file and requires explicit approval. Any such change requires global `wsl --shutdown`, so LatticeVale checks for other running distros first and asks if that running-state check itself is unavailable. Declining leaves the setting unchanged. Other normal configuration flows do not take ownership of global WSL networking.
+
+### Resource-burst controller privilege boundary
+
+The optional WSL systemd timer invokes its oneshot controller as the selected
+non-root Ubuntu owner. It uses the same local Docker Engine access already
+required by LatticeVale; the Docker socket is not mounted in any new app
+container. It validates Compose project/service labels, container IDs,
+canonical policy identity and user override ownership before `docker update`.
+Controller state is stored mode 0600. Failure or missing telemetry retains the
+static resource policy. The timer is removed by the LatticeVale uninstaller.

@@ -365,3 +365,10 @@ The original granular pre-LatticeVale v13 patch notes from the v13.16.6 bundle a
 ## GitHub repository and release packaging
 
 See [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md) for repository-size/path constraints, community-health file locations, archive-root requirements, release-content policy, and pre-publication checks.
+
+### 14.6.6 resource-burst hotfix
+
+The bounded CPU/RAM borrowing controller retains the canonical static v13
+fallback and integrates with repair/audit. [RESOURCE-POLICY.md](RESOURCE-POLICY.md)
+is the authoritative description of v14 scheduling, memory/CPU safety
+ceilings, verification, and optional systemd timer requirements.

@@ -66,3 +66,15 @@ Run `./manage.sh diagnose-policy`. Hardware/backend fingerprint changes intentio
 ## Patch ZIP versus full release
 
 The repository patch ZIP contains only changed/new repository files relative to the declared parent release. It is not a live-stack overlay. Existing installations should always be updated/repaired through the full release installer.
+
+### Resource bursts are not occurring
+
+Check `systemctl status latticevale-resource-burst.timer` and
+`journalctl -u latticevale-resource-burst.service -n 50 --no-pager` inside WSL.
+The scheduler deliberately leaves quotas at their safe Compose values when
+systemd/Docker/PSI evidence is unavailable, a selected container is missing,
+`compose.override.yaml` exists, a newly observed OOM/pressure event appears,
+or traffic has not met the sustained demand/idleness thresholds. A stale
+Docker OOM marker alone does not establish a new OOM event. Run the read-only
+`python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack`
+check for the exact policy/ownership snapshot before using Resume / repair.

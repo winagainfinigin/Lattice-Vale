@@ -399,3 +399,12 @@ The **v13.16.0 repair maintenance** design remains part of v14: bounded cleanup/
 
 
 Detailed v14.x implementation and audit history is consolidated in `../docs/PATCH-NOTES.md`; `../docs/CHANGELOG.md` remains canonical for release chronology.
+
+### 14.6.6 resource-burst hotfix
+
+The host-side `resource-burst-controller.py` runs, when supported, through the
+WSL systemd timer, reallocating bounded unused managed-container CPU/RAM
+ceilings from verified live pressure without container restarts. Static
+`runtime-policy.json` schema 13 and `compose.override.yaml` remain authoritative
+for unsupported/overridden environments. Use Resume / repair to install the
+host-owned service. See `../docs/RESOURCE-POLICY.md`.

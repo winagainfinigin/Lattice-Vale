@@ -46,3 +46,15 @@ The Windows Obsidian check now verifies an executable through registered Windows
 ### QMD allocation correction regression (14.6.5)
 
 `tests/v14.6.5-qmd-resource-floor-fixtures.py` exercises minimum-fit, full multi-service budget conservation, monotonic service allocations, disabled-service identity, under-budget refusal, and the shipping generator/verifier's shared canonical resource formula. Verify that Resume / repair changes stale 304 MiB QMD indexer ceilings rather than concluding an unchanged policy fingerprint is current. Live WSL/Docker verification of the actual default QMD embedding workload remains necessary; fixture results do not prove `qmd embed` succeeds under every container/runtime environment.
+
+### v14.6.6 bounded resource-burst hotfix verification
+
+The 151-fixture suite adds `v14.6.6-burst-resource-fixtures.py`. It tests
+canonical host-budget relaxation, workload-derived CPU weights/memory floors,
+unused quota borrowing, aggregate conservation, DirectML transitions,
+CPU/memory/I/O pressure response, Docker OOM freshness, fake transaction
+rollback, and hundreds of arbitrary simulated loads. The fixture also checks
+timer registration, uninstall cleanup, source/Compose wiring, and read-only
+audit acceptance of exact dynamic snapshots. Live Windows/WSL/Docker
+reconciliation must still be verified on the target host; simulated tests
+are not an end-to-end performance result.

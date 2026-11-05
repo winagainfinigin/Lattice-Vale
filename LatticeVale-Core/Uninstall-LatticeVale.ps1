@@ -510,6 +510,13 @@ set -e
 stack="$1"; purge="$2"
 helper=/usr/local/sbin/hermes-stack-start
 if [ -f "$helper" ] && grep -Fq "$stack" "$helper" 2>/dev/null; then rm -f "$helper"; fi
+burst_service=/etc/systemd/system/latticevale-resource-burst.service
+burst_timer=/etc/systemd/system/latticevale-resource-burst.timer
+if [ -f "$burst_service" ] && grep -Fq "$stack/resource-burst-controller.py" "$burst_service" 2>/dev/null; then
+  if command -v systemctl >/dev/null 2>&1; then systemctl disable --now latticevale-resource-burst.timer >/dev/null 2>&1 || true; fi
+  rm -f "$burst_service" "$burst_timer"
+  if command -v systemctl >/dev/null 2>&1; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
+fi
 directml_unit=/etc/systemd/system/latticevale-directml-gateway.service
 if [ -f "$directml_unit" ] && grep -Fq "$stack/directml-gateway.sh" "$directml_unit" 2>/dev/null; then
   if command -v systemctl >/dev/null 2>&1; then systemctl disable --now latticevale-directml-gateway.service >/dev/null 2>&1 || true; fi

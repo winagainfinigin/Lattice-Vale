@@ -1,9 +1,108 @@
-# LatticeVale 14.6.6 Canonical Resource Policy v13
+# LatticeVale 14.6.6 Resource Scheduler v14 (Canonical Schema v13)
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
 > **v14.6.6 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+
+
+
+## v14.6.6 bounded resource-burst hotfix (scheduler policy v14)
+
+This hotfix preserves the canonical **runtime-policy schema 13** and the fixed
+`POLICY_VERSION=13` fallback contract. `RESOURCE_BURST_STRATEGY=bounded-v14`
+enables a *separate runtime scheduling layer* after the canonical planner has
+validated WSL-visible hardware, selected services, hard memory floors, CPU
+headroom, and DirectML/GPU admission. An older v13 policy is regenerated on
+Resume / repair. Version remains **14.6.6**.
+
+The canonical hard budgets still sum to no more than the selected WSL CPU/RAM
+envelopes. Docker Compose additionally receives `cpu_shares` (relative
+priority) and `mem_reservation` (soft pressure target), while `cpus` and
+`mem_limit` remain the safe static baseline. The controller can rebalance
+**hard quota within those conserved totals** using `docker update` without
+restarting the applications. It does not set WSL's global CPU/RAM limits or
+write `.wslconfig`, alter GPU VRAM ceilings, or modify user-owned Compose files.
+
+The 12 container roles have separate priority weights and their existing
+canonical memory minima. The Hermes/Matrix/Honcho interactive roles receive
+higher CPU scheduling priorities than background QMD indexing/derivation.
+Each eligible recipient can borrow at most 400 milli-CPU and 128 MiB in one
+rebalancing cycle, subject to aggregate limits; per-service CPU limits are
+capped at the smaller of 75% of WSL logical CPU capacity and a bounded
+multiple of the baseline. Memory recipients have at most a 1.75× baseline
+ceiling, while donors retain the maximum of the canonical floor, 75% of their
+baseline, and 1.5× observed use plus 64 MiB. CPU donors retain their bounded
+minimum. Previously idle donors regain baseline CPU quota when they reawaken,
+even during an ordinary cooldown; borrowed RAM is reclaimed only where actual
+working-set usage permits safe reduction. No pool grows merely because a selected service exists.
+
+The optional host-side controller at `~/hermes-stack/resource-burst-controller.py`
+uses local Docker inspection/statistics, cgroup v2 CPU-throttling and OOM-event
+counters where accessible, and Linux CPU/memory/I/O pressure plus `MemAvailable`.
+It requires repeated demand (two samples), repeated idleness (three samples),
+and a 75-second post-change cooldown. It holds or contracts allocations during
+high memory pressure (10-second PSI average at least 2%), high CPU pressure
+(at least 25%), high I/O pressure (at least 12%), newly observed cgroup OOMs,
+missing essential pressure measurements, or low available RAM. A pre-existing
+`OOMKilled` marker alone is not treated as a newly timed kernel event.
+
+When DirectML is selected **and its host-side gateway process is absent or has remained CPU-idle for two samples**, at
+most one third of its normally reserved CPU slice (and at most 10% of WSL
+CPUs) may be lent transiently to Docker; the protected system scheduler slice
+remains intact. Detecting renewed DirectML CPU activity restores the full DirectML CPU reserve
+on the next sample, even during cooldown. DirectML host RAM is reserved at
+28% of WSL-visible memory with the existing 2 GiB floor/8 GiB cap.
+Managed-Ollama host reserve is 10%, otherwise 13%, with the original
+independent min/max host safeguards. The smaller ordinary reserve increases
+container availability only when selected service minima still fit safely.
+
+The host timer `latticevale-resource-burst.timer` runs as the selected normal
+Ubuntu user, reads only the **local** rootful Docker Engine, and never exposes
+Docker's control socket to an application container. It uses a
+fingerprint- and container-ID-bound transaction snapshot at
+`data/latticevale/resource-burst-state.json`; partial changes are recovered
+or stopped for review. Every repair stops the timer, restores the static
+Compose baseline when possible (including when a new user-owned Compose
+override is detected), and then revalidates canonical state.
+Both the installer verifier and read-only audit distinguish a verified dynamic
+snapshot from genuine unexplained Docker drift.
+
+**Fail-safe:** Missing systemd support before activation leaves static Compose
+ceilings in place. Missing Docker access, an invalid policy identity, changed
+container ownership, incomplete telemetry, or a user-owned
+`compose.override.yaml` suppresses further borrowing. Previously applied
+limits remain inside the verified aggregate envelope until an owner-run repair
+or an explicit restoration returns them to the canonical Compose baseline.
+User-supplied service/resource overrides retain final precedence and suppress
+automatic rebalancing for that stack. If the controller cannot safely execute
+one Docker change, it attempts the inverse transaction and keeps a recovery
+journal for the next activation. The Docker engine and QMD/model floors remain
+otherwise unchanged.
+
+To return an active installation to the canonical static quotas during a
+manual diagnostic, pause the timer and restore the verified baseline as the
+normal Linux owner: `sudo systemctl stop latticevale-resource-burst.timer
+latticevale-resource-burst.service`, then
+`python3 ~/hermes-stack/resource-burst-controller.py --restore --stack
+~/hermes-stack`. The next normal installer repair reconciles the policy and
+reactivates the timer when eligible.
+
+**Operational verification:** After applying the source hotfix through
+LatticeVale's Resume / repair installer flow, inspect:
+
+```
+systemctl status latticevale-resource-burst.timer --no-pager
+journalctl -u latticevale-resource-burst.service --no-pager -n 50
+python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack
+```
+
+A missing/inactive timer before first activation means *static fallback*,
+not a failed stack. Once dynamic limits have been applied, the last verified
+limits remain bounded until a verified restore or repair completes. The
+runtime controller requires a live Windows/WSL/Docker validation on the
+actual host before a throughput improvement can be claimed. Source/fixture
+checks prove calculation and transaction invariants, not Windows performance.
 
 
 ## Policy v13 conserved CPU envelope
@@ -33,7 +132,7 @@ The persisted policy includes at least:
 
 DirectML runs on the WSL host, outside the Docker service memory budget. Its host reserve therefore remains valid even when Linux-native GPU enumeration is zero. The canonical calculation treats it independently from managed Ollama acceleration.
 
-For current policy v13, ordinary host headroom scales from live WSL RAM (12% when managed Ollama is selected, otherwise 15%) with bounded safety floors/caps. When DirectML is selected, the total host reserve is raised to the larger of that ordinary reserve and a DirectML reserve derived from about 30% of live WSL RAM. The DirectML path uses a 2 GiB floor when the allocation can afford it, clamps against very small VMs so at least a minimal container-planning remainder exists, and caps the DirectML reserve at 8 GiB on large systems. The calculation uses integer-MiB scaling rather than coarse percentage rounding or RAM-size tiers, so increasing WSL RAM cannot make the calculated container budget go backward at a boundary.
+For the v14.6.6 bounded-burst hotfix, ordinary host headroom scales from live WSL RAM (10% when managed Ollama is selected, otherwise 13%) with bounded safety floors/caps. When DirectML is selected, the total host reserve is raised to the larger of that ordinary reserve and a DirectML reserve derived from about 28% of live WSL RAM. The DirectML path uses a 2 GiB floor when the allocation can afford it, clamps against very small VMs so at least a minimal container-planning remainder exists, and caps the DirectML reserve at 8 GiB on large systems. The calculation uses integer-MiB scaling rather than coarse percentage rounding or RAM-size tiers, so increasing WSL RAM cannot make the calculated container budget go backward at a boundary.
 
 These values are ceilings/budget partitions, not a promise that every selected model can run on every machine. Service minima, model VRAM admission, current host `MemAvailable`, and the live DirectML model self-test are separate gates. If the selected topology cannot fit safely, LatticeVale refuses the plan or leaves DirectML unavailable according to the configured fallback policy rather than overcommitting RAM.
 

@@ -241,3 +241,12 @@ For v14.4.4 live repair metadata-race behavior, see `PATCH-NOTES.md`.
 ### Policy v9 model/timeout diagnostics
 
 For managed Ollama, `.latticevale-resource-state` records `OLLAMA_TEXT_ARTIFACT_MIB`, `OLLAMA_EMBED_ARTIFACT_MIB`, `OLLAMA_CONTEXT_LENGTH`, and `OLLAMA_MODEL_FLOOR_MIB`. A model download or user context change therefore makes the policy fingerprint stale and triggers normal bounded reconciliation. `./manage.sh status` reports cgroup pressure using a two-sample delta: a lifetime `memory.max` count that is not increasing is historical information, while new `memory.max`, `oom`, or `oom_kill` events indicate current pressure. Honcho timeout defaults are LatticeVale-owned only when the corresponding `.latticevale-timeout-auto` sidecar proves ownership; editing the JSON timeout makes it user-owned and it is preserved.
+
+### Resource scheduler v14 support
+
+For CPU/memory performance issues after this 14.6.6 hotfix, collect the
+`latticevale-resource-burst.service` journal and the exact verified
+`resource-burst-state.json` alongside the existing resource-policy report.
+Explain whether the controller was enabled, statically held, or rebudgeted;
+compare `docker stats`, PSI, and cgroup OOM deltas before changing ceilings.
+See `RESOURCE-POLICY.md`.

@@ -929,6 +929,27 @@ write_latticevale_compose_overlay() {
     done
   fi
 
+  # v14 burst metadata comes from the SAME canonical service specification as
+  # the hard memory limits and persists in the signed resource fingerprint.
+  declare -A burst_floors=() burst_shares=()
+  if [[ "$limits" == true ]]; then
+    local burst_plan burst_service burst_vals burst_floor burst_share
+    burst_plan="$(python3 runtime-policy.py burst-metadata "$budget_mib" \
+      "$(opt_bool matrix)" "$(opt_bool searxng)" "$(opt_bool qmd)" \
+      "$(if managed_ollama_enabled; then printf true; else printf false; fi)" "$(opt_bool honcho)" \
+      "$hermes_floor_mib" "$ollama_floor_mib")" || return 1
+    while IFS='=' read -r burst_service burst_vals; do
+      [[ -n "$burst_service" ]] || continue
+      IFS=: read -r burst_floor burst_share <<<"$burst_vals"
+      [[ "$burst_floor" =~ ^[0-9]+$ && "$burst_share" =~ ^[0-9]+$ ]] || return 1
+      burst_floors["$burst_service"]="$burst_floor"
+      burst_shares["$burst_service"]="$burst_share"
+    done <<<"$burst_plan"
+    for burst_service in "${!mem_limits[@]}"; do
+      [[ "${burst_floors[$burst_service]:-0}" -le "${mem_limits[$burst_service]}" && -n "${burst_shares[$burst_service]:-}" ]] || return 1
+    done
+  fi
+
   # Application tuning is derived from the live CPU/RAM envelope and, when limits
   # are enabled, the actual service allocations just produced above.  No host-size
   # bucket or known-machine topology chooses allocator/database/cache settings.
@@ -969,7 +990,7 @@ write_latticevale_compose_overlay() {
     [CPU_DOCKER_ENVELOPE_MILLI]="$cpu_docker_envelope_milli" [CPU_DOCKER_ALLOCATED_MILLI]="$cpu_docker_allocated_milli"
     [MEM_MIB]="$mem_mib" [RAM_PROFILE]="$ram_profile"
     [RESERVE_MIB]="$reserve_mib" [DIRECTML_HOST_RESERVE_MIB]="$directml_reserve_mib"
-    [RESOURCE_POLICY_MODE]=adaptive
+    [RESOURCE_POLICY_MODE]=adaptive [RESOURCE_BURST_STRATEGY]=bounded-v14
     [BUDGET_MIB]="$budget_mib" [MATRIX_PROFILE_GATEWAYS]="$matrix_profile_gateways"
     [KANBAN_CONCURRENCY]="$kanban_concurrency" [HERMES_MIN_MIB]="$hermes_floor_mib"
     [OLLAMA_ACCELERATION]="$accel" [MANAGED_OLLAMA_SELECTED]="$(if managed_ollama_enabled; then printf true; else printf false; fi)" [GPU_COUNT]="$gpu_count"
@@ -994,6 +1015,8 @@ write_latticevale_compose_overlay() {
     resource_state_key="${resource_state_svc^^}"; resource_state_key="${resource_state_key//-/_}"
     resource_policy["LIMIT_${resource_state_key}_MIB"]="${mem_limits[$resource_state_svc]}"
     resource_policy["CPU_${resource_state_key}_MILLI"]="${cpu_limits[$resource_state_svc]}"
+    resource_policy["FLOOR_${resource_state_key}_MIB"]="${burst_floors[$resource_state_svc]}"
+    resource_policy["SHARES_${resource_state_key}"]="${burst_shares[$resource_state_svc]}"
   done
   local hardware_material policy_material canonical_hardware_fingerprint
   canonical_hardware_fingerprint="$(jq -r '.hardwareFingerprint // empty' data/latticevale/hardware-capabilities.json 2>/dev/null || true)"
@@ -1013,21 +1036,21 @@ write_latticevale_compose_overlay() {
     {
       echo 'services:'
       if [[ "$limits" == true ]]; then
-        printf '  hermes:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HERMES_MILLI]}")" "${resource_policy[LIMIT_HERMES_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
+        printf '  hermes:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HERMES_MILLI]}")" "${resource_policy[LIMIT_HERMES_MIB]}" "${resource_policy[FLOOR_HERMES_MIB]}" "${resource_policy[SHARES_HERMES]}" "${resource_policy[MALLOC_ARENA_MAX]}"
         if [[ "$(opt_bool matrix)" == true ]]; then
-          printf '  synapse-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "shared_buffers=%s"]\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SYNAPSE_DB_MILLI]}")" "${resource_policy[LIMIT_SYNAPSE_DB_MIB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
-          printf '  synapse:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n      SYNAPSE_CACHE_FACTOR: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SYNAPSE_MILLI]}")" "${resource_policy[LIMIT_SYNAPSE_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}" "${resource_policy[SYNAPSE_CACHE_FACTOR]}"
+          printf '  synapse-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n    command: ["postgres", "-c", "shared_buffers=%s"]\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SYNAPSE_DB_MILLI]}")" "${resource_policy[LIMIT_SYNAPSE_DB_MIB]}" "${resource_policy[FLOOR_SYNAPSE_DB_MIB]}" "${resource_policy[SHARES_SYNAPSE_DB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
+          printf '  synapse:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n      SYNAPSE_CACHE_FACTOR: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SYNAPSE_MILLI]}")" "${resource_policy[LIMIT_SYNAPSE_MIB]}" "${resource_policy[FLOOR_SYNAPSE_MIB]}" "${resource_policy[SHARES_SYNAPSE]}" "${resource_policy[MALLOC_ARENA_MAX]}" "${resource_policy[SYNAPSE_CACHE_FACTOR]}"
         fi
         if [[ "$(opt_bool searxng)" == true ]]; then
-          printf '  searxng-valkey:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SEARXNG_VALKEY_MILLI]}")" "${resource_policy[LIMIT_SEARXNG_VALKEY_MIB]}"
-          printf '  searxng:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SEARXNG_MILLI]}")" "${resource_policy[LIMIT_SEARXNG_MIB]}"
+          printf '  searxng-valkey:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SEARXNG_VALKEY_MILLI]}")" "${resource_policy[LIMIT_SEARXNG_VALKEY_MIB]}" "${resource_policy[FLOOR_SEARXNG_VALKEY_MIB]}" "${resource_policy[SHARES_SEARXNG_VALKEY]}"
+          printf '  searxng:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n' "$(resource_cpu_limit_string "${resource_policy[CPU_SEARXNG_MILLI]}")" "${resource_policy[LIMIT_SEARXNG_MIB]}" "${resource_policy[FLOOR_SEARXNG_MIB]}" "${resource_policy[SHARES_SEARXNG]}"
         fi
         if [[ "$(opt_bool qmd)" == true ]]; then
-          printf '  qmd:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_QMD_MILLI]}")" "${resource_policy[LIMIT_QMD_MIB]}"
-          printf '  qmd-indexer:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_QMD_INDEXER_MILLI]}")" "${resource_policy[LIMIT_QMD_INDEXER_MIB]}"
+          printf '  qmd:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n' "$(resource_cpu_limit_string "${resource_policy[CPU_QMD_MILLI]}")" "${resource_policy[LIMIT_QMD_MIB]}" "${resource_policy[FLOOR_QMD_MIB]}" "${resource_policy[SHARES_QMD]}"
+          printf '  qmd-indexer:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n' "$(resource_cpu_limit_string "${resource_policy[CPU_QMD_INDEXER_MILLI]}")" "${resource_policy[LIMIT_QMD_INDEXER_MIB]}" "${resource_policy[FLOOR_QMD_INDEXER_MIB]}" "${resource_policy[SHARES_QMD_INDEXER]}"
         fi
         if managed_ollama_enabled; then
-          printf '  ollama:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_OLLAMA_MILLI]}")" "${resource_policy[LIMIT_OLLAMA_MIB]}"
+          printf '  ollama:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n' "$(resource_cpu_limit_string "${resource_policy[CPU_OLLAMA_MILLI]}")" "${resource_policy[LIMIT_OLLAMA_MIB]}" "${resource_policy[FLOOR_OLLAMA_MIB]}" "${resource_policy[SHARES_OLLAMA]}"
           if [[ "$accel" == nvidia ]]; then
             printf '    deploy:\n      resources:\n        reservations:\n          devices:\n            - driver: nvidia\n              count: all\n              capabilities: [gpu]\n'
           elif [[ "$accel" == amd ]]; then
@@ -1061,10 +1084,10 @@ write_latticevale_compose_overlay() {
           fi
         fi
         if [[ "$(opt_bool honcho)" == true ]]; then
-          printf '  honcho-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=%s"]\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_DB_MILLI]}")" "${resource_policy[LIMIT_HONCHO_DB_MIB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
-          printf '  honcho-redis:\n    cpus: "%s"\n    mem_limit: "%sm"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_REDIS_MILLI]}")" "${resource_policy[LIMIT_HONCHO_REDIS_MIB]}"
-          printf '  honcho-api:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_API_MILLI]}")" "${resource_policy[LIMIT_HONCHO_API_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
-          printf '  honcho-deriver:\n    cpus: "%s"\n    mem_limit: "%sm"\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_DERIVER_MILLI]}")" "${resource_policy[LIMIT_HONCHO_DERIVER_MIB]}" "${resource_policy[MALLOC_ARENA_MAX]}"
+          printf '  honcho-db:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=%s"]\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_DB_MILLI]}")" "${resource_policy[LIMIT_HONCHO_DB_MIB]}" "${resource_policy[FLOOR_HONCHO_DB_MIB]}" "${resource_policy[SHARES_HONCHO_DB]}" "${resource_policy[POSTGRES_SHARED_BUFFERS]}"
+          printf '  honcho-redis:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_REDIS_MILLI]}")" "${resource_policy[LIMIT_HONCHO_REDIS_MIB]}" "${resource_policy[FLOOR_HONCHO_REDIS_MIB]}" "${resource_policy[SHARES_HONCHO_REDIS]}"
+          printf '  honcho-api:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_API_MILLI]}")" "${resource_policy[LIMIT_HONCHO_API_MIB]}" "${resource_policy[FLOOR_HONCHO_API_MIB]}" "${resource_policy[SHARES_HONCHO_API]}" "${resource_policy[MALLOC_ARENA_MAX]}"
+          printf '  honcho-deriver:\n    cpus: "%s"\n    mem_limit: "%sm"\n    mem_reservation: "%sm"\n    cpu_shares: %s\n    environment:\n      MALLOC_ARENA_MAX: "%s"\n' "$(resource_cpu_limit_string "${resource_policy[CPU_HONCHO_DERIVER_MILLI]}")" "${resource_policy[LIMIT_HONCHO_DERIVER_MIB]}" "${resource_policy[FLOOR_HONCHO_DERIVER_MIB]}" "${resource_policy[SHARES_HONCHO_DERIVER]}" "${resource_policy[MALLOC_ARENA_MAX]}"
         fi
       elif managed_ollama_enabled; then
         echo '  ollama:'
@@ -1122,7 +1145,7 @@ write_latticevale_compose_overlay() {
     if [[ "$(opt_bool qmd)" == true ]]; then
       echo "QMD adaptive memory ceilings: MCP/search=${resource_policy[LIMIT_QMD_MIB]}MiB, background indexer/embedding=${resource_policy[LIMIT_QMD_INDEXER_MIB]}MiB; both are accounted for inside the container budget (user Compose overrides remain authoritative)."
     fi
-    echo "Adaptive container ceilings (policy v13): WSL CPUs=${resource_policy[CPUS]} (${resource_policy[CPU_PROFILE]}), CPU scheduler headroom=${resource_policy[CPU_SYSTEM_HEADROOM_MILLI]}m, DirectML host reserve=${resource_policy[CPU_DIRECTML_RESERVE_MILLI]}m, aggregate Docker envelope=${resource_policy[CPU_DOCKER_ENVELOPE_MILLI]}m (allocated=${resource_policy[CPU_DOCKER_ALLOCATED_MILLI]}m), RAM=${resource_policy[MEM_MIB]}MiB (${resource_policy[RAM_PROFILE]}), reserved=${resource_policy[RESERVE_MIB]}MiB (DirectML host reserve=${resource_policy[DIRECTML_HOST_RESERVE_MIB]}MiB), container budget=${resource_policy[BUDGET_MIB]}MiB across ${active_count} enabled services; Hermes topology floor=${resource_policy[HERMES_MIN_MIB]}MiB for ${resource_policy[MATRIX_PROFILE_GATEWAYS]} secondary Matrix profile workload(s) and Kanban concurrency ${resource_policy[KANBAN_CONCURRENCY]}; managed Ollama model-aware floor=${resource_policy[OLLAMA_MODEL_FLOOR_MIB]}MiB (text artifact=${resource_policy[OLLAMA_TEXT_ARTIFACT_MIB]}MiB, embedding artifact=${resource_policy[OLLAMA_EMBED_ARTIFACT_MIB]}MiB, context=${resource_policy[OLLAMA_CONTEXT_LENGTH]}); Linux-native Ollama GPU inventory=${resource_policy[GPU_COUNT]} adapter(s), min/max/aggregate=${resource_policy[GPU_MIN_MIB]}/${resource_policy[GPU_MAX_MIB]}/${resource_policy[GPU_TOTAL_MIB]}MiB, heterogeneous=${resource_policy[GPU_HETEROGENEOUS]}, DirectML admission=${resource_policy[DIRECTML_ADMISSION_MIB]}MiB source=${resource_policy[DIRECTML_ADMISSION_SOURCE]} confidence=${resource_policy[DIRECTML_ADMISSION_CONFIDENCE]}, OLLAMA_GPU_OVERHEAD=${resource_policy[OLLAMA_GPU_OVERHEAD_MIB]}MiB per GPU, DirectML VRAM limit=${resource_policy[DIRECTML_VRAM_LIMIT_PCT]}%, shared-vendor=${resource_policy[GPU_SHARED_WITH_DIRECTML]}; hardware fingerprint=${resource_policy[HARDWARE_FINGERPRINT]}; policy fingerprint=${resource_policy[POLICY_FINGERPRINT]}; user compose.override.yaml is applied last."
+    echo "Adaptive container ceilings (v14 bounded-burst over canonical policy v13): WSL CPUs=${resource_policy[CPUS]} (${resource_policy[CPU_PROFILE]}), CPU scheduler headroom=${resource_policy[CPU_SYSTEM_HEADROOM_MILLI]}m, DirectML host reserve=${resource_policy[CPU_DIRECTML_RESERVE_MILLI]}m, aggregate Docker envelope=${resource_policy[CPU_DOCKER_ENVELOPE_MILLI]}m (allocated=${resource_policy[CPU_DOCKER_ALLOCATED_MILLI]}m), RAM=${resource_policy[MEM_MIB]}MiB (${resource_policy[RAM_PROFILE]}), reserved=${resource_policy[RESERVE_MIB]}MiB (DirectML host reserve=${resource_policy[DIRECTML_HOST_RESERVE_MIB]}MiB), container budget=${resource_policy[BUDGET_MIB]}MiB across ${active_count} enabled services; Hermes topology floor=${resource_policy[HERMES_MIN_MIB]}MiB for ${resource_policy[MATRIX_PROFILE_GATEWAYS]} secondary Matrix profile workload(s) and Kanban concurrency ${resource_policy[KANBAN_CONCURRENCY]}; managed Ollama model-aware floor=${resource_policy[OLLAMA_MODEL_FLOOR_MIB]}MiB (text artifact=${resource_policy[OLLAMA_TEXT_ARTIFACT_MIB]}MiB, embedding artifact=${resource_policy[OLLAMA_EMBED_ARTIFACT_MIB]}MiB, context=${resource_policy[OLLAMA_CONTEXT_LENGTH]}); Linux-native Ollama GPU inventory=${resource_policy[GPU_COUNT]} adapter(s), min/max/aggregate=${resource_policy[GPU_MIN_MIB]}/${resource_policy[GPU_MAX_MIB]}/${resource_policy[GPU_TOTAL_MIB]}MiB, heterogeneous=${resource_policy[GPU_HETEROGENEOUS]}, DirectML admission=${resource_policy[DIRECTML_ADMISSION_MIB]}MiB source=${resource_policy[DIRECTML_ADMISSION_SOURCE]} confidence=${resource_policy[DIRECTML_ADMISSION_CONFIDENCE]}, OLLAMA_GPU_OVERHEAD=${resource_policy[OLLAMA_GPU_OVERHEAD_MIB]}MiB per GPU, DirectML VRAM limit=${resource_policy[DIRECTML_VRAM_LIMIT_PCT]}%, shared-vendor=${resource_policy[GPU_SHARED_WITH_DIRECTML]}; hardware fingerprint=${resource_policy[HARDWARE_FINGERPRINT]}; policy fingerprint=${resource_policy[POLICY_FINGERPRINT]}; user compose.override.yaml is applied last."
   else
     rm -f .latticevale-resource-state
     echo 'Adaptive container ceilings: disabled; any existing user compose.override.yaml remains authoritative.'
@@ -1224,6 +1247,12 @@ for name,cfg in (data.get("services") or {}).items():
     print(f"{name}={size_bytes(cfg.get('"'"'mem_limit'"'"'))}:{cpu_nanos(cfg.get('"'"'cpus'"'"'))}")
 ')" || return 1
 
+  # The v14 controller may conservatively redistribute live hard limits. Its
+  # owner/ID/fingerprint-verified snapshot is an alternative to the static model;
+  # a missing or stale snapshot restores the normal exact-Compose verification.
+  if [[ -f resource-burst-controller.py ]] && python3 resource-burst-controller.py --verify --stack "$PWD" >/dev/null 2>&1; then
+    return 0
+  fi
   local -a resource_pairs=("hermes:hermes-agent")
   [[ "$(opt_bool matrix)" == true ]] && resource_pairs+=("synapse-db:hermes-synapse-db" "synapse:hermes-synapse")
   [[ "$(opt_bool searxng)" == true ]] && resource_pairs+=("searxng-valkey:hermes-searxng-valkey" "searxng:hermes-searxng")

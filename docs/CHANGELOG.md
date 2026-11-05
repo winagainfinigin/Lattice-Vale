@@ -1,5 +1,21 @@
 # Changelog
 
+## 14.6.6 bounded-resource hotfix — 2026-11-04
+
+- Adds policy-v14 bounded, measurement-driven CPU and RAM rebalancing while
+  retaining canonical schema/policy v13 and its safe static fallback.
+- Adds per-container CPU shares and soft memory reservations, a non-root WSL
+  systemd controller with transaction recovery, pressure/OOM awareness, and
+  DirectML workload reserve protection.
+- Reduces the ordinary WSL host reservation from 12/15% to 10/13% and the
+  DirectML reservation ratio from 30% to 28%; all prior floors/caps and QMD
+  1024-MiB minima remain enforced.
+- Preserves user Compose overrides; repairs restore controller-derived limits
+  before canonical revalidation, and audits accept only exact validated
+  controller snapshots. Existing services are not restarted by the controller.
+- Includes controller-specific regression coverage, updated release tests, and
+  source manifest. Live Windows/WSL performance remains to be validated.
+
 ## 14.6.6 — update-on-availability repair and Tailscale validation (2026-11-03)
 
 Existing-install Option 1 checks supported managed software versions every run, without relying on the legacy 30-day refresh window. It performs managed refresh only on demonstrated upstream or package drift; unknown availability is reported and does not automatically trigger updates. Option 6 remains the explicit force-refresh path. Preserves full 14.6.5 Tailscale IPv4/IPv6 verified-HTTPS correction, including proxy bypass and non-destructive handling of false-negative Windows listener checks. Maintains schema 24, policy 13, persistent data, user overrides, and previous Windows/WSL integration.

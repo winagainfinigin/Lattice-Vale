@@ -72,3 +72,17 @@ Generated architecture documents include schema, architecture version, generatio
 ## Compatibility
 
 v14.6.5 inherits the v14.6.0 canonical architecture, retains the v14.6.1 repair hardening and v14.6.2 managed-upstream policy, and migrates recognized managed 14.x installations preservation-first. For older recognized stacks, cumulative migration precedes mutating Options 1, 2, 4, 5, and 6; Options 3 and 8 remain read-only, while Option 7 remains isolated cleanup. Durable historical option names remain understood for migration. Future schemas fail closed. User/application data, persistent identities, and explicit overrides remain preservation-first.
+
+### Resource scheduler v14 over canonical schema v13
+
+`latticevale_arch.py` and `runtime-policy.py` remain the only canonical
+calculation/verification engine for the fixed WSL host reserve, managed-container
+memory floors, and total CPU/RAM safety envelopes. `configure-stack.sh` emits
+static Compose `cpus`/`mem_limit`, relative `cpu_shares`, and `mem_reservation`
+values from canonical functions. `resource-burst-controller.py` optionally
+rebudgets live managed-container quotas within those envelopes using a
+fingerprint-bound transaction journal, Docker inspection, WSL PSI,
+`MemAvailable`, and cgroup v2 counters. `linux/bootstrap.sh` installs the
+unprivileged host-side timer; repair restores baseline limits before policy
+reconciliation. The controller itself does not write shared app state or
+restart containers. See `RESOURCE-POLICY.md`.

@@ -62,3 +62,13 @@ The Windows Obsidian check now verifies an executable through registered Windows
 Windows add-on/shortcut/Tailscale results are verified from live Windows state and written into `.installer-state.json` at the end of the installer run. The writer preserves all Linux-stage keys and commits only its Windows snapshot atomically. A `STATE_WRITE_ERROR` means the snapshot was not confirmed; an `EVENT_LOG_WARNING` means the state was successfully saved but the optional event log failed. This follow-up does not reauthenticate Tailscale or modify previously matching Serve routes.
 
 An OOM marker (`Docker inspect .State.OOMKilled`) on an otherwise running `hermes-qmd-indexer` indicates a kill during the current container lifecycle but does not establish *when* it happened or whether memory exhaustion is continuing. Repair can correctly keep an unchanged resource-policy fingerprint and allocation while the OOM marker remains; an explicit unresolved-OOM warning and `./manage.sh audit` remain the appropriate health signals. Do not restart an otherwise healthy container or increase its memory ceiling solely to clear a marker. If the audit remains PARTIAL, examine actual container memory use/limits and recent memory events before adjusting policy.
+
+### Runtime resource borrowing and repair
+
+Resume / repair stops the optional `latticevale-resource-burst.timer`, restores
+verified dynamic CPU/RAM limits to Compose baseline before normal repair, and
+then reinstalls/re-enables the timer. If the controller reports a failed
+restoration, inspect `data/latticevale/resource-burst-state.json` and the
+live Docker limits; retain the existing backup and select the minimal
+configuration reconciliation supported by the evidence. The controller is
+inactive when a user Compose override is present. See `RESOURCE-POLICY.md`.

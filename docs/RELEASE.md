@@ -1,3 +1,13 @@
+> **v14.6.6 bounded resource-burst hotfix release gate:** Preserve public
+> 14.6.6 release identity; retain runtime-policy schema 13 and canonical
+> policy 13 while introducing v14 bounded scheduling metadata. Validate all
+> **151** fixtures across six shards, static auditing, manifest regeneration,
+> source/content/ZIP integrity, and byte-identical overlay reconstruction
+> against public commit `109977a013d167085f2fee78e0b759f2fe3a2bbf`.
+> Confirm time/pressure-limited borrowing, ownership-aware static fallback,
+> rollback, DirectML re-admission, repair restoration, and user overrides.
+> Windows/WSL live load testing remains separately required.
+
 > **v14.6.6 current release:** `VERSION.txt` must be 14.6.6. Canonical installer-options schema is **24**, runtime-policy schema remains **13**, and managed-refresh revision remains **5**. Schema-23 install options must remain readable and migrate to schema 24 without introducing a user-facing Matrix relay-limit setting; interim schema-24 relay-limit data is tolerated but ignored.
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.

@@ -88,6 +88,12 @@ ollama_acceleration=cpu
 # from installer-owned filesystem state. Do not regex-parse JSON control flags: valid
 # JSON strings can contain text that looks like another key/value pair.
 if [[ -f "$stack_dir/install-options.json" || -f "$stack_dir/.installer-state.json" || -s "$stack_dir/.install-info" || -f "$stack_dir/.configured" ]]; then repair_run=true; fi
+# Suspend only LatticeVale's own controller during repair; restore canonical
+# limits before generating or verifying Compose, leaving data and identities intact.
+if [[ "$repair_run" == true && -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1; then
+  systemctl stop latticevale-resource-burst.timer >/dev/null 2>&1 || true
+  systemctl stop latticevale-resource-burst.service >/dev/null 2>&1 || true
+fi
 if [[ "$force_managed_update" == true && "$repair_run" != true ]]; then
   echo 'Update / repair is valid only for an existing installer-managed LatticeVale stack.' >&2
   exit 2
@@ -559,6 +565,16 @@ if [[ "$local_ai_requested" == true && "$ollama_backend" == managed && "$ollama_
   fi
 fi
 
+# Restore canonical Compose limits before repair or policy regeneration. The
+# previous controller is paused above, and Docker has been started by this point.
+# If an old dynamic snapshot cannot be reconciled, later verification reports
+# that exact inconsistency instead of silently accepting unexplained drift.
+if [[ "$repair_run" == true && -f "$stack_dir/resource-burst-controller.py" && -f "$stack_dir/data/latticevale/resource-burst-state.json" ]]; then
+  runuser -u "$linux_user" -- env HOME="$user_home" USER="$linux_user" DOCKER_HOST=unix:///var/run/docker.sock \
+    python3 "$stack_dir/resource-burst-controller.py" --restore --stack "$stack_dir" || \
+    echo 'WARNING: Pre-repair burst allocation could not be restored. Live CPU/RAM reconciliation requires review.' >&2
+fi
+
 # A single root helper gives Windows auto-start and older non-systemd WSL2 builds the
 # same reliable startup path. The user can also run it manually with sudo after wsl --shutdown.
 printf -v stack_user_q '%q' "$linux_user"
@@ -941,7 +957,7 @@ unset rel path
 # Refuse replacement symlinks before root writes installer-controlled files; otherwise a broken
 # or hostile prior install could redirect a repair write outside the dedicated stack tree.
 installer_owned_files=(
-  compose.yaml Dockerfile.qmd compatibility.conf configure-stack.sh gateway-multiplex-verify.py manage.sh managed-upstreams.py state-audit.py
+  compose.yaml Dockerfile.qmd compatibility.conf resource-burst-controller.py configure-stack.sh gateway-multiplex-verify.py manage.sh managed-upstreams.py state-audit.py
   latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json
   qmd-index-cycle.sh native-ollama-relay.py native-ollama-relay.sh directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json
 )
@@ -967,6 +983,8 @@ install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/backend-capabilities.py" "$stack_dir/backend-capabilities.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/runtime-policy.py" "$stack_dir/runtime-policy.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
+  "$bundle_root/stack/resource-burst-controller.py" "$stack_dir/resource-burst-controller.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/diagnostics.py" "$stack_dir/diagnostics.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
@@ -1019,7 +1037,7 @@ verify_write_dirs=(
 verify_write_files=(
   "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/compatibility.conf"
   "$stack_dir/configure-stack.sh" "$stack_dir/gateway-multiplex-verify.py" "$stack_dir/manage.sh" "$stack_dir/managed-upstreams.py" "$stack_dir/state-audit.py"
-  "$stack_dir/latticevale_readonly.py" "$stack_dir/latticevale_arch.py" "$stack_dir/hardware-capabilities.py" "$stack_dir/backend-capabilities.py" "$stack_dir/runtime-policy.py" "$stack_dir/diagnostics.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
+  "$stack_dir/latticevale_readonly.py" "$stack_dir/latticevale_arch.py" "$stack_dir/resource-burst-controller.py" "$stack_dir/hardware-capabilities.py" "$stack_dir/backend-capabilities.py" "$stack_dir/runtime-policy.py" "$stack_dir/diagnostics.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
   "$stack_dir/qmd-index-cycle.sh" "$stack_dir/native-ollama-relay.py" "$stack_dir/native-ollama-relay.sh" "$stack_dir/directml-gateway.py" "$stack_dir/directml-gateway.sh" "$stack_dir/directml-requirements.txt" "$stack_dir/install-options.json" "$stack_dir/.env"
   "$stack_dir/.repair-package-refresh" "$stack_dir/.repair-package-refresh-pending"
   "$stack_dir/.installer-state.json" "$stack_dir/.install-info" "$stack_dir/.configured"
@@ -1056,6 +1074,53 @@ PY_WRITABLE
 verify_selected_user_writable
 
 runuser --pty -u "$linux_user" -- env HOME="$user_home" USER="$linux_user" bash "$stack_dir/configure-stack.sh"
+
+# Run the optional controller as the normal WSL user, never as root or inside
+# an application container. When unavailable, the static resource plan survives.
+if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1 \
+   && [[ "$linux_user" =~ ^[a-z_][a-z0-9_-]*$ && "$stack_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]]; then
+  if [[ "$(python3 - "$stack_dir/install-options.json" <<'PY_BURST_ENABLED'
+import json,sys
+try: print('true' if json.load(open(sys.argv[1])).get('containerResourceLimits') is True else 'false')
+except Exception: print('false')
+PY_BURST_ENABLED
+)" == true && ! -e "$stack_dir/compose.override.yaml" ]]; then
+    cat > /etc/systemd/system/latticevale-resource-burst.service <<EOF_BURST_SERVICE
+[Unit]
+Description=LatticeVale bounded resource-burst controller
+After=docker.service
+Wants=docker.service
+[Service]
+Type=oneshot
+User=$linux_user
+WorkingDirectory=$stack_dir
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=DOCKER_HOST=unix:///var/run/docker.sock
+ExecStart=/usr/bin/python3 $stack_dir/resource-burst-controller.py --stack $stack_dir
+TimeoutStartSec=40
+NoNewPrivileges=true
+PrivateTmp=true
+EOF_BURST_SERVICE
+    cat > /etc/systemd/system/latticevale-resource-burst.timer <<'EOF_BURST_TIMER'
+[Unit]
+Description=LatticeVale bounded resource-burst scheduling
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=45s
+AccuracySec=5s
+[Install]
+WantedBy=timers.target
+EOF_BURST_TIMER
+    chmod 0644 /etc/systemd/system/latticevale-resource-burst.{service,timer}
+    systemctl daemon-reload
+    systemctl enable --now latticevale-resource-burst.timer >/dev/null 2>&1 || \
+      echo 'Resource burst timer unavailable; static Compose resource safety remains active.' >&2
+  else
+    systemctl disable --now latticevale-resource-burst.timer >/dev/null 2>&1 || true
+  fi
+else
+  echo 'Resource burst controller scheduling unavailable; static Compose resource safety remains active.'
+fi
 
 # A container entrypoint must not be allowed to make a successful fresh install unrepairable.
 # Reclaim only the roots/files that LatticeVale deliberately owns after the services have started.

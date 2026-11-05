@@ -65,3 +65,14 @@ GPU acceleration is selected by capability rather than vendor name alone. Direct
 ## Post-install verification
 
 Run `./manage.sh verify` and `./manage.sh diagnose`. The diagnostic output states what was detected, what backend was selected, and why a candidate backend was rejected or deferred.
+
+### Applying the 14.6.6 bounded-resource hotfix
+
+Replace the changed source files inside an **extracted matching public 14.6.6
+release**, retaining paths, then run the normal Windows installer and select
+**Option 1 — Resume / repair**. The bootstrap validates and copies the new
+controller into the managed WSL stack, restores any prior dynamic ceilings,
+recreates the canonical resource state, and enables the optional user-owned
+systemd timer when local Docker and systemd are available. Preserve the
+per-run safety backup. The ZIP is a *release-source overlay*, not a set of
+files to copy directly into a live stack. See [RESOURCE-POLICY.md](RESOURCE-POLICY.md).

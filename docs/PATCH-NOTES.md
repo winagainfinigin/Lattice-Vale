@@ -1,3 +1,15 @@
+> **14.6.6 bounded-resource hotfix (post-release):** The v14 scheduling layer
+> redistributes unused CPU and memory ceilings among the managed containers
+> while preserving aggregate WSL/DirectML headroom, service minima, explicit
+> overrides, and runtime-policy schema 13. Canonical host reserves become
+> 10%/13% (managed/non-managed Ollama) and 28% for DirectML, retaining original
+> floors/caps. Docker Compose gains soft CPU priority/memory reservation and
+> a host-side, user-owned 45-second systemd timer for bounded rebalancing when
+> cgroup/PSI and Docker state can be verified. An exact snapshot allows honest
+> repair/audit verification and safe restoration. This is a corrective-only
+> **14.6.6 hotfix**, not a version or database migration. See
+> [RESOURCE-POLICY.md](RESOURCE-POLICY.md).
+
 ## v14.6.6 — update-on-availability repair and Tailscale dual-stack fix
 
 - Option 1 checks latest-supported, installer-owned package/image/QMD/Honcho versions on **every** run. The 30-day refresh gate is retired; normal repair stays local-first when the check proves there is no update.

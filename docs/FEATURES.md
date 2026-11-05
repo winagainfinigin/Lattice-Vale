@@ -1196,3 +1196,14 @@ Keeping a single feature/options catalog would prevent current questionnaire cho
 When LatticeVale-managed Ollama is selected, policy v9 fingerprints the installed text-model artifact size, Honcho embedding-model artifact size, persisted `OLLAMA_CONTEXT_LENGTH`, and the derived `OLLAMA_MODEL_FLOOR_MIB`. Before a clean install has downloaded models, CPU-backed Ollama uses the proven provisional floor; after downloads complete, LatticeVale performs a second bounded resource reconciliation before inference/embedding verification. Because managed Ollama is constrained to one loaded model, text and embedding artifact sizes are treated as alternative resident requirements rather than blindly summed. If the model-aware minimum plus the selected services cannot fit inside the managed budget, LatticeVale refuses the unsafe plan.
 
 Self-hosted Honcho also receives an adaptive supported root request timeout. LatticeVale records ownership in a private sidecar and updates only the timeout value it previously owned; an explicit user timeout remains authoritative. `./manage.sh status` samples cgroup `memory.events` twice and distinguishes a historical lifetime `memory.max` count from new pressure during the sample window.
+
+### 14.6.6 bounded resource bursting
+
+For managed container limits, policy-v14 optional runtime rebalancing can
+transfer unused CPU and memory quota between containers without expanding the
+aggregate WSL safety budget. It uses soft CPU scheduling priorities, memory
+reservations, live cgroup/PSI feedback, and an optional user-owned systemd
+timer; static Compose limits and user-owned opaque `compose.override.yaml`
+remain authoritative when automatic borrowing is unavailable. QMD minimums,
+DirectML host headroom, existing GPU safeguards, and no-data-reset repair are
+preserved. See [RESOURCE-POLICY.md](RESOURCE-POLICY.md).
