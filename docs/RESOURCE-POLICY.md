@@ -179,9 +179,11 @@ requirement to revert any previous hotfix first**. Keep the `Lattice-Vale/`
 directory structure and all unchanged files. The package is designed for the
 current 14.6.6 source and the previous 14.6.6 source plus its hotfix overlay.
 The accompanying `installer/SOURCE-SHA256SUMS.txt` contains updated hashes
-for the modified source and documentation. Run `installer/verify-release.ps1`
-against the complete, merged tree before selecting the normal **Option 1 —
-Resume / repair** installer flow. Take the offered safety backup before changes
+for the modified source and documentation. From Windows PowerShell in the complete, merged `Lattice-Vale` directory,
+run `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File
+.\installer\verify-release.ps1` before selecting normal **Option 1 —
+Resume / repair**. This verifies source hashes and exact release-file coverage;
+it is different from verifying live WSL/Docker application health. Take the offered safety backup before changes
 that require rollback. Do not substitute Option 6: it forces broader managed
 software refresh and is unnecessary for a source-policy reconciliation.
 

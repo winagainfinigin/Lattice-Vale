@@ -1,5 +1,18 @@
 # LatticeVale v14.6.6
 
+> **Downstream portable-performance resource hotfix (same 14.6.6 version):**
+> Canonical CPU quotas now prioritize Hermes and CPU/Vulkan Ollama within the
+> WSL-derived aggregate Docker envelope, scaling with enabled services,
+> acceleration mode, profiles, and worker concurrency. The optional bounded
+> resource controller can be enabled alongside a *verified image-only*
+> Hermes Compose override; CPU-quota-induced stall pressure no longer blocks
+> in-envelope borrowing. Apply the changed-files ZIP over an **extracted
+> complete 14.6.6 source tree**, then use normal Windows installer Option 1
+> Resume / repair. A changed-files ZIP is not a standalone release. This
+> downstream change requires live Windows/WSL/Docker performance qualification.
+> See [Resource Policy](docs/RESOURCE-POLICY.md) and
+> [Release Verification](docs/RELEASE.md).
+
 > **14.6.6 resource-usage hotfix:** Optional bounded-burst controller
 > reallocates unused CPU and memory headroom among selected LatticeVale
 > containers using live Docker/cgroup/WSL pressure evidence. Canonical
@@ -125,7 +138,7 @@ Native Windows Ollama remains externally owned. LatticeVale recommends one loade
 
 Resource policy v11 is finalized once into a canonical installer-owned policy object. Generated Compose CPU/RAM limits, `.latticevale-resource-state`, audit expectations, and the human-readable `resource-policy-report.txt` consume that same finalized object instead of independently recalculating ceilings. The state records separate hardware and policy SHA-256 fingerprints, so audit/repair can distinguish a hardware/topology change from policy/configuration drift. The report contains no credentials and records the RAM/CPU profile, acceleration/offload status, GPU topology, DirectML/Ollama coordination, context/model floor, and generated service ceilings.
 
-Current v14.6.6 release qualification requires exactly 148 deterministic fixtures across six shards, both resume simulations, PowerShell parsing under Windows PowerShell 5.1 and PowerShell 7, exact source-manifest verification, and a fresh release ZIP whose extracted files match the qualified source tree. Historical v14.5.42 qualification used a 135-fixture suite and its own patch-lineage reconstruction; those historical numbers do not describe the current release gate.
+Current v14.6.6 release qualification requires exactly 151 deterministic fixtures across six shards, both resume simulations, PowerShell parsing under Windows PowerShell 5.1 and PowerShell 7, exact source-manifest verification, and a fresh release ZIP whose extracted files match the qualified source tree. Historical v14.5.42 qualification used a 135-fixture suite and its own patch-lineage reconstruction; those historical numbers do not describe the current release gate.
 
 ### v14.5.4 — DirectML VRAM guard + 16 GB-class RAM efficiency
 
