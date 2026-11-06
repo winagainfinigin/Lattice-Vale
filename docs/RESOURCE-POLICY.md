@@ -19,6 +19,42 @@
 
 
 
+## v14.6.6 portable CPU-priority and burst activation correction (same version)
+
+The v14.6.6 follow-up fixes two independent causes of high inference latency:
+
+1. The canonical **static CPU planner** now gives proportionally higher shares of
+   the existing Docker envelope to Hermes's interactive agent and CPU/Vulkan
+   Ollama inference, while retaining at least 50 milli-CPU for every enabled
+   service. GPU-accelerated Ollama receives a smaller CPU share. The weights
+   are recalculated from **WSL-visible logical CPUs, enabled services,
+   acceleration backend, gateway/profile count, and Kanban concurrency** on
+   install/repair; they are not hardware-specific fixed CPU counts. On one
+   example fully enabled **4-logical-CPU CPU-inference** stack the 3.6-core
+   Docker envelope divides into about **1.35 CPUs for Ollama**, **0.85 for
+   Hermes**, and **1.40 across the remaining services**; 0.40 CPU remains
+   outside Docker for host/system scheduling. These are **Linux CPU-time
+   ceilings**, not permanently pinned cores or physical reservations.
+2. The **bootstrap timer eligibility** now uses the same full resolved-Compose
+   comparison as the runtime controller: a user-selected Hermes **image-only**
+   override remains eligible for dynamic borrowing, while any additional
+   resource, environment, or topology override retains static fallback.
+3. The controller's in-envelope CPU transfers proceed during **CPU PSI caused
+   by cgroup quota throttling**, including high PSI with an otherwise lightly
+   loaded WSL host. CPU PSI corroborated by heavy runqueue load still
+   prevents *additional borrowing from an idle DirectML host reserve*;
+   canonical aggregate Docker and host safety envelopes remain enforced.
+   The timer now checks about every **25 seconds** after an initial 1-minute
+   boot delay, with a **45-second** post-change cooldown. Sustained measured
+   throttling can trigger a CPU-only lease during cooldown. The pressure
+   and fresh-OOM safeguards for memory transfers remain unchanged.
+
+The enhanced policy supports arbitrary validated WSL CPU/RAM assignments,
+optional services, CPU/Vulkan/GPU backends, and DirectML. Tiny configurations
+that cannot fit active service minimums are rejected rather than overcommitted.
+Source and simulated Docker tests establish invariants only; measure real
+latency/throughput on the deployed host before claiming a performance gain.
+
 ## v14.6.6 bounded resource-burst hotfix (scheduler policy v14)
 
 This hotfix preserves the canonical **runtime-policy schema 13** and the fixed
@@ -58,14 +94,16 @@ The optional host-side controller at `~/hermes-stack/resource-burst-controller.p
 uses local Docker inspection/statistics, cgroup v2 CPU-throttling and OOM-event
 counters where accessible, cgroup `memory.current` (including charged file cache)
 for *reducing* memory limits, and Linux CPU/memory/I/O pressure plus `MemAvailable`.
-Normally it requires two demand samples, three idle samples, and a 75-second
+Normally it requires two demand samples, three idle samples, and a 45-second
 post-change cooldown. A newly measured quota-throttling interval can override
 the cooldown and two-sample requirement for CPU redistribution only; unrelated
 memory-limit changes remain on cooldown. Missing cgroup memory-current telemetry
 prevents reducing memory limits but does not prevent ordinary CPU borrowing. It holds or contracts allocations during
-high memory pressure (10-second PSI average at least 2%), high CPU pressure
-(at least 25%), high I/O pressure (at least 12%), newly observed cgroup OOMs,
-missing essential pressure measurements, or low available RAM. A pre-existing
+high memory pressure (10-second PSI average at least 2%), high I/O pressure
+(at least 12%), newly observed cgroup OOMs, missing essential pressure
+measurements, or low available RAM. CPU PSI alone is not a reason to stop
+quota redistribution **inside** the Docker envelope; true host CPU load
+corroborates CPU PSI only for protecting additional DirectML reserve lending. A pre-existing
 `OOMKilled` marker alone is not treated as a newly timed kernel event.
 
 When DirectML is selected **and its host-side gateway process is absent or has remained CPU-idle for two samples**, at
@@ -95,8 +133,9 @@ container ownership, incomplete essential telemetry, or a user-owned
 resource/behavior-changing `compose.override.yaml` suppresses borrowing. The
 only admitted override is one whose full resolved Compose model differs from
 the canonical model solely in Hermes's `image` and optional `pull_policy`.
-This is verified using Docker Compose's own merge/interpolation output on
-each scheduler activation; no override file is modified. Previously applied
+The installer also checks that eligibility as the selected normal WSL user
+before enabling the timer; the controller rechecks Docker Compose's complete
+merge/interpolation output on every activation. No override file is modified. Previously applied
 limits remain inside the verified aggregate envelope until an owner-run repair
 or an explicit restoration returns them to the canonical Compose baseline.
 User-supplied service/resource overrides retain final precedence and suppress
@@ -133,8 +172,12 @@ checks prove calculation and transaction invariants, not Windows performance.
 
 ## Applying this changed-files-only source overlay
 
-Apply the matching ZIP overlay to an **extracted complete** LatticeVale
-v14.6.6 release, retaining its `Lattice-Vale/` directory and unchanged files.
+Apply this ZIP **directly over the extracted complete LatticeVale v14.6.6
+repository tree**, allowing the matching files to be overwritten. The full
+replacement files include the prior demand-matched changes, so there is **no
+requirement to revert any previous hotfix first**. Keep the `Lattice-Vale/`
+directory structure and all unchanged files. The package is designed for the
+current 14.6.6 source and the previous 14.6.6 source plus its hotfix overlay.
 The accompanying `installer/SOURCE-SHA256SUMS.txt` contains updated hashes
 for the modified source and documentation. Run `installer/verify-release.ps1`
 against the complete, merged tree before selecting the normal **Option 1 —

@@ -1,5 +1,23 @@
 # Changelog
 
+## 14.6.6 portable CPU priorities and image-only override timer fix — 2026-11-05
+
+- Reweights canonical static CPU quotas toward Hermes and CPU/Vulkan Ollama
+  under the existing 90% Docker CPU envelope (65% with DirectML). The planner
+  scales across visible WSL CPUs, active services, backend, gateway count and
+  Kanban concurrency, while retaining per-service minima and host reserve.
+- Fixes installer/runtime divergence: verified Hermes-image-only Compose
+  overrides are eligible for resource timer installation; resource-changing
+  overrides retain static fallback.
+- Allows demand-matched CPU borrowing despite CPU PSI from quota throttling,
+  still guarding extra DirectML reserve lending under corroborated host load.
+- Reduces optional controller timer cadence to 25 seconds and cooldown to
+  45 seconds; requires sustained cgroup throttling samples for urgent action.
+- Updates portability tests, operational troubleshooting and release hashes.
+  Existing version, schema 13, memory floors, user data and host hardware
+  settings remain unchanged. Source tests do not establish live speed gains.
+
+
 ## 14.6.6 demand-matched resource scheduling follow-up — 2026-11-05
 
 - Fixes unconditional donor quota reduction: CPU and RAM leases are transferred

@@ -71,4 +71,7 @@ then reinstalls/re-enables the timer. If the controller reports a failed
 restoration, inspect `data/latticevale/resource-burst-state.json` and the
 live Docker limits; retain the existing backup and select the minimal
 configuration reconciliation supported by the evidence. The controller is
-inactive when a user Compose override is present. See `RESOURCE-POLICY.md`.
+inactive when a user Compose override changes anything beyond the verified
+Hermes image/pull-policy selection. The bootstrap and controller both check
+the effective Compose model; an image-only override remains eligible. See
+`RESOURCE-POLICY.md`.

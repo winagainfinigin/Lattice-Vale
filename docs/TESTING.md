@@ -1,5 +1,19 @@
 # LatticeVale 14.6.6 Test Confidence Levels
 
+## Portable CPU-priority and timer-activation follow-up verification
+
+The same-version follow-up tests static CPU weights on 1, 2, 4, 8, 16, 32,
+and 64 logical CPUs, CPU/Vulkan/NVIDIA/AMD backend selections, optional local
+Ollama, and DirectML host reservation. They verify every enabled service's
+50-milli-CPU minimum, unchanged aggregate/system headroom, and higher Hermes
+and CPU-inference weighting where the envelope permits it. Synthetic high
+CPU PSI with low/high host runqueue load must not block **within-envelope**
+borrowing; genuine host contention suppresses additional DirectML reserve
+lending. Bootstrap must admit the same verified image-only override as the
+controller's resolved Compose comparison. Timer cadence and cooldown checks
+are covered. `--check-override` is read-only and needs no Docker socket inside
+Hermes. Full live behavior still requires Windows/WSL/Docker integration tests.
+
 ## Demand-matched burst scheduler follow-up verification
 
 The updated `v14.6.6-burst-resource-fixtures.py` covers recipient-capacity

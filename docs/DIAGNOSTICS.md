@@ -11,6 +11,25 @@
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 
+## v14.6.6 CPU bottleneck and controller activation diagnostics
+
+A missing `latticevale-resource-burst.timer` with an existing
+`RESOURCE_BURST_STRATEGY=bounded-v14` and an image-only Compose override may
+indicate an installer built before the image-only override/timer integration
+fix. Deploy the updated complete source via Option 1, then verify the timer.
+The controller's read-only `--check-override` uses the same effective Compose
+model admission rule as its runtime check. Failure with an override means
+static fallback is deliberately retained.
+
+A saturated Ollama cgroup with `cpu.max` equivalent to 0.55 CPU can produce
+~90% CPU PSI and 100% throttled periods even when WSL has four logical CPUs
+and a low load average. New CPU weights scale from current WSL CPU count and
+service/backend selections. The controller redistributes quotas **within**
+the unchanged aggregate envelope despite CPU PSI; a genuinely saturated host
+retains its additional DirectML CPU reserve. Check `docker inspect` NanoCpus,
+`cpu.stat` deltas, `cpu.pressure`, workload throughput, and timer journal for
+actual activation. `docker stats` alone cannot establish the root cause.
+
 ## v14.6.6 demand-matched CPU/RAM diagnostic follow-up
 
 An idle container **can** temporarily donate quota, but the controller may

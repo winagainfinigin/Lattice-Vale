@@ -53,6 +53,22 @@
 
 # Current v14.6.6 patch notes
 
+**Portable CPU-priority and timer activation follow-up (same release version):**
+The canonical CPU split now prioritizes the interactive Hermes agent and
+CPU/Vulkan Ollama inference. Quotas scale with WSL logical CPU count and the
+installed service/backend topology, retaining the bounded host/system/DirectML
+envelopes. An image-only Hermes Compose override is checked by the installer
+and runtime using the same effective model criteria, permitting normal timer
+installation without changing user-owned Compose files. In-envelope CPU
+redistribution continues despite CPU PSI from hard quota throttling; high
+runqueue load protects the optional additional DirectML slice. The timer
+operates at 25-second intervals with a 45-second cooldown and measures fresh
+throttling over enough periods to exclude isolated wake-ups. Apply this ZIP
+as a **direct overwrite** of files in the extracted v14.6.6 source tree;
+previous same-version hotfixes require no rollback. Use Option 1 Resume /
+repair to activate the source changes. Live performance is unverified.
+
+
 ## v14.6.5 same-version public-installer hotfix
 
 ### 14.6.5 same-version QMD CPU embedding resource allocation correction

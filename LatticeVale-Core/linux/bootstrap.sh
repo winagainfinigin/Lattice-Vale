@@ -1084,7 +1084,15 @@ import json,sys
 try: print('true' if json.load(open(sys.argv[1])).get('containerResourceLimits') is True else 'false')
 except Exception: print('false')
 PY_BURST_ENABLED
-)" == true && ! -e "$stack_dir/compose.override.yaml" ]]; then
+)" == true ]] && {
+       [[ ! -e "$stack_dir/compose.override.yaml" ]] ||
+       { command -v runuser >/dev/null 2>&1 &&
+         runuser -u "$linux_user" -- /usr/bin/python3 \
+           "$stack_dir/resource-burst-controller.py" \
+           --check-override --stack "$stack_dir" >/dev/null 2>&1; }
+     }; then
+    # A verified Hermes-image-only Compose override is eligible for borrowing.
+    # The controller repeats its full Compose-model check every timer run.
     cat > /etc/systemd/system/latticevale-resource-burst.service <<EOF_BURST_SERVICE
 [Unit]
 Description=LatticeVale bounded resource-burst controller
@@ -1105,8 +1113,8 @@ EOF_BURST_SERVICE
 [Unit]
 Description=LatticeVale bounded resource-burst scheduling
 [Timer]
-OnBootSec=3min
-OnUnitInactiveSec=45s
+OnBootSec=1min
+OnUnitInactiveSec=25s
 AccuracySec=5s
 [Install]
 WantedBy=timers.target

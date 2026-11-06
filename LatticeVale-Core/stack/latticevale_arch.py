@@ -1406,9 +1406,11 @@ def service_memory_plan(
 # Policy-v14 burst allocations are a live, separate layer over the canonical
 # schema-13 safety envelope. Static CPU quotas remain a safe fallback.
 CPU_SOFT_WEIGHTS = {
-    "hermes": 11, "synapse-db": 7, "synapse": 8,
+    # Shares are relative priority inside the container scheduler; actual
+    # CPU time is controlled independently by the bounded hard quota plan.
+    "hermes": 18, "synapse-db": 7, "synapse": 8,
     "searxng-valkey": 3, "searxng": 4, "qmd": 6,
-    "qmd-indexer": 3, "ollama": 7, "honcho-db": 6,
+    "qmd-indexer": 3, "ollama": 22, "honcho-db": 6,
     "honcho-redis": 4, "honcho-api": 7, "honcho-deriver": 3,
 }
 
@@ -1467,12 +1469,18 @@ def cpu_quota_plan(
     # conserved aggregate ceiling. Increasing a service's weight redistributes CPU;
     # it cannot manufacture additional WSL CPU capacity.
     pressure = max(0, matrix_gateways - 1) * 0.35 + max(0, kanban_concurrency - 1) * 0.18
+    # Prioritize the interactive agent and CPU inference. With a fully enabled
+    # 4-vCPU stack, the old near-equal split stranded Ollama at ~0.55 CPU even
+    # while the other 10 roles were mostly idle. Dynamic borrowing is additional
+    # capacity; normal latency must not depend on the timer being installed.
+    # Weights scale with the *visible* WSL envelope, enabled roles, backend,
+    # profile count, and Kanban concurrency, not a fixed machine configuration.
     weights = {
-        "hermes": 8.0 + pressure,
+        "hermes": 27.0 + pressure,
         "synapse-db": 3.0, "synapse": 4.0,
         "searxng-valkey": 1.5, "searxng": 3.0,
         "qmd": 3.0, "qmd-indexer": 3.5,
-        "ollama": 8.0 if accel in ("cpu", "vulkan") else 5.0,
+        "ollama": 45.0 if accel in ("cpu", "vulkan") else 14.0,
         "honcho-db": 3.0, "honcho-redis": 1.5, "honcho-api": 3.5, "honcho-deriver": 4.0,
     }
     quantum = 50

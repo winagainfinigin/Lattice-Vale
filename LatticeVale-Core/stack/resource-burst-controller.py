@@ -44,7 +44,7 @@ MEM_QUANTUM_MIB = 16
 
 PRIORITY = {
     'hermes': 11, 'synapse': 8, 'synapse-db': 7,
-    'honcho-api': 7, 'honcho-db': 6, 'qmd': 6, 'ollama': 7,
+    'honcho-api': 7, 'honcho-db': 6, 'qmd': 6, 'ollama': 10,
     'searxng': 4, 'searxng-valkey': 3, 'honcho-redis': 4,
     'qmd-indexer': 3, 'honcho-deriver': 3,
 }
@@ -111,6 +111,38 @@ def pressure(path, kind='some'):
         return float(re.search(r'\bavg10=([0-9.]+)', line).group(1))
     except (OSError, ValueError, AttributeError, StopIteration):
         return None
+
+
+def sustained_quota_throttle(periods, throttled, old_periods, old_throttled):
+    """Detect recent sustained CFS throttling, excluding sporadic wake-ups."""
+    if any(v is None for v in (periods, throttled, old_periods, old_throttled)):
+        return False
+    try:
+        delta_periods = int(periods) - int(old_periods)
+        delta_throttled = int(throttled) - int(old_throttled)
+    except (TypeError, ValueError):
+        return False
+    return (delta_periods >= 20 and 4 <= delta_throttled <= delta_periods and
+            delta_throttled / delta_periods >= .12)
+
+
+def host_cpu_load1():
+    """1-minute Linux runqueue load; combine with CPU PSI to avoid quota false alarms.
+
+    A cgroup hard quota can produce ~90% CPU PSI even if the 4-vCPU WSL host
+    has a load average far below one. Borrowing idle *quota* helps that case.
+    A missing or invalid load measurement remains a conservative guard.
+    """
+    try:
+        load = float(os.getloadavg()[0])
+        return load if math.isfinite(load) and load >= 0 else None
+    except (OSError, ValueError, TypeError, AttributeError):
+        return None
+
+
+def override_eligible(root):
+    """Use exactly the same full Compose-model check at bootstrap and runtime."""
+    return not (root / 'compose.override.yaml').exists() or image_only_compose_override(root)
 
 
 def host_available_mib():
@@ -369,7 +401,8 @@ def safe_state(root, expected, state, actual):
     return record
 
 
-def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi, io_psi=None, fresh_oom=False,
+def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi,
+         cpu_load1=None, io_psi=None, fresh_oom=False,
          directml_selected=False, directml_active=True, cpus=1, cpu_envelope=0,
          directml_reserve=0, budget=0, now=None):
     """Pure, reproducible planner; never raises per-service cap outside group budget."""
@@ -377,8 +410,19 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     old = {k: {'mem': current[k]['mem'], 'cpu': current[k]['cpu']} for k in expected}
     goal = {k: v.copy() for k, v in old.items()}
     counters = {}
+    # WSL-wide CPU PSI includes time that *cgroup-quota-throttled* tasks
+    # cannot run. A high PSI number alone therefore does not prove physical
+    # cores are exhausted (observed: 88% PSI with load1=0.31 on 4 vCPUs).
+    # Hard per-container quotas can create high CPU PSI on an otherwise idle
+    # WSL host. The CPU quota transfers stay strictly within the configured
+    # aggregate Docker envelope, so CPU PSI alone must not suppress them.
+    # Corroborating high runqueue load does, however, disable any additional
+    # lending from a separately reserved DirectML slice.
+    cpu_host_busy = (cpu_psi >= 25.0 and
+                     (cpu_load1 is None or not math.isfinite(cpu_load1) or
+                      cpu_load1 >= cpus * 0.85)) if cpu_psi is not None else True
     high_pressure = (available_mib is None or memory_psi is None or cpu_psi is None or
-                     memory_psi >= 2.0 or cpu_psi >= 25.0 or
+                     memory_psi >= 2.0 or
                      (io_psi is not None and io_psi >= 12.0) or
                      available_mib < max(512, int(budget * 0.10)))
     for k in expected:
@@ -394,7 +438,8 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     # Reserve against sudden host/DirectML pressure. On a verified inactive
     # DirectML worker, temporarily lend at most a third of its CPU reservation.
     extra = (min(int(directml_reserve / 3), int(cpus * 100))
-             if directml_selected and not directml_active and not high_pressure else 0)
+             if directml_selected and not directml_active and
+             not high_pressure and not cpu_host_busy else 0)
     usable_cpu = cpu_envelope + extra
     if usable_cpu > cpus * 1000 - max(50, int(cpus * 100)):
         usable_cpu = cpus * 1000 - max(50, int(cpus * 100))
@@ -470,7 +515,7 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     # A measured, fresh quota-throttling signal can bypass cooldown for CPU
     # only. Ordinary quota increases still require two demand samples.
     urgent_throttle = any(usage[k].get('throttled', False) for k in expected)
-    in_cooldown = now - record.get('lastUpdate', 0) < 75
+    in_cooldown = now - record.get('lastUpdate', 0) < 45
     if in_cooldown and not urgent_throttle:
         ensure_cpu_envelope()
         return goal, counters
@@ -658,6 +703,7 @@ def run_once(root, restore=False):
             psi_c = pressure('/proc/pressure/cpu', 'some')
             psi_io = pressure('/proc/pressure/io', 'some')
             available = host_available_mib()
+            host_load1 = host_cpu_load1()
             fresh_oom = False
             for k in expected:
                 # Include charged cache and current cgroup usage when assessing
@@ -670,17 +716,14 @@ def run_once(root, restore=False):
                 periods = actual[k].get('nr_periods')
                 throttle = actual[k].get('nr_throttled')
                 if periods is not None and throttle is not None:
-                    old_periods = previous.get('nr_periods')
-                    old_throttle = previous.get('nr_throttled')
-                    if (old_periods is not None and old_throttle is not None and
-                            periods > old_periods and throttle >= old_throttle):
-                        n = periods - old_periods
-                        usage[k]['throttled'] = (throttle - old_throttle) / n >= .12
+                    usage[k]['throttled'] = sustained_quota_throttle(
+                        periods, throttle, previous.get('nr_periods'),
+                        previous.get('nr_throttled'))
             sampled_at = time.time()
             directml_busy = directml_workload(snapshot, sampled_at) if state.get('DIRECTML_SELECTED') == 'true' else True
             target, counters = plan(expected, actual, usage, snapshot,
                                     available_mib=available, memory_psi=psi_m, cpu_psi=psi_c,
-                                    io_psi=psi_io, fresh_oom=fresh_oom,
+                                    cpu_load1=host_load1, io_psi=psi_io, fresh_oom=fresh_oom,
                                     directml_selected=state.get('DIRECTML_SELECTED') == 'true',
                                     directml_active=directml_busy, cpus=int(state['CPUS']),
                                     cpu_envelope=int(state['CPU_DOCKER_ENVELOPE_MILLI']),
@@ -706,18 +749,24 @@ def main():
     p.add_argument('--stack', type=Path, default=Path(__file__).resolve().parent)
     p.add_argument('--restore', action='store_true')
     p.add_argument('--verify', action='store_true')
+    p.add_argument('--check-override', action='store_true',
+                   help='Read-only check of an image-only Compose override')
     a = p.parse_args()
     root = a.stack.resolve()
     if root != Path(__file__).resolve().parent:
         raise SystemExit('resource controller must run from its own installed stack')
     try:
+        if a.check_override:
+            if not override_eligible(root):
+                raise RuntimeError('Compose override modifies managed policy beyond Hermes image selection')
+            return 0
         if a.verify:
             verify_snapshot(root)
             return 0
         return run_once(root, restore=a.restore)
     except Exception as exc:
         print(f'Resource burst controller inactive (canonical or last verified bounded limits retained): {exc}', file=sys.stderr)
-        return 2 if (a.restore or a.verify) else 0  # Keep optional timer fail-safe.
+        return 2 if (a.restore or a.verify or a.check_override) else 0  # Keep optional timer fail-safe.
 
 
 if __name__ == '__main__':

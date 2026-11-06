@@ -61,10 +61,10 @@ record = {'lastUpdate': 0, 'services': {
 }}
 
 def decide(cur=base, work=usage, old=record, *, avail=4096, mpsi=0.05, cpsi=0.2,
-           iopsi=0.0, fresh=False, directml=False, active=True, now=500):
+           load1=0.3, iopsi=0.0, fresh=False, directml=False, active=True, now=500):
     return module.plan(services, cur, work, old,
                        available_mib=avail, memory_psi=mpsi, cpu_psi=cpsi,
-                       io_psi=iopsi, fresh_oom=fresh, cpus=8,
+                       cpu_load1=load1, io_psi=iopsi, fresh_oom=fresh, cpus=8,
                        directml_selected=directml, directml_active=active,
                        cpu_envelope=4200, directml_reserve=2000 if directml else 0,
                        budget=5120, now=now)
@@ -80,12 +80,23 @@ assert module.plan(services, base, {**usage, 'hermes': {'cpu_pct': 151, 'mem': 1
 assert counters['hermes']['up'] == 2 and counters['qmd-indexer']['idle'] == 3
 assert all(goal[k]['mem'] >= services[k]['floor'] for k in services)
 
-# No borrowing under reported memory pressure, CPU pressure, I/O pressure, OOM,
-# missing telemetry, or insufficient available WSL RAM.
-for kw in ({'mpsi': 5}, {'cpsi': 40}, {'iopsi': 15}, {'fresh': True},
+# Memory pressure, I/O pressure, OOM, or missing essential telemetry retains
+# canonical caps. CPU PSI alone cannot veto safe within-envelope CPU transfers:
+# hard per-container CFS quotas can create CPU PSI >85% at tiny host load.
+for kw in ({'mpsi': 5}, {'iopsi': 15}, {'fresh': True},
            {'avail': None}, {'avail': 350}):
     constrained, _ = decide(**kw)
     assert constrained == {k: {'cpu': v['cpu'], 'mem': v['mem']} for k, v in base.items()}, kw
+for host_load in (0.31, 8.0):
+    high_cpu_psi, _ = decide(cpsi=88, load1=host_load)
+    assert high_cpu_psi['hermes']['cpu'] > base['hermes']['cpu']
+    assert sum(k['cpu'] for k in high_cpu_psi.values()) <= 4200
+# Genuinely busy host CPU prevents additional *DirectML-reserved* loans, but
+# still permits redistribution *inside* the canonical Docker envelope.
+true_host_pressure, _ = decide(cpsi=88, load1=8.0, directml=True, active=False)
+assert sum(k['cpu'] for k in true_host_pressure.values()) <= 4200
+false_host_pressure, _ = decide(cpsi=88, load1=0.31, directml=True, active=False)
+assert sum(k['cpu'] for k in false_host_pressure.values()) <= 4200 + min(2000//3, 800)
 
 # An idle DirectML host worker can lend only bounded CPU headroom; once active,
 # its reserve is immediately reclaimed even during cooldown.
@@ -110,7 +121,7 @@ assert sum(v['cpu'] for v in settled.values()) <= 4200
 assert sum(v['mem'] for v in settled.values()) <= 5120
 
 # Borrowing is preemptible: if an idle donor awakens, recover baseline
-# CPU immediately despite the 75s cooldown; return RAM only from safe headroom.
+# CPU immediately despite the 45s cooldown; return RAM only from safe headroom.
 borrowed = {k: {**base[k], **goal[k]} for k in services}
 awakened_work = {**usage, 'qmd-indexer': {'cpu_pct': max(50, borrowed['qmd-indexer']['cpu'] / 10),
                                          'mem': int(borrowed['qmd-indexer']['mem'] * 0.84)}}
@@ -177,8 +188,18 @@ no_mem_donation, _ = module.plan(
     cpu_envelope=6000, budget=6400, now=500)
 assert all(no_mem_donation[k]['mem'] == at_mem_cap[k]['mem'] for k in services)
 
+# Only sustained, fresh throttling is an urgent CPU signal. Short-lived
+# background wake-ups, missing records, and reset counters stay inconclusive.
+assert module.sustained_quota_throttle(152, 152, 0, 0)
+assert module.sustained_quota_throttle(120, 16, 0, 0)
+assert not module.sustained_quota_throttle(3, 1, 0, 0)
+assert not module.sustained_quota_throttle(150, 3, 0, 0)
+assert not module.sustained_quota_throttle(150, 150, 200, 200)
+assert not module.sustained_quota_throttle(150, 150, None, None)
+assert not module.sustained_quota_throttle(150, 151, 0, 0)
+
 # A freshly observed cgroup CPU quota bottleneck must be addressed during the
-# ordinary 75-second cooldown, without simultaneously moving RAM ceilings.
+# ordinary 45-second cooldown, without simultaneously moving RAM ceilings.
 throttle_work = {k: v.copy() for k, v in usage.items()}
 throttle_work['hermes']['throttled'] = True
 throttled, _ = decide(work=throttle_work,
@@ -228,6 +249,44 @@ with tempfile.TemporaryDirectory() as tmp:
         customized['services']['ollama']['mem_limit'] = '2g'
         customized['services']['hermes']['environment'] = ['UNVERIFIED=1']
         assert not module.image_only_compose_override(root)
+
+# CPU baselines follow enabled services, WSL vCPU count, CPU inference vs.
+# accelerated Ollama, and DirectML host reservation. These are portable
+# constraints rather than a special case for the reporter's 4-core system.
+for cores in (1, 2, 4, 8, 16, 32, 64):
+    for accelerated in ('cpu', 'vulkan', 'nvidia', 'amd'):
+        for directml_mode in (False, True):
+            quota = cpu_quota_plan(
+                cores, matrix_gateways=1, kanban_concurrency=3,
+                accel=accelerated, directml_selected=directml_mode)
+            envelope = cpu_envelope_plan(cores, directml_mode)
+            assert sum(quota.values()) <= envelope['dockerEnvelopeMilli']
+            assert max(quota.values()) < cores * 1000
+            assert all(q >= 50 and q % 50 == 0 for q in quota.values())
+            assert quota['hermes'] >= quota['qmd-indexer']
+            if cores >= 2:
+                assert quota['hermes'] > quota['qmd-indexer']
+            if accelerated in ('cpu', 'vulkan'):
+                assert quota['ollama'] >= quota['qmd-indexer']
+            no_local_ollama = cpu_quota_plan(
+                cores, 1, 3, accelerated, ollama=False,
+                directml_selected=directml_mode)
+            assert 'ollama' not in no_local_ollama
+            assert sum(no_local_ollama.values()) <= envelope['dockerEnvelopeMilli']
+# Performance-oriented reference case, without coding a hardware-specific
+# allocation path: reserve 10% of four vCPUs for WSL/system scheduling.
+reference = cpu_quota_plan(4, 1, 3, 'cpu')
+assert reference['ollama'] >= 1200
+assert reference['hermes'] >= 750
+assert sum(reference.values()) <= 3600
+
+# Bootstrap must call the same read-only resolved-Compose override check as
+# the runtime controller when deciding whether to install a systemd timer.
+boot_source = (ROOT / 'linux/bootstrap.sh').read_text()
+assert '--check-override --stack "$stack_dir"' in boot_source
+assert 'runuser -u "$linux_user" -- /usr/bin/python3' in boot_source
+assert 'OnUnitInactiveSec=25s' in boot_source
+assert 'OnBootSec=1min' in boot_source
 
 # Portability sweep: derive everything from exposed WSL CPUs/RAM, selected
 # services and backend, not machine-specific CPU/RAM tiers. Infeasible tiny
