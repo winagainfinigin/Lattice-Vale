@@ -11,6 +11,33 @@
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 
+## v14.6.6 demand-matched CPU/RAM diagnostic follow-up
+
+An idle container **can** temporarily donate quota, but the controller may
+only reduce its hard cap when a receiver can actually accept that capacity.
+CPU throttling is checked from **new per-cgroup** `nr_throttled` and
+`nr_periods` deltas, not from Ollama's `PROCESSOR=100% CPU` label (which
+means CPU-only placement, not saturation). New throttling can accelerate CPU
+rebalancing despite normal cooldown, while memory rebalancing respects cooldown.
+
+For memory cap reductions, `memory.current` supplies the full cgroup charge,
+including file cache omitted from Docker's user-facing stats calculation.
+Missing cgroup readings prohibit cap reductions, not all CPU balancing. Reclaim
+from over-baseline memory also respects the live charged-memory floor. Older
+OOMKilled markers do not prove a new OOM. Negative, missing, or reset throttling
+deltas must not be interpreted as fresh throttling evidence.
+
+Use `systemctl status latticevale-resource-burst.timer --no-pager`,
+`journalctl -u latticevale-resource-burst.service --no-pager -n 50`, and
+`python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack`.
+An inactive timer or a rejected Compose override means the **static fallback**;
+passing snapshot verification does not prove that any transfer or performance
+improvement occurred. For configured `compose.override.yaml`, only an effective
+Hermes image/pull-policy difference is permitted; other changes disable dynamic
+borrowing. Compare actual `docker inspect` ceilings and pressure before/after
+a real workload to judge improvements. Unsupported/missing cgroup v2 telemetry
+must not be repaired by weakening identity/fingerprint checks.
+
 ## Windows Tailscale remote-access diagnostics
 
 A Tailscale-enabled install/repair writes a focused log at `%LOCALAPPDATA%\LatticeVale\logs\remote-access-YYYYMMDD-HHMMSS.log` when possible. It records prerequisite, preference, DNS, Serve/listener, Matrix client-path, mapping adoption/replacement, cleanup, and final-state diagnostics. It does not claim that a particular remote device was tested during installation.

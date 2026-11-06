@@ -1,5 +1,17 @@
 # LatticeVale 14.6.6 Resource Scheduler v14 (Canonical Schema v13)
 
+> **v14.6.6 demand-matched resource hotfix:** The original v14 controller
+> transferred quotas from every idle donor before checking what busy receivers
+> could accept. The follow-up allocates only confirmed demand, protects
+> priority-dependent idle-service CPU margins, reads cgroup `memory.current`
+> before any hard-memory-cap donation, and permits an effective *Hermes-image-only*
+> Compose override when all other resolved settings match the canonical stack.
+> It also allows fresh, measured CPU quota throttling to bypass the normal
+> cooldown for CPU-only transfers. Canonical schema 13, installed version
+> 14.6.6, user-selected WSL limits, and existing service minima do not change.
+> This is a source-level correction; throughput or responsiveness gains require
+> real host/WSL/Docker measurements before they can be claimed.
+
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
@@ -30,18 +42,27 @@ higher CPU scheduling priorities than background QMD indexing/derivation.
 Each eligible recipient can borrow at most 400 milli-CPU and 128 MiB in one
 rebalancing cycle, subject to aggregate limits; per-service CPU limits are
 capped at the smaller of 75% of WSL logical CPU capacity and a bounded
-multiple of the baseline. Memory recipients have at most a 1.75× baseline
-ceiling, while donors retain the maximum of the canonical floor, 75% of their
-baseline, and 1.5× observed use plus 64 MiB. CPU donors retain their bounded
-minimum. Previously idle donors regain baseline CPU quota when they reawaken,
-even during an ordinary cooldown; borrowed RAM is reclaimed only where actual
-working-set usage permits safe reduction. No pool grows merely because a selected service exists.
+multiple of the baseline. Memory recipients retain at most a 1.75× baseline ceiling. CPU donor
+headroom depends on workload priority: background services keep at least 65%
+of baseline CPU quota, standard services 80%, and high-priority interactive
+services 90%, rounded up to 50 milli-CPU scheduling units. Memory donors keep
+the greater of their canonical service/model minimum, 85% of baseline for
+background roles or 90% for other roles, and 120% of the *charged cgroup*
+`memory.current` value plus 64 MiB. The memory floor and actual recipient
+capacity must permit the full transfer; donations no longer occur speculatively.
+Previously idle services regain baseline CPU quota when they reawaken,
+including during normal cooldown. Borrowed RAM is reclaimed only when cgroup
+memory usage safely permits it. No pool grows merely because a service exists.
 
 The optional host-side controller at `~/hermes-stack/resource-burst-controller.py`
 uses local Docker inspection/statistics, cgroup v2 CPU-throttling and OOM-event
-counters where accessible, and Linux CPU/memory/I/O pressure plus `MemAvailable`.
-It requires repeated demand (two samples), repeated idleness (three samples),
-and a 75-second post-change cooldown. It holds or contracts allocations during
+counters where accessible, cgroup `memory.current` (including charged file cache)
+for *reducing* memory limits, and Linux CPU/memory/I/O pressure plus `MemAvailable`.
+Normally it requires two demand samples, three idle samples, and a 75-second
+post-change cooldown. A newly measured quota-throttling interval can override
+the cooldown and two-sample requirement for CPU redistribution only; unrelated
+memory-limit changes remain on cooldown. Missing cgroup memory-current telemetry
+prevents reducing memory limits but does not prevent ordinary CPU borrowing. It holds or contracts allocations during
 high memory pressure (10-second PSI average at least 2%), high CPU pressure
 (at least 25%), high I/O pressure (at least 12%), newly observed cgroup OOMs,
 missing essential pressure measurements, or low available RAM. A pre-existing
@@ -70,12 +91,17 @@ snapshot from genuine unexplained Docker drift.
 
 **Fail-safe:** Missing systemd support before activation leaves static Compose
 ceilings in place. Missing Docker access, an invalid policy identity, changed
-container ownership, incomplete telemetry, or a user-owned
-`compose.override.yaml` suppresses further borrowing. Previously applied
+container ownership, incomplete essential telemetry, or a user-owned
+resource/behavior-changing `compose.override.yaml` suppresses borrowing. The
+only admitted override is one whose full resolved Compose model differs from
+the canonical model solely in Hermes's `image` and optional `pull_policy`.
+This is verified using Docker Compose's own merge/interpolation output on
+each scheduler activation; no override file is modified. Previously applied
 limits remain inside the verified aggregate envelope until an owner-run repair
 or an explicit restoration returns them to the canonical Compose baseline.
 User-supplied service/resource overrides retain final precedence and suppress
-automatic rebalancing for that stack. If the controller cannot safely execute
+automatic rebalancing for that stack. Unverified or unsupported Compose model
+resolution also leaves the verified static fallback active. If the controller cannot safely execute
 one Docker change, it attempts the inverse transaction and keeps a recovery
 journal for the next activation. The Docker engine and QMD/model floors remain
 otherwise unchanged.
@@ -104,6 +130,23 @@ runtime controller requires a live Windows/WSL/Docker validation on the
 actual host before a throughput improvement can be claimed. Source/fixture
 checks prove calculation and transaction invariants, not Windows performance.
 
+
+## Applying this changed-files-only source overlay
+
+Apply the matching ZIP overlay to an **extracted complete** LatticeVale
+v14.6.6 release, retaining its `Lattice-Vale/` directory and unchanged files.
+The accompanying `installer/SOURCE-SHA256SUMS.txt` contains updated hashes
+for the modified source and documentation. Run `installer/verify-release.ps1`
+against the complete, merged tree before selecting the normal **Option 1 —
+Resume / repair** installer flow. Take the offered safety backup before changes
+that require rollback. Do not substitute Option 6: it forces broader managed
+software refresh and is unnecessary for a source-policy reconciliation.
+
+The ZIP is **not** a complete standalone release and must not be extracted
+straight into a running WSL stack. After installation, verify timer activity,
+controller journal, live Docker resource ceilings, and at least one workload
+where a receiver actually borrows and relinquishes unused quota. Container
+health and source tests alone do not establish measured performance gains.
 
 ## Policy v13 conserved CPU envelope
 
@@ -154,7 +197,7 @@ The verifier recomputes and checks `RESERVE_MIB`, `DIRECTML_HOST_RESERVE_MIB`, a
 
 ## User override
 
-`compose.override.yaml` remains user-owned and is applied after installer-owned generated Compose policy. The planner/auditor does not pretend to understand or rewrite opaque user-owned override semantics.
+`compose.override.yaml` remains user-owned and is applied after installer-owned generated Compose policy. A resource-affecting or otherwise behavior-changing override stays authoritative and disables the burst controller. Only a *verified effective Hermes-image-only* override may retain adaptive borrowing: the controller compares complete resolved Compose models, removing solely `services.hermes.image` and `services.hermes.pull_policy` before an exact equality check. A Compose error or any additional difference falls back to static policy. The controller never modifies an override or assumes arbitrary YAML semantics are safe.
 
 ## Runtime health versus resource topology
 

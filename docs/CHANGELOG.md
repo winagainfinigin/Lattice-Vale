@@ -1,5 +1,25 @@
 # Changelog
 
+## 14.6.6 demand-matched resource scheduling follow-up — 2026-11-05
+
+- Fixes unconditional donor quota reduction: CPU and RAM leases are transferred
+  only when a measured receiver has enough remaining burst capacity.
+- Balances responsiveness and utilization through priority-dependent CPU floors
+  rather than one uniform aggressive or overly restrictive reduction.
+- Protects memory cap decreases with cgroup `memory.current`, including charged
+  page cache; missing telemetry disables memory donation rather than guessing.
+- Allows fresh cgroup quota throttling to trigger an immediate CPU-only
+  rebalance during the normal cooldown. All conservation, DirectML, and model
+  floors remain in place.
+- Safely admits effective Hermes image-only Compose overrides without disabling
+  the burst controller; other user changes retain static fallback and precedence.
+- Extends the existing deterministic fixture with realistic donor/cap cases,
+  resource-neutral override tests, and broad CPU/RAM/DirectML portability sweeps.
+- Leaves v14.6.6, runtime schema 13, explicit WSL configuration, current host
+  memory reserve ratios, database identities, installer controls and services
+  unchanged. Source tests do not claim live performance gains.
+
+
 ## 14.6.6 bounded-resource hotfix — 2026-11-04
 
 - Adds policy-v14 bounded, measurement-driven CPU and RAM rebalancing while

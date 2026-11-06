@@ -1,5 +1,28 @@
 # LatticeVale 14.6.6 Test Confidence Levels
 
+## Demand-matched burst scheduler follow-up verification
+
+The updated `v14.6.6-burst-resource-fixtures.py` covers recipient-capacity
+matching, no speculative CPU/memory donation, priority-dependent idle service
+CPU floors, cgroup-charged memory protection and missing-telemetry fallback,
+measured CPU throttling bypass during cooldown, DirectML reserve recovery,
+Compose image-only override admission versus resource/env override rejection,
+transaction rollback, and deterministic CPU/RAM invariant sweeps. It also
+exercises WSL-visible processor counts of 1, 2, 4, 8, 16, 32, and 64, and
+RAM allocations from 2 through 128 GiB for both ordinary and DirectML
+planning. Impossible full-stack topologies fail instead of manufacturing
+capacity. The overall regression file count stays at 151.
+
+These tests prove **source behavior and conserved envelopes**, not deployment
+or speed. For real qualification, compare the pre-burst canonical v13 policy,
+original v14 scheduler, and demand-matched hotfix using equivalent WSL CPU/RAM
+settings and workloads. Observe p50/p95 interactive response time, throughput,
+per-container CPU throttling, memory PSI, `memory.events`, crashes, CPU/RAM
+quota restoration, DirectML activity, and Windows/WSL responsiveness. A few
+Docker stats snapshots alone cannot establish causality. Preserve explicit
+`.wslconfig` and user-owned Compose settings across comparisons.
+
+
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 > **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.

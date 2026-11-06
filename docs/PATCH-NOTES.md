@@ -1,3 +1,19 @@
+> **14.6.6 demand-matched resource scheduler follow-up hotfix:** Corrects the
+> original v14 scheduler's unconditional idle-donor quota reductions by
+> reassigning only capacity that a verified busy receiver can accept. Uses
+> priority-aware CPU floors (65% background, 80% standard, 90% interactive),
+> cgroup `memory.current` and minimum headroom for any memory cap decrease,
+> and immediate CPU-only response to freshly measured quota throttling.
+> Accepts a Hermes image-only Compose override after verifying full effective
+> model equivalence; arbitrary user resource overrides still select static
+> fallback. Keeps canonical v13 policy schema, release version 14.6.6,
+> the current 10%/13%/28% host-memory reserves, selected WSL settings,
+> QMD/DirectML minima, and bounded conservation rules unchanged. Includes
+> portability/regression fixtures and updated diagnostics. Apply as a
+> changed-files overlay to the matching complete release, verify the merged
+> source manifest, and use normal Option 1 — Resume / repair. Live throughput
+> improvements require target-host measurements.
+
 > **14.6.6 bounded-resource hotfix (post-release):** The v14 scheduling layer
 > redistributes unused CPU and memory ceilings among the managed containers
 > while preserving aggregate WSL/DirectML headroom, service minima, explicit

@@ -31,12 +31,43 @@ PAIRS = {
     'honcho-db': 'hermes-honcho-db', 'honcho-redis': 'hermes-honcho-redis',
     'honcho-api': 'hermes-honcho-api', 'honcho-deriver': 'hermes-honcho-deriver',
 }
+# Priority-sensitive donor floors: background capacity is available for real
+# bottlenecks, while interactive services retain larger burst margins.
+# These ratios scale with canonical service quotas, not any PC/WSL hardware SKU.
+CPU_DONOR_FLOOR_BACKGROUND = 0.65
+CPU_DONOR_FLOOR_STANDARD = 0.80
+CPU_DONOR_FLOOR_INTERACTIVE = 0.90
+MEM_DONOR_FLOOR_BACKGROUND = 0.85
+MEM_DONOR_FLOOR_INTERACTIVE = 0.90
+CPU_QUANTUM_MILLI = 50
+MEM_QUANTUM_MIB = 16
+
 PRIORITY = {
     'hermes': 11, 'synapse': 8, 'synapse-db': 7,
     'honcho-api': 7, 'honcho-db': 6, 'qmd': 6, 'ollama': 7,
     'searxng': 4, 'searxng-valkey': 3, 'honcho-redis': 4,
     'qmd-indexer': 3, 'honcho-deriver': 3,
 }
+
+
+def cpu_donor_floor(service, baseline):
+    """Keep enough quota for a fast wake-up without hard-coding host sizes."""
+    priority = PRIORITY[service]
+    ratio = (CPU_DONOR_FLOOR_BACKGROUND if priority <= 4 else
+             CPU_DONOR_FLOOR_INTERACTIVE if priority >= 8 else
+             CPU_DONOR_FLOOR_STANDARD)
+    return max(CPU_QUANTUM_MILLI,
+               math.ceil(baseline * ratio / CPU_QUANTUM_MILLI) * CPU_QUANTUM_MILLI)
+
+
+def memory_donor_floor(service, baseline, configured_floor, charged_mib):
+    """Preserve cgroup-charged pages, hard model floors, and burst headroom."""
+    if charged_mib is None:
+        return baseline  # Missing cgroup telemetry must never shrink a hard limit.
+    ratio = (MEM_DONOR_FLOOR_BACKGROUND if PRIORITY[service] <= 4
+             else MEM_DONOR_FLOOR_INTERACTIVE)
+    return max(configured_floor, math.ceil(baseline * ratio),
+               math.ceil(charged_mib * 1.20) + 64)
 
 
 def run(args, cwd, timeout=12):
@@ -157,6 +188,48 @@ def mem_from_stats(value):
     return math.ceil(amount * scale / MIB)
 
 
+def image_only_compose_override(root):
+    """Admit only a verified image-only Hermes override, preserving opaque overrides.
+
+    Docker Compose resolves interpolation and merge semantics; comparing the
+    entire effective models avoids attempting to parse user YAML ourselves.
+    Any other effective mutation, Compose error, or unsupported tool falls back
+    to static allocations. Neither model is written to disk or logged.
+    """
+    files = ['compose.yaml']
+    if (root / 'compose.latticevale.yaml').is_file() and (root / 'compose.latticevale.yaml').stat().st_size:
+        files.append('compose.latticevale.yaml')
+    if not (root / 'compose.override.yaml').is_file():
+        return False
+
+    def resolved_model(paths):
+        cmd = ['docker', 'compose']
+        for path in paths:
+            cmd.extend(['-f', path])
+        cmd.extend(['config', '--format', 'json'])
+        model = json.loads(run(cmd, root, timeout=25))
+        if not isinstance(model, dict) or not isinstance(model.get('services'), dict):
+            raise RuntimeError('Compose effective model is malformed')
+        return model
+
+    plain = resolved_model(files)
+    custom = resolved_model(files + ['compose.override.yaml'])
+    plain_hermes = plain['services'].get('hermes')
+    custom_hermes = custom['services'].get('hermes')
+    if not isinstance(plain_hermes, dict) or not isinstance(custom_hermes, dict):
+        return False
+    if not isinstance(custom_hermes.get('image'), str) or not custom_hermes['image'].strip():
+        return False
+    # Only Hermes's image/pull selection may differ; all other settings and
+    # every other service, volume, network, resource value, and profile must
+    # remain exactly as LatticeVale generates them.
+    for model in (plain, custom):
+        hermes = model['services']['hermes']
+        hermes.pop('image', None)
+        hermes.pop('pull_policy', None)
+    return plain == custom
+
+
 def load_expected(root, *, allow_override=False):
     opts = read_json(root / 'install-options.json', {})
     state = parse_env_state(root / '.latticevale-resource-state')
@@ -168,7 +241,8 @@ def load_expected(root, *, allow_override=False):
     if state.get('RESOURCE_BURST_STRATEGY') != 'bounded-v14':
         raise RuntimeError('burst policy not installed; static fallback')
     if (root / 'compose.override.yaml').exists() and not allow_override:
-        raise RuntimeError('user-owned Compose override present; static fallback')
+        if not image_only_compose_override(root):
+            raise RuntimeError('unverified or resource-affecting Compose override; static fallback')
     names = [x for x in SERVICE_ORDER if f'LIMIT_{x.upper().replace("-", "_")}_MIB' in state]
     expected = {}
     for name in names:
@@ -207,6 +281,12 @@ def cgroup_event_counters(pid):
             for field in fields:
                 if field in data:
                     output[field] = int(data[field])
+        try:
+            charged = int((group / 'memory.current').read_text().strip())
+            if charged >= 0:
+                output['memory_current_mib'] = math.ceil(charged / MIB)
+        except (OSError, ValueError, PermissionError):
+            pass
         return output
     except (OSError, ValueError, StopIteration, PermissionError):
         return {}
@@ -362,8 +442,11 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
         for borrowed in sorted(expected, key=lambda k: (PRIORITY[k], k)):
             if spare >= missing:
                 break
+            charged = usage[borrowed].get('charged_mem')
+            if charged is None:
+                continue
             remain = max(expected[borrowed]['mem'],
-                         math.ceil(usage[borrowed]['mem'] * 1.5) + 64)
+                         math.ceil(charged * 1.20) + 64)
             take = min(missing - spare, max(0, goal[borrowed]['mem'] - remain))
             take = (take // 16) * 16
             goal[borrowed]['mem'] -= take
@@ -374,37 +457,53 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
         # When memory pressure or prior OOM is indicated, give resources back to
         # the canonical safe profile gradually, leaving busy memory untouched.
         for k, e in expected.items():
-            if current[k]['mem'] > e['mem'] and usage[k]['mem'] < e['mem'] * .8:
-                goal[k]['mem'] = max(e['mem'], current[k]['mem'] - 64)
+            charged = usage[k].get('charged_mem')
+            candidate = max(e['mem'], current[k]['mem'] - 64)
+            if (current[k]['mem'] > e['mem'] and charged is not None and
+                    candidate >= math.ceil(charged * 1.20) + 64 and
+                    usage[k]['mem'] < e['mem'] * .8):
+                goal[k]['mem'] = candidate
             if current[k]['cpu'] > e['cpu']:
                 goal[k]['cpu'] = max(e['cpu'], current[k]['cpu'] - 100)
         ensure_cpu_envelope()
         return goal, counters
-    if now - record.get('lastUpdate', 0) < 75:
+    # A measured, fresh quota-throttling signal can bypass cooldown for CPU
+    # only. Ordinary quota increases still require two demand samples.
+    urgent_throttle = any(usage[k].get('throttled', False) for k in expected)
+    in_cooldown = now - record.get('lastUpdate', 0) < 75
+    if in_cooldown and not urgent_throttle:
         ensure_cpu_envelope()
         return goal, counters
 
     # Rebalance CPU from idle services to busy services while conserving the
     # aggregate Docker envelope. Never reduce the stable minimum for a service.
-    cpu_receivers = [k for k in expected if counters[k]['up'] >= 2 and
+    cpu_receivers = [k for k in expected if
+                     (counters[k]['up'] >= 2 or usage[k].get('throttled', False)) and
                      (usage[k]['cpu_pct'] >= (current[k]['cpu'] / 10) * .82 or
                       usage[k].get('throttled', False))]
     cpu_receivers.sort(key=lambda k: (-PRIORITY[k], -usage[k]['cpu_pct'], k))
-    cpu_donors = [k for k in expected if counters[k]['idle'] >= 3]
+    cpu_donors = [k for k in expected if counters[k]['idle'] >= 3 and k not in cpu_receivers]
     cpu_donors.sort(key=lambda k: (PRIORITY[k], k))
     available_cpu = max(0, usable_cpu - sum(x['cpu'] for x in goal.values()))
     if cpu_receivers:
-        for donor in cpu_donors:
-            base, cur = expected[donor]['cpu'], goal[donor]['cpu']
-            floor = max(50, (base * 55 // 100 // 50) * 50)
-            reclaim = min(200, max(0, cur - floor))
-            goal[donor]['cpu'] -= reclaim
-            available_cpu += reclaim
+        # Allocate only what recipients can accept. Previously every idle donor
+        # was reduced even if no receiver had sufficient burst ceiling.
         for target in cpu_receivers:
             base, cur = expected[target]['cpu'], goal[target]['cpu']
             ceiling = min(int(cpus * 1000 * .75), max(base * 3, base + 500))
-            added = min(available_cpu, max(0, ceiling - cur), 400)
-            added = (added // 50) * 50
+            requested = (min(400, max(0, ceiling - cur)) // CPU_QUANTUM_MILLI
+                         ) * CPU_QUANTUM_MILLI
+            for donor in cpu_donors:
+                shortage = requested - available_cpu
+                if shortage <= 0:
+                    break
+                donor_cur = goal[donor]['cpu']
+                floor = cpu_donor_floor(donor, expected[donor]['cpu'])
+                reclaim = (min(200, shortage, max(0, donor_cur - floor))
+                           // CPU_QUANTUM_MILLI) * CPU_QUANTUM_MILLI
+                goal[donor]['cpu'] -= reclaim
+                available_cpu += reclaim
+            added = min(requested, available_cpu)
             goal[target]['cpu'] += added
             available_cpu -= added
     else:
@@ -422,36 +521,55 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
                 goal[k]['cpu'] += add
                 spare_cpu -= add
 
+    if in_cooldown:
+        ensure_cpu_envelope()
+        assert sum(x['cpu'] for x in goal.values()) <= usable_cpu
+        assert sum(x['mem'] for x in goal.values()) <= budget
+        return goal, counters
+
     # Redistribute caps only by taking safely unused headroom from idle donors.
     # The sum of all hard limits stays <= the original container budget.
     memory_receivers = [k for k in expected if counters[k]['up'] >= 2 and
                         usage[k]['mem'] >= current[k]['mem'] * .82]
     memory_receivers.sort(key=lambda k: (-PRIORITY[k], -usage[k]['mem'], k))
-    memory_donors = [k for k in expected if counters[k]['idle'] >= 3]
+    # The cgroup charge (memory.current), including file cache, is required
+    # before reducing anyone's hard memory limit. Docker stats alone is not.
+    memory_donors = [k for k in expected if counters[k]['idle'] >= 3 and
+                     isinstance(usage[k].get('charged_mem'), (int, float)) and
+                     usage[k]['charged_mem'] >= 0 and k not in memory_receivers]
     memory_donors.sort(key=lambda k: (PRIORITY[k], k))
     spare = max(0, budget - sum(x['mem'] for x in goal.values()))
     if memory_receivers:
-        for donor in memory_donors:
-            cur = goal[donor]['mem']
-            floor = max(expected[donor]['floor'], int(expected[donor]['mem'] * .75),
-                        math.ceil(usage[donor]['mem'] * 1.5) + 64)
-            reclaim = min(128, max(0, cur - floor))
-            reclaim = (reclaim // 16) * 16
-            goal[donor]['mem'] -= reclaim
-            spare += reclaim
         for target in memory_receivers:
             cur, base = goal[target]['mem'], expected[target]['mem']
             max_burst = min(budget, max(base + 256, int(base * 1.75)))
-            # Allow a measured amount of RAM to be borrowed; postpone if host
-            # MemAvailable is already insufficient, keeping directml headroom.
-            add = min(128, spare, max(0, max_burst - cur), max(0, available_mib - 512))
-            add = (add // 16) * 16
-            goal[target]['mem'] += add
-            spare -= add
+            requested = (min(128, max(0, max_burst - cur),
+                             max(0, available_mib - 512)) // MEM_QUANTUM_MIB
+                         ) * MEM_QUANTUM_MIB
+            for donor in memory_donors:
+                shortage = requested - spare
+                if shortage <= 0:
+                    break
+                donor_cur = goal[donor]['mem']
+                floor = memory_donor_floor(
+                    donor, expected[donor]['mem'], expected[donor]['floor'],
+                    usage[donor]['charged_mem'])
+                reclaim = (min(128, shortage, max(0, donor_cur - floor))
+                           // MEM_QUANTUM_MIB) * MEM_QUANTUM_MIB
+                goal[donor]['mem'] -= reclaim
+                spare += reclaim
+            added = min(requested, spare)
+            goal[target]['mem'] += added
+            spare -= added
     else:
         for k, e in expected.items():
-            if counters[k]['idle'] >= 3 and goal[k]['mem'] > e['mem'] and usage[k]['mem'] < e['mem'] * .8:
-                goal[k]['mem'] = max(e['mem'], goal[k]['mem'] - 64)
+            charged = usage[k].get('charged_mem')
+            candidate = max(e['mem'], goal[k]['mem'] - 64)
+            if (counters[k]['idle'] >= 3 and goal[k]['mem'] > e['mem'] and
+                    charged is not None and
+                    candidate >= math.ceil(charged * 1.20) + 64 and
+                    usage[k]['mem'] < e['mem'] * .8):
+                goal[k]['mem'] = candidate
         spare_mib = max(0, budget - sum(x['mem'] for x in goal.values()))
         for k in sorted(expected, key=lambda k: (-PRIORITY[k], k)):
             if goal[k]['mem'] < expected[k]['mem']:
@@ -542,6 +660,9 @@ def run_once(root, restore=False):
             available = host_available_mib()
             fresh_oom = False
             for k in expected:
+                # Include charged cache and current cgroup usage when assessing
+                # safety of reducing memory.max, not just Docker stats usage.
+                usage[k]['charged_mem'] = actual[k].get('memory_current_mib')
                 previous = snapshot['services'].get(k, {})
                 now_oom = actual[k].get('oom_kill')
                 prior_oom = previous.get('oom_kill')
@@ -551,8 +672,9 @@ def run_once(root, restore=False):
                 if periods is not None and throttle is not None:
                     old_periods = previous.get('nr_periods')
                     old_throttle = previous.get('nr_throttled')
-                    if old_periods is not None and old_throttle is not None:
-                        n = max(1, periods - old_periods)
+                    if (old_periods is not None and old_throttle is not None and
+                            periods > old_periods and throttle >= old_throttle):
+                        n = periods - old_periods
                         usage[k]['throttled'] = (throttle - old_throttle) / n >= .12
             sampled_at = time.time()
             directml_busy = directml_workload(snapshot, sampled_at) if state.get('DIRECTML_SELECTED') == 'true' else True
