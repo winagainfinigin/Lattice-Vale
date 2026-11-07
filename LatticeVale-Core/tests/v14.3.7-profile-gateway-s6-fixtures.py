@@ -67,6 +67,14 @@ printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 args="$*"
 case "$args" in
   *s6-svstat*)
+    case "$FAKE_DOCKER_ROOT" in
+      /run/hermes-service|/run/service) ;;
+      *) printf 'unexpected fake service root: %s\n' "$FAKE_DOCKER_ROOT" >&2; exit 98 ;;
+    esac
+    case "$args" in
+      *assistant*) printf 'resolved=%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG" ;;
+      *) printf 'resolved=%s/gateway-default\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG" ;;
+    esac
     if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
       printf 'up (pid 4242) 1 seconds\n'
     else

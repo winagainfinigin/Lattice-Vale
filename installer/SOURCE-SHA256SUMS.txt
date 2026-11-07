@@ -138,7 +138,7 @@ c71e6bbc3270a26fc3af1facd60527235c432c5fb19df0f0927c8bcdaa484ee1  LatticeVale-Co
 3d6f7608568d2082226bf682f621ab89377763e7dc8942e1f674dc245a86ac31  LatticeVale-Core/tests/v14.3.5-gpu-prerequisite-repair-fixtures.py
 a845a54f46374790b541a8dcabf8c744d0ebe5247b2629d6d8f50b6c5c08d09f  LatticeVale-Core/tests/v14.3.5-native-windows-ollama-fixtures.py
 e69a0008f84a5fd2f57bd002b2e3c5978ae9b26a17248d85f2512021489d90ea  LatticeVale-Core/tests/v14.3.6-matrix-first-bootstrap-pipefail-fixtures.py
-440206c20113c8e753f5774674c2075fc8c8100e9b9ea6cdc0b41594c90353cb  LatticeVale-Core/tests/v14.3.7-profile-gateway-s6-fixtures.py
+5d9a8430868558629f41f07ab64666c6a5b443752e4216ffe7ed17595d3d9512  LatticeVale-Core/tests/v14.3.7-profile-gateway-s6-fixtures.py
 87cfa5c2a5519678d647eb6bd939db142a33bcfe66beaa472098e522cce92933  LatticeVale-Core/tests/v14.3.8-matrix-v10-online-order-fixtures.py
 441d67dd1cfa8fa7390e0ad13c3ddd6a87e4f357c3243e467d0c2c3f6b6e4808  LatticeVale-Core/tests/v14.3.9-profile-matrix-gateway-start-fixtures.py
 7fcdc9bba6b0a01ad9723b4f79a886e448b0c0e237bb0f16de1cc2d77a748daa  LatticeVale-Core/tests/v14.4.0-documentation-audit-fixtures.py
@@ -165,7 +165,7 @@ bd9104d8c1da13f293ad27e28f7f57b9ebb20a0790d76ed567abb2817de363b6  LatticeVale-Co
 790159ac7050a5b84f5bfcb02850fe435891846f858ecd384c5d06dd53bbb2f8  LatticeVale-Core/tests/v14.5.0-readonly-planner-fixtures.py
 09e7493e1d3ef315c8dbdeab3052d0671a19c771668200a467680c2fa70ae6ff  LatticeVale-Core/tests/v14.5.0-release-identity-fixtures.py
 ac286a6c723ed4039dcc192c3661d8678d7c135b5e41e23db434ce3fa473c51d  LatticeVale-Core/tests/v14.5.1-adaptive-hardware-matrix-fixtures.py
-c7aa3a6019818c6792d17fbd4475421e5c0e6a1cb9eee92f5c51037f86e34abb  LatticeVale-Core/tests/v14.5.1-delayed-gateway-reconcile-fixtures.py
+fc8bce931aa55aac1daec90c9ec6aef79c858baa5673345de63c0713ed132ebd  LatticeVale-Core/tests/v14.5.1-delayed-gateway-reconcile-fixtures.py
 e20527600b58ec185b167d340278c3a170746ff0dc3bee3958929e707110924c  LatticeVale-Core/tests/v14.5.1-documentation-audit-fixtures.py
 d0176c2597149361c4b0722995ba35f53cdd4ac29d685d86034ef45cfb064c1c  LatticeVale-Core/tests/v14.5.1-model-aware-ollama-honcho-fixtures.py
 e20e7e41f4b6addc7541429bf18bd0878260201158a6310de3a04db0a8a21731  LatticeVale-Core/tests/v14.5.1-option-topology-resource-fixtures.py
