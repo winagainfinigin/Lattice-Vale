@@ -67,6 +67,7 @@ printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 args="$*"
 case "$args" in
   *'exec hermes-agent /command/s6-svstat '*gateway-*)
+    printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG"
     if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
       printf 'up (pid 4242) 1 seconds\n'
     else
@@ -75,6 +76,7 @@ case "$args" in
     exit 0
     ;;
   *'exec /command/s6-svstat'*)
+    printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG"
     if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
       printf 'up (pid 4242) 1 seconds\n'
     else
