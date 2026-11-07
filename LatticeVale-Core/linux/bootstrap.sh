@@ -1080,12 +1080,16 @@ runuser --pty -u "$linux_user" -- env HOME="$user_home" USER="$linux_user" bash 
 # an application container. When unavailable, the static resource plan survives.
 if [[ -d /run/systemd/system ]] && command -v systemctl >/dev/null 2>&1 \
    && [[ "$linux_user" =~ ^[a-z_][a-z0-9_-]*$ && "$stack_dir" =~ ^/[a-zA-Z0-9/_-]+$ ]]; then
+  # Ask the same stack-owned, read-only resolved-Compose checker that guards
+  # runtime borrowing. Image-only Hermes overrides are safe; any other
+  # override, Compose failure, or missing controller leaves static limits on.
   if [[ "$(python3 - "$stack_dir/install-options.json" <<'PY_BURST_ENABLED'
 import json,sys
 try: print('true' if json.load(open(sys.argv[1])).get('containerResourceLimits') is True else 'false')
 except Exception: print('false')
 PY_BURST_ENABLED
-)" == true && ! -e "$stack_dir/compose.override.yaml" ]]; then
+)" == true ]] && runuser -u "$linux_user" -- /usr/bin/python3 \
+      "$stack_dir/resource-burst-controller.py" --check-override --stack "$stack_dir" >/dev/null 2>&1; then
     cat > /etc/systemd/system/latticevale-resource-burst.service <<EOF_BURST_SERVICE
 [Unit]
 Description=LatticeVale bounded resource-burst controller
@@ -1106,8 +1110,8 @@ EOF_BURST_SERVICE
 [Unit]
 Description=LatticeVale bounded resource-burst scheduling
 [Timer]
-OnBootSec=3min
-OnUnitInactiveSec=45s
+OnBootSec=1min
+OnUnitInactiveSec=25s
 AccuracySec=5s
 [Install]
 WantedBy=timers.target
