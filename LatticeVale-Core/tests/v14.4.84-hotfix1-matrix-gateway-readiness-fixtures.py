@@ -40,7 +40,7 @@ assert '/command/s6-svc -U "$service"' in reconcile
 default=manage[manage.index('reconcile_default_gateway_manage()'):manage.index('reconcile_profile_gateway_exact_manage()')]
 assert 'up) action=restart' in default
 assert 'hermes gateway "$action"' in default
-assert '/run/service/gateway-default' in default
+assert 'profile_gateway_s6_service_path_exact default' in default
 
 selected=manage[manage.index('start_selected_matrix_profile_gateways()'):manage.index('refresh_adaptive_resource_policy()')]
 assert selected.index('ensure_matrix_runtime_online_manage') < selected.index('reconcile_default_gateway_manage')

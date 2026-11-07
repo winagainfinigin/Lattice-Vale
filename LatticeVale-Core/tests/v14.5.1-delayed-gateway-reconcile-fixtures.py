@@ -59,6 +59,7 @@ mock = r'''set -e
 wait_calls=0
 calls=$(mktemp)
 profile_gateway_s6_state() { printf 'up\n'; }
+profile_gateway_s6_service_path_exact() { printf '/run/service/gateway-%s\n' "$1"; }
 wait_profile_gateway_up_exact() {
   wait_calls=$((wait_calls+1))
   [ "$wait_calls" -ge 2 ]
