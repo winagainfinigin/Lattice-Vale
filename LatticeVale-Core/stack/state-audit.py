@@ -266,7 +266,19 @@ def gateway_heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
 
 
 def exact_gateway_s6_pid(name: str) -> int | None:
-    rc, out = run(["docker", "exec", "hermes-agent", "/command/s6-svstat", f"/run/service/gateway-{name}"], timeout=15)
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", name):
+        return None
+    probe = '''
+name="$1"
+for root in /run/hermes-service /run/service; do
+  svc="$root/gateway-$name"
+  if [ -d "$svc" ]; then
+    exec /command/s6-svstat "$svc"
+  fi
+done
+exit 1
+'''
+    rc, out = run(["docker", "exec", "hermes-agent", "sh", "-c", probe, "sh", name], timeout=15)
     if rc != 0:
         return None
     match = re.match(r"^up \(pid ([0-9]+) pgid [0-9]+\)", out.strip())
