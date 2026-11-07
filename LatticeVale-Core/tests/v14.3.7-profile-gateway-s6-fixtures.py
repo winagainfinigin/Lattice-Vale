@@ -18,10 +18,10 @@ for token in (
     'profile_gateway_s6_state()',
     'profile_gateway_is_running_exact()',
     'quiesce_profile_gateway_for_credential_write()',
-    'for root in /run/hermes-service /run/service; do',
-    '/command/s6-svstat "$svc"',
-    'profile_gateway_s6_service_path_exact "$name"',
-    '/command/s6-svc -U "$service"',
+    'service="/run/service/gateway-$name"',
+    '/command/s6-svstat "$service"',
+    '/command/s6-svc -d "$service"',
+    '/command/s6-svc -U "/run/service/gateway-$name"',
     'quiesce_profile_gateway_for_credential_write "$name"',
 ):
     assert token in cfg, token
@@ -57,7 +57,7 @@ assert r.returncode == 0, r.stderr
 # stop path and the upstream dynamic-s6 race where normal stop/down requests
 # report success but the exact service remains up until its exact service PID
 # receives TERM. `sleep` is stubbed so the bounded wait loops run instantly.
-helper=cfg[cfg.index('profile_gateway_s6_service_path_exact() {'):cfg.index('verify_profiles() {')]
+helper=cfg[cfg.index('profile_gateway_s6_state() {'):cfg.index('verify_profiles() {')]
 with tempfile.TemporaryDirectory() as td:
     td=Path(td)
     state=td/'state'; log=td/'docker.log'; bindir=td/'bin'; bindir.mkdir()
@@ -72,10 +72,6 @@ case "$args" in
     else
       printf 'down (exitcode 0) 1 seconds, normally down\n'
     fi
-    exit 0
-    ;;
-  *"exec hermes-agent sh -c"*gateway-*)
-    case "$args" in *assistant*) printf '/run/service/gateway-assistant\n';; *) printf '/run/service/gateway-default\n';; esac
     exit 0
     ;;
   *"gateway stop"*)

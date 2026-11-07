@@ -159,9 +159,9 @@ with tempfile.TemporaryDirectory() as td:
     (stack / "data/hermes/profiles/assistant/gateway_state.json").write_text(json.dumps(standalone_record), encoding="utf-8")
     def fake_run(cmd, cwd=None, timeout=8):
         joined = " ".join(cmd)
-        if "s6-svstat" in joined and "default" in joined:
+        if "/run/service/gateway-default" in joined:
             return 0, "up (pid 5799 pgid 5799) 1 seconds"
-        if "s6-svstat" in joined and "assistant" in joined:
+        if "/run/service/gateway-assistant" in joined:
             return 0, "up (pid 5800 pgid 5800) 1 seconds"
         return 127, ""
     audit.run = fake_run
