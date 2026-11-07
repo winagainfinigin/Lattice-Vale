@@ -7,7 +7,7 @@ manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}, 'Hotfix 1 behavior must remain inherited by v14.4.85'
+assert version in {'14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}, 'Hotfix 1 behavior must remain inherited by v14.4.85'
 
 # The observed regression was: Synapse unavailable/Docker DNS not ready, gateway process
 # stays alive, audit reports RUNNING, Element loses communication. Probe from the actual
@@ -40,7 +40,7 @@ assert '/command/s6-svc -U "$service"' in reconcile
 default=manage[manage.index('reconcile_default_gateway_manage()'):manage.index('reconcile_profile_gateway_exact_manage()')]
 assert 'up) action=restart' in default
 assert 'hermes gateway "$action"' in default
-assert 'profile_gateway_s6_service_path_exact default' in default
+assert '/run/service/gateway-default' in default
 
 selected=manage[manage.index('start_selected_matrix_profile_gateways()'):manage.index('refresh_adaptive_resource_policy()')]
 assert selected.index('ensure_matrix_runtime_online_manage') < selected.index('reconcile_default_gateway_manage')
@@ -74,4 +74,3 @@ for script in (ROOT/'stack/manage.sh', ROOT/'stack/configure-stack.sh'):
     assert r.returncode == 0, r.stderr
 compile((ROOT/'stack/state-audit.py').read_text(encoding='utf-8'), str(ROOT/'stack/state-audit.py'), 'exec')
 print('v14.4.84 HOTFIX 1 MATRIX GATEWAY READINESS FIXTURES: PASS')
-

@@ -20,7 +20,7 @@ instructions = (ROOT / 'docs/Instructions.txt').read_text(encoding='utf-8')
 # v14.5.2 baseline: the first seven existing-install choices keep their wording/order.
 # v14.6.0 adds diagnostics as Option 8 without renumbering any baseline operation.
 menu = [
-    'Resume / repair installation - recommended; check latest supported managed software on every run and apply available updates only; preserve user overrides and state',
+    'Resume / repair installation - recommended; reuse previous choices and repair failed/incomplete/stale stages (targeted managed software also refreshes when the periodic window is due)',
     'Change installed components - reuse the stack but choose options again',
     'Verify installation only - read-only audit; make no changes',
     'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',
@@ -39,7 +39,7 @@ menu_ps = ps[menu_start:menu_end]
 
 # Option 1 baseline: preservation-first normal repair, no blanket same-version update.
 assert "1 { $installMode = 'resume' }" in ps
-assert ('Between refresh windows it remains local-first and is not a blanket update.' in ps) if (core/'VERSION.txt').read_text().strip() != '14.6.6' else ('Option 1 checks latest-supported managed software on every run' in ps)
+assert 'Between refresh windows it remains local-first and is not a blanket update.' in ps
 assert 'A bundle-version change alone remains local-first' in instructions
 
 # v14.6.1 extension: when the *stack itself* predates the current schema, migration is

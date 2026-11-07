@@ -51,9 +51,8 @@ assert "grep -q '^Status: pending-manual$'" in finalize
 # exists. -U intentionally clears a stale persistent down marker left by a prior stop.
 helper = cfg[cfg.index('start_or_restart_profile_gateway_exact()'):cfg.index('wait_profile_gateway_down_exact()')]
 assert 'gateway "$action"' in helper
-assert 'profile_gateway_s6_service_path_exact "$name"' in helper
-assert '/command/s6-svc -U "$service"' in helper
-assert '/command/s6-svc -r "$service"' in helper
+assert '/command/s6-svc -U "/run/service/gateway-$name"' in helper
+assert '/command/s6-svc -r "/run/service/gateway-$name"' in helper
 mhelper = manage[manage.index('start_profile_gateway_exact_manage()'):manage.index('stop_profile_gateway_exact_manage()')]
 assert 'profile_gateway_s6_state_exact "$name"' in mhelper
 assert '/command/s6-svc -U "$service"' in mhelper
@@ -133,7 +132,7 @@ LATTICEVALE_MATRIX_ROOM_VERSION=10
     assert r.returncode == 0, r.stdout+r.stderr
 
 # Execute the manage.sh start helper with an upstream-style named-profile CLI failure.
-# The fallback must touch only the assistant profile's dynamically resolved s6 slot and clear a stale down marker.
+# The fallback must touch only /run/service/gateway-assistant and clear a stale down marker.
 with tempfile.TemporaryDirectory() as td_raw:
     td=Path(td_raw); (td/'bin').mkdir(); state=td/'state'; log=td/'docker.log'
     state.write_text('down\n'); log.write_text('')
@@ -144,13 +143,12 @@ case "$*" in
   *s6-svstat*)
     if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then printf 'up (pid 4242) 1 seconds\n'; else printf 'down (exitcode 0) 1 seconds, normally down\n'; fi
     exit 0 ;;
-  *"exec hermes-agent sh -c"*gateway-*) printf '/run/service/gateway-assistant\n'; exit 0 ;;
   *"gateway start"*) exit 1 ;;
   *"s6-svc -U /run/service/gateway-assistant"*) printf 'up\n' > "$FAKE_DOCKER_STATE"; exit 0 ;;
   *) exit 0 ;;
 esac
 '''); os.chmod(td/'bin/docker',0o755)
-    start=manage.index('profile_gateway_s6_service_path_exact() {')
+    start=manage.index('profile_gateway_s6_state_exact() {')
     end=manage.index('\nstop_profile_gateway_exact_manage() {', start)
     helpers=manage[start:end]
     env=os.environ.copy(); env.update({'PATH':str(td/'bin')+os.pathsep+env['PATH'],'FAKE_DOCKER_LOG':str(log),'FAKE_DOCKER_STATE':str(state)})
@@ -215,4 +213,3 @@ with tempfile.TemporaryDirectory() as td_raw:
 
 assert 'matrix_cross_signing) [[ -e .matrix-cross-signing-pending ]] ;;' in cfg
 print('v14.3.30 default Matrix legacy-pending semantics fixtures: PASS')
-

@@ -5,7 +5,7 @@ import re
 
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}, VERSION
+assert VERSION in {'14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}, VERSION
 
 boot = (ROOT / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 compat = (ROOT / 'compatibility.conf').read_text(encoding='utf-8')
@@ -16,7 +16,7 @@ arch = (ROOT / 'stack/latticevale_arch.py').read_text(encoding='utf-8')
 m = re.search(r'^MANAGED_REPAIR_REFRESH_REVISION=(\d+)$', compat, re.M)
 assert m
 current_refresh_revision = int(m.group(1))
-assert current_refresh_revision == (5 if VERSION in {'14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'} else (4 if VERSION in {'14.6.0','14.6.1'} else (3 if VERSION == '14.5.47' else 2)))
+assert current_refresh_revision == (5 if VERSION in {'14.6.2','14.6.3','14.6.4','14.6.5'} else (4 if VERSION in {'14.6.0','14.6.1'} else (3 if VERSION == '14.5.47' else 2)))
 assert 'VERSION.txt alone is' in compat and 'not a managed-refresh trigger' in compat
 
 # Public v14.4.2 shipped refresh revision 1 and adaptive resource policy v2. A direct
@@ -28,25 +28,18 @@ assert current_refresh_revision > PUBLIC_14_4_2_REFRESH_REVISION
 assert '[POLICY_VERSION]=13' in cfg and '[RESOURCE_POLICY_MODE]=adaptive' in cfg
 assert PUBLIC_14_4_2_RESOURCE_POLICY < 5
 
-# v14.6.6 intentionally retires time-based refresh. Historical versions
-# continue to test the original age/revision-gated behavior below.
-if VERSION == '14.6.6':
-    assert 'now_epoch - last_refresh_epoch >= repair_refresh_interval_seconds' not in boot
-    assert 'No managed software refresh was requested or confirmed' in boot
-    assert 'LATTICEVALE_MANAGED_UPDATE_STATUS=(available|none|unknown)' in (ROOT/'Install-LatticeVale.ps1').read_text()
-else:
-    # Ordinary repair refresh gating must use marker validity, refresh revision, or age.
-    refresh_condition = re.search(
-        r'elif \[\[ ! "\$last_refresh_epoch" =~ \^\[0-9\]\+\$ \]\] \|\| '
-        r'\[\[ "\$last_refresh_revision" != "\$repair_refresh_revision" \]\] \|\| '
-        r'\(\( now_epoch - last_refresh_epoch >= repair_refresh_interval_seconds \)\); then',
-        boot,
-    )
-    assert refresh_condition, 'ordinary repair refresh condition changed unexpectedly'
-    assert '[[ "$last_refresh_installer_version" != "$installer_version" ]] ||' not in boot
-    assert 'Managed repair package/image/source refresh is due because the LatticeVale bundle changed' not in boot
-    assert 'bundle changed since the last managed component refresh' in boot
-    assert 'Resume / repair remains local-first' in boot
+# Ordinary repair refresh gating must use marker validity, refresh revision, or age.
+refresh_condition = re.search(
+    r'elif \[\[ ! "\$last_refresh_epoch" =~ \^\[0-9\]\+\$ \]\] \|\| '
+    r'\[\[ "\$last_refresh_revision" != "\$repair_refresh_revision" \]\] \|\| '
+    r'\(\( now_epoch - last_refresh_epoch >= repair_refresh_interval_seconds \)\); then',
+    boot,
+)
+assert refresh_condition, 'ordinary repair refresh condition changed unexpectedly'
+assert '[[ "$last_refresh_installer_version" != "$installer_version" ]] ||' not in boot
+assert 'Managed repair package/image/source refresh is due because the LatticeVale bundle changed' not in boot
+assert 'bundle changed since the last managed component refresh' in boot
+assert 'Resume / repair remains local-first' in boot
 
 # Pending refreshes are compatible across a version-only bump when the explicit refresh
 # policy revision is unchanged. Provenance is retained but must not force root APT/Docker
@@ -59,7 +52,7 @@ assert "printf 'POLICY_REVISION=%s\\nINSTALLER_VERSION=%s\\n'" in boot
 
 # Option 6 remains the explicit force-refresh escape hatch.
 assert 'if [[ "$force_managed_update" == true ]]' in boot
-assert ('Explicit Update / repair requested: forcing a latest-supported installer-managed package/image/source refresh now' in boot) if VERSION != '14.6.6' else ('A supported managed update was explicitly requested or confirmed' in boot)
+assert 'Explicit Update / repair requested: forcing a latest-supported installer-managed package/image/source refresh now' in boot
 
 # Policy-v3 migration remains an explicit repair obligation and must reconcile containers
 # only when the resource overlay actually changes.
@@ -70,7 +63,7 @@ assert 'Adaptive runtime/RAM policy is already current.' in cfg
 
 # v14.4.6 CPU audit fix remains present; a 14.4.5 -> 14.4.6 repair can adopt this file
 # without a managed image/source refresh when its current adaptive-policy state is healthy.
-if VERSION in {'14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}:
+if VERSION in {'14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}:
     assert 'def visible_cpu_count() -> int:' in arch
     assert 'os.sched_getaffinity(0)' in arch
     assert 'cpus = visible_cpu_count()' in arch

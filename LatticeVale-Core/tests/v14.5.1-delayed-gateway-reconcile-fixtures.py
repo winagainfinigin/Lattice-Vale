@@ -7,7 +7,7 @@ cfg = (ROOT / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
 readonly = (ROOT / 'stack/latticevale_readonly.py').read_text(encoding='utf-8')
 version = (ROOT / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}, version
+assert version in {'14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}, version
 
 # Live repair evidence showed the exact default gateway could need longer than the
 # former 20-second readiness window, while the bounded stack verifier later became
@@ -59,8 +59,6 @@ mock = r'''set -e
 wait_calls=0
 calls=$(mktemp)
 profile_gateway_s6_state() { printf 'up\n'; }
-profile_gateway_s6_service_path_exact() { printf '/run/service/gateway-%s\n' "$1"; }
-export -f profile_gateway_s6_service_path_exact
 wait_profile_gateway_up_exact() {
   wait_calls=$((wait_calls+1))
   [ "$wait_calls" -ge 2 ]
@@ -148,8 +146,6 @@ mock = r'''set -e
 gateway_state=absent
 calls=$(mktemp)
 profile_gateway_s6_state() { printf '%s\n' "$gateway_state"; }
-profile_gateway_s6_service_path_exact() { printf '/run/service/gateway-%s\n' "$1"; }
-export -f profile_gateway_s6_service_path_exact
 register_missing_gateway_slot_exact() { gateway_state=down; printf '%s\n' "register:$1" >> "$calls"; }
 wait_profile_gateway_up_exact() { return 0; }
 profile_gateway_log_tail_exact() { :; }

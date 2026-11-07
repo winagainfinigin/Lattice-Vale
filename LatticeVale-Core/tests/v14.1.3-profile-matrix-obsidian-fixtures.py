@@ -10,7 +10,7 @@ audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
 arch=(ROOT/'stack/latticevale_arch.py').read_text(encoding='utf-8')
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
 
-assert version in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}
+assert version in {'14.3.0','14.3.1','14.3.2','14.3.3','14.3.4','14.3.5','14.3.6','14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}
 assert 'schema = $compat.InstallOptionsSchema' in ps1
 
 # Profile/Matrix intent is one data structure: arbitrary installer profile name -> same Matrix localpart.
@@ -65,7 +65,7 @@ assert 'LATTICEVALE_PROVISIONING_STATE pending' in cfg
 assert 'LATTICEVALE_PROVISIONING_STATE complete' in cfg
 assert 'Resuming interrupted Matrix provisioning for Hermes profile' in cfg
 assert cfg.index('LATTICEVALE_PROVISIONING_STATE pending') < cfg.index('/_synapse/admin/v2/users/$encoded_user', cfg.index('stage_matrix_profiles()'))
-if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}:
+if version in {'14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}:
     assert 'LATTICEVALE_PROVISIONING_STATE pending-manual' in cfg
     assert 'MATRIX_SETUP_STATUS=$provisioning_state' in cfg
 else:
@@ -74,7 +74,7 @@ assert '[[ "$provisioning_state" == complete ]] || return 1' in cfg or 'pending-
 
 # Container/WSL execution scope: profile Hermes commands are docker exec, never host-only venv paths.
 assert 'start_or_restart_profile_gateway_exact "$name"' in cfg
-assert 'profile_gateway_s6_service_path_exact "$name"' in cfg and '/command/s6-svc -r "$service"' in cfg
+assert '/command/s6-svc -r "/run/service/gateway-$name"' in cfg
 assert '/opt/hermes/.venv/bin/hermes' not in ps1 + cfg + manage
 
 # The profile Matrix stage is a subshell, so EXIT cleanup/set -e cannot leak to an interactive parent shell.
@@ -99,7 +99,7 @@ assert 'profileMatrix' in audit
 assert 'matrixEnabled' in audit
 
 # Obsidian vault is requested during the initial component questionnaire and persisted through the hardened path converter.
-vault_prompt = ('Windows Obsidian vault folder (explicit Windows-local path required)' if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'} else ('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else 'Windows Obsidian vault folder [$defaultObsidianVault]'))
+vault_prompt = ('Windows Obsidian vault folder (explicit Windows-local path required)' if version in {'14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'} else ('Windows Obsidian vault folder [suggested: $defaultObsidianVault; Enter accepts]' if version in {'14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21'} else 'Windows Obsidian vault folder [$defaultObsidianVault]'))
 assert vault_prompt in ps1
 assert ps1.index(vault_prompt) < ps1.index("Read-Choice 'Install fully self-hosted Honcho memory?'")
 assert 'obsidianVaultWindowsPath = $obsidianVaultWindowsPath' in ps1
@@ -115,10 +115,9 @@ assert 'profile create "$name" --clone' not in cfg
 assert 'profile create "$name" --description "$desc"' in cfg
 assert 'hermes -p "$name" gateway stop' in cfg
 assert 'quiesce_profile_gateway_for_credential_write "$name"' in cfg
-assert '/command/s6-svstat' in cfg and 'for root in /run/hermes-service /run/service' in cfg
+assert '/command/s6-svstat' in cfg and '/run/service/gateway-$name' in cfg
 assert "gateway status 2>/dev/null | grep -qi 'running'" not in cfg
 assert 'PY_PROFILE_SAFE_CLONE' in cfg
 assert "prefixes=('TELEGRAM_','DISCORD_','SLACK_','MATRIX_'" in cfg
 
 print('V14.3.0 PROFILE MATRIX + OBSIDIAN FIXTURES: PASS')
-

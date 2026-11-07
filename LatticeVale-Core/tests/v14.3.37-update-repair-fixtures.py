@@ -7,7 +7,7 @@ CONF = (ROOT/'stack'/'configure-stack.sh').read_text(encoding='utf-8')
 MANAGE = (ROOT/'stack'/'manage.sh').read_text(encoding='utf-8')
 VERSION = (ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
 
-assert VERSION in {'14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}, VERSION
+assert VERSION in {'14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}, VERSION
 assert "Update / repair installer-managed software" in PS
 assert "$installMode = 'update'" in PS
 assert "$forceManagedUpdate = $true" in PS
@@ -23,7 +23,7 @@ assert "$forceManagedUpdateArg" in PS and "$bundleVersion, $forceManagedUpdateAr
 
 assert 'force_managed_update="${4:-false}"' in BOOT
 assert 'Update / repair is valid only for an existing installer-managed LatticeVale stack.' in BOOT
-assert ('Explicit Update / repair requested: forcing a latest-supported' in BOOT) if VERSION != '14.6.6' else ('A supported managed update was explicitly requested or confirmed' in BOOT)
+assert 'Explicit Update / repair requested: forcing a latest-supported' in BOOT
 assert 'repair_refresh_pending=true' in BOOT
 assert 'repair_root_refresh_needed=true' in BOOT
 assert 'upgrading/installing only LatticeVale prerequisite packages plus the managed Docker package set' in BOOT
@@ -32,7 +32,7 @@ assert "'forceManagedUpdate'" in CONF
 assert "latticevale_arch.py validate-options install-options.json" in CONF
 assert "INSTALL_OPTIONS_SCHEMA=24" in (ROOT/'compatibility.conf').read_text()
 assert "resume|reconfigure|update) return 0 ;;" in CONF
-assert ('Explicit Update / repair latest-supported package/image/source refresh completed' in CONF) if VERSION != '14.6.6' else ('Latest-supported package/image/source refresh completed' in CONF)
+assert "Explicit Update / repair latest-supported package/image/source refresh completed" in CONF
 # The transient operation mode must not invalidate the saved configuration checkpoint identity.
 assert "'forceManagedUpdate'" in CONF.split('OPTIONS_HASH=',1)[1].split('CURRENT_STAGE=',1)[0]
 # A forced managed refresh must bypass the relevant checkpoints and exercise every

@@ -9,7 +9,7 @@ ROOT=Path(__file__).resolve().parents[1]
 version=(ROOT/'VERSION.txt').read_text(encoding='utf-8').strip()
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage=(ROOT/'stack/manage.sh').read_text(encoding='utf-8')
-assert version in {'14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}
+assert version in {'14.3.7','14.3.8','14.3.9','14.3.10','14.3.11','14.3.12','14.3.13','14.3.14','14.3.15','14.3.16','14.3.17','14.3.18','14.3.19','14.3.20','14.3.21','14.3.22','14.3.23','14.3.24','14.3.25','14.3.26','14.3.27','14.3.28','14.3.29','14.3.30','14.3.31','14.3.36','14.3.37','14.3.38','14.3.40','14.3.41','14.3.42','14.3.43','14.4.0','14.4.1','14.4.2','14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5'}
 
 # The failure that produced v14.3.7 was caused by trusting Hermes' profile CLI
 # status after profile creation. Current Docker Hermes exposes one s6 slot per
@@ -18,10 +18,10 @@ for token in (
     'profile_gateway_s6_state()',
     'profile_gateway_is_running_exact()',
     'quiesce_profile_gateway_for_credential_write()',
-    'for root in /run/hermes-service /run/service; do',
-    '/command/s6-svstat "$svc"',
-    'profile_gateway_s6_service_path_exact "$name"',
-    '/command/s6-svc -U "$service"',
+    'service="/run/service/gateway-$name"',
+    '/command/s6-svstat "$service"',
+    '/command/s6-svc -d "$service"',
+    '/command/s6-svc -U "/run/service/gateway-$name"',
     'quiesce_profile_gateway_for_credential_write "$name"',
 ):
     assert token in cfg, token
@@ -57,7 +57,7 @@ assert r.returncode == 0, r.stderr
 # stop path and the upstream dynamic-s6 race where normal stop/down requests
 # report success but the exact service remains up until its exact service PID
 # receives TERM. `sleep` is stubbed so the bounded wait loops run instantly.
-helper=cfg[cfg.index('profile_gateway_s6_service_path_exact() {'):cfg.index('verify_profiles() {')]
+helper=cfg[cfg.index('profile_gateway_s6_state() {'):cfg.index('verify_profiles() {')]
 with tempfile.TemporaryDirectory() as td:
     td=Path(td)
     state=td/'state'; log=td/'docker.log'; bindir=td/'bin'; bindir.mkdir()
@@ -66,29 +66,12 @@ with tempfile.TemporaryDirectory() as td:
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 args="$*"
 case "$args" in
-  *'exec hermes-agent /command/s6-svstat '*gateway-*)
-    printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG"
+  *s6-svstat*)
     if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
       printf 'up (pid 4242) 1 seconds\n'
     else
       printf 'down (exitcode 0) 1 seconds, normally down\n'
     fi
-    exit 0
-    ;;
-  *'exec /command/s6-svstat'*)
-    printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG"
-    if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
-      printf 'up (pid 4242) 1 seconds\n'
-    else
-      printf 'down (exitcode 0) 1 seconds, normally down\n'
-    fi
-    exit 0
-    ;;
-  *"exec hermes-agent sh -c"*gateway-*)
-    case "$args" in
-      *assistant*) printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" | tee -a "$FAKE_DOCKER_LOG" ;;
-      *) printf '%s/gateway-default\n' "$FAKE_DOCKER_ROOT" | tee -a "$FAKE_DOCKER_LOG" ;;
-    esac
     exit 0
     ;;
   *"gateway stop"*)
@@ -115,7 +98,6 @@ exit 99
         'PATH':str(bindir)+os.pathsep+env['PATH'],
         'FAKE_DOCKER_STATE':str(state),
         'FAKE_DOCKER_LOG':str(log),
-        'FAKE_DOCKER_ROOT':'/run/service',
     })
     script='set -Eeuo pipefail\n'+helper+'\nquiesce_profile_gateway_for_credential_write assistant\n'
 
@@ -129,23 +111,6 @@ exit 99
     assert r.returncode == 0, r.stdout+r.stderr
     calls=log.read_text()
     assert '/run/service/gateway-assistant' in calls
-    assert 'kill -TERM' in calls and '4242' in calls
-    assert 'kill -KILL' not in calls
-
-    # Hermes v0.23 uses /run/hermes-service. The same exact stop path must use
-    # the discovered root without falling back to the legacy service directory.
-    env['FAKE_DOCKER_ROOT']='/run/hermes-service'
-    state.write_text('up\n'); log.write_text(''); env['FAKE_DOCKER_MODE']='normal'
-    r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
-    assert r.returncode == 0, r.stdout+r.stderr
-    assert '/run/hermes-service/gateway-assistant' in log.read_text()
-
-    state.write_text('up\n'); log.write_text(''); env['FAKE_DOCKER_MODE']='stuck'
-    r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
-    assert r.returncode == 0, r.stdout+r.stderr
-    calls=log.read_text()
-    assert '/run/hermes-service/gateway-assistant' in calls
-    assert '/run/service/gateway-assistant' not in calls
     assert 'kill -TERM' in calls and '4242' in calls
     assert 'kill -KILL' not in calls
 

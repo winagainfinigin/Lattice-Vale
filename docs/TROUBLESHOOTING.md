@@ -1,9 +1,9 @@
-# LatticeVale 14.6.6 Troubleshooting
+# LatticeVale 14.6.5 Troubleshooting
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.6 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.5 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
 ## Tailscale remote access reports PARTIAL or FAIL
@@ -43,7 +43,7 @@ CPU fallback remains valid when no GPU backend is usable.
 
 ## DirectML tensor probe passes but the model self-test has no HTTP response
 
-A passing tensor probe proves the WSL DirectX bridge, `torch_directml` import, selected adapter, and a simple device operation. It does **not** prove that every Transformers model/operator used during generation is supported. Current v14.6.6 retains the v14.6.0 protection for the pinned Qwen2/Qwen2.5 path from known DirectML causal-mask `masked_fill`/in-place-mask failures and fixes the fail-closed helper used when Ollama text fallback is disabled.
+A passing tensor probe proves the WSL DirectX bridge, `torch_directml` import, selected adapter, and a simple device operation. It does **not** prove that every Transformers model/operator used during generation is supported. Current v14.6.5 retains the v14.6.0 protection for the pinned Qwen2/Qwen2.5 path from known DirectML causal-mask `masked_fill`/in-place-mask failures and fixes the fail-closed helper used when Ollama text fallback is disabled.
 
 On Resume / repair, LatticeVale rebuilds/revalidates its isolated DirectML environment and retries the model self-test. If the HTTP request still terminates, the self-test now prints the bounded curl error and the last 120 lines of `logs/directml-gateway.log` before applying the configured fallback policy. With fallback `none`, this remains a hard fail-closed result; with a configured Ollama text fallback, LatticeVale may activate the bounded fallback marker and continue. Do not interpret a successful standalone system-Python tensor test as proof that the managed model-generation path is healthy.
 
@@ -66,15 +66,3 @@ Run `./manage.sh diagnose-policy`. Hardware/backend fingerprint changes intentio
 ## Patch ZIP versus full release
 
 The repository patch ZIP contains only changed/new repository files relative to the declared parent release. It is not a live-stack overlay. Existing installations should always be updated/repaired through the full release installer.
-
-### Resource bursts are not occurring
-
-Check `systemctl status latticevale-resource-burst.timer` and
-`journalctl -u latticevale-resource-burst.service -n 50 --no-pager` inside WSL.
-The scheduler deliberately leaves quotas at their safe Compose values when
-systemd/Docker/PSI evidence is unavailable, a selected container is missing,
-`compose.override.yaml` exists, a newly observed OOM/pressure event appears,
-or traffic has not met the sustained demand/idleness thresholds. A stale
-Docker OOM marker alone does not establish a new OOM event. Run the read-only
-`python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack`
-check for the exact policy/ownership snapshot before using Resume / repair.

@@ -266,19 +266,7 @@ def gateway_heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
 
 
 def exact_gateway_s6_pid(name: str) -> int | None:
-    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,31}", name):
-        return None
-    probe = '''
-name="$1"
-for root in /run/hermes-service /run/service; do
-  svc="$root/gateway-$name"
-  if [ -d "$svc" ]; then
-    exec /command/s6-svstat "$svc"
-  fi
-done
-exit 1
-'''
-    rc, out = run(["docker", "exec", "hermes-agent", "sh", "-c", probe, "sh", name], timeout=15)
+    rc, out = run(["docker", "exec", "hermes-agent", "/command/s6-svstat", f"/run/service/gateway-{name}"], timeout=15)
     if rc != 0:
         return None
     match = re.match(r"^up \(pid ([0-9]+) pgid [0-9]+\)", out.strip())
@@ -1185,16 +1173,6 @@ def main() -> int:
                     if not effective_limits:
                         policy_issues.append("effective Compose CPU/RAM policy could not be rendered for live-limit verification")
                     else:
-                        # v14 bounded borrowing is a separate transient layer.
-                        # Trust it only if the controller validates its full live
-                        # ID/limit snapshot; user Compose overlays retain priority.
-                        burst_valid = False
-                        burst_path = root / 'resource-burst-controller.py'
-                        if burst_path.is_file() and not (root / 'compose.override.yaml').exists():
-                            burst_rc, _burst_msg = run(
-                                [sys.executable, str(burst_path), '--verify', '--stack', str(root)],
-                                cwd=root, timeout=22)
-                            burst_valid = (burst_rc == 0)
                         for service_name, container_name in live_limit_pairs:
                             expected_bytes, expected_nano = effective_limits.get(service_name, (0, 0))
                             expected_bytes = int(expected_bytes or 0)
@@ -1210,11 +1188,11 @@ def main() -> int:
                                 continue
                             actual_bytes = int(live_state.get("memoryLimitBytes") or 0)
                             actual_nano = int(live_state.get("cpuLimitNanoCpus") or 0)
-                            if actual_bytes != expected_bytes and not burst_valid:
+                            if actual_bytes != expected_bytes:
                                 policy_issues.append(
                                     f"{container_name} live memory ceiling is {actual_bytes} bytes but effective Compose requires {expected_bytes} bytes; Resume / repair must reconcile Compose"
                                 )
-                            if actual_nano != expected_nano and not burst_valid:
+                            if actual_nano != expected_nano:
                                 policy_issues.append(
                                     f"{container_name} live CPU ceiling is {actual_nano} NanoCPUs but effective Compose requires {expected_nano} NanoCPUs; Resume / repair must reconcile Compose"
                                 )
@@ -1745,4 +1723,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

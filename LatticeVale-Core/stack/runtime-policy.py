@@ -7,7 +7,7 @@ from latticevale_arch import (
     atomic_write_json, build_runtime_policy_document, cpu_envelope_plan, cpu_profile, cpu_quota_plan, directml_context_recommendation, directml_cpu_thread_plan, directml_generation_limit,
     gpu_context_recommendation, gpu_coordination, hermes_floor_mib, host_memory_budget, ollama_model_floor,
     load_json, ollama_runtime_settings, parse_compatibility, parse_env_state, ram_context_recommendation,
-    ram_profile, resource_burst_metadata, runtime_tuning, schema_value, service_memory_plan,
+    ram_profile, runtime_tuning, schema_value, service_memory_plan,
     validate_install_options, validate_runtime_policy_document, validate_runtime_policy_state,
 )
 
@@ -31,7 +31,6 @@ def main()->int:
     q=sub.add_parser('cpu-plan'); q.add_argument('cpus',type=int); q.add_argument('matrix_gateways',type=int); q.add_argument('kanban_concurrency',type=int); q.add_argument('accel'); q.add_argument('matrix',type=tf); q.add_argument('searxng',type=tf); q.add_argument('qmd',type=tf); q.add_argument('ollama',type=tf); q.add_argument('honcho',type=tf); q.add_argument('directml',type=tf)
     q=sub.add_parser('cpu-envelope'); q.add_argument('cpus',type=int); q.add_argument('directml',type=tf)
     q=sub.add_parser('tuning'); q.add_argument('mem_mib',type=int); q.add_argument('cpus',type=int); q.add_argument('synapse_mib',type=int); q.add_argument('database_mib',type=int)
-    q=sub.add_parser('burst-metadata'); q.add_argument('budget_mib',type=int); q.add_argument('matrix',type=tf); q.add_argument('searxng',type=tf); q.add_argument('qmd',type=tf); q.add_argument('ollama',type=tf); q.add_argument('honcho',type=tf); q.add_argument('hermes_floor',type=int); q.add_argument('ollama_floor',type=int)
     q=sub.add_parser('service-plan'); q.add_argument('budget_mib',type=int); q.add_argument('matrix',type=tf); q.add_argument('searxng',type=tf); q.add_argument('qmd',type=tf); q.add_argument('ollama',type=tf); q.add_argument('honcho',type=tf); q.add_argument('hermes_floor',type=int); q.add_argument('ollama_floor',type=int)
     for name in ('write','verify'):
         q=sub.add_parser(name); q.add_argument('--stack',default='.'); q.add_argument('--compat',default='compatibility.conf'); q.add_argument('--state',default='.latticevale-resource-state'); q.add_argument('--output',default='data/latticevale/runtime-policy.json')
@@ -65,10 +64,6 @@ def main()->int:
             r=cpu_envelope_plan(a.cpus,a.directml); print(f"{r['systemHeadroomMilli']}:{r['directmlReserveMilli']}:{r['dockerEnvelopeMilli']}"); return 0
         if a.cmd=='tuning':
             r=runtime_tuning(a.mem_mib,a.cpus,a.synapse_mib,a.database_mib); print(f"{r['mallocArenaMax']}:{r['synapseCacheFactor']}:{r['postgresSharedBuffers']}"); return 0
-        if a.cmd=='burst-metadata':
-            r=resource_burst_metadata(a.budget_mib,matrix=a.matrix,searxng=a.searxng,qmd=a.qmd,ollama=a.ollama,honcho=a.honcho,hermes_floor=a.hermes_floor,ollama_floor=a.ollama_floor)
-            for k,v in r.items(): print(f'{k}={v["memoryFloorMiB"]}:{v["cpuShares"]}')
-            return 0
         if a.cmd=='service-plan':
             r=service_memory_plan(a.budget_mib,matrix=a.matrix,searxng=a.searxng,qmd=a.qmd,ollama=a.ollama,honcho=a.honcho,hermes_floor=a.hermes_floor,ollama_floor=a.ollama_floor)
             for k,v in r.items(): print(f'{k}={v}')

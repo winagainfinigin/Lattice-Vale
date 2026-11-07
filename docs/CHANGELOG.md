@@ -1,78 +1,5 @@
 # Changelog
 
-## 14.6.6 Hermes profile-gateway convergence hotfix — 2026-11-06
-
-- Resolve each profile's exact s6 gateway slot from the running Hermes image,
-  supporting /run/hermes-service and the legacy /run/service layout. Use that
-  path consistently for status, lifecycle recovery, and runtime audit checks.
-- Temporarily isolate installer-managed worker profiles while provider and Matrix
-  settings are applied. Persist original standalone values for interruption-safe
-  recovery, then restore the user's topology and request Hermes' profile rescan
-  before shared-gateway convergence checks and after multiplex migration.
-- Extend regression fixtures for both service roots, profile activation/resume,
-  migration convergence, and the source checksum manifest. Retain version 14.6.6
-  and existing persistent data formats.
-- Detailed implementation context: [`PATCH-NOTES.md`](PATCH-NOTES.md).
-
-## 14.6.6 portable CPU priorities and image-only override timer fix — 2026-11-05
-
-- Reweights canonical static CPU quotas toward Hermes and CPU/Vulkan Ollama
-  under the existing 90% Docker CPU envelope (65% with DirectML). The planner
-  scales across visible WSL CPUs, active services, backend, gateway count and
-  Kanban concurrency, while retaining per-service minima and host reserve.
-- Fixes installer/runtime divergence: verified Hermes-image-only Compose
-  overrides are eligible for resource timer installation; resource-changing
-  overrides retain static fallback.
-- Allows demand-matched CPU borrowing despite CPU PSI from quota throttling,
-  still guarding extra DirectML reserve lending under corroborated host load.
-- Reduces optional controller timer cadence to 25 seconds and cooldown to
-  45 seconds; requires sustained cgroup throttling samples for urgent action.
-- Updates portability tests, operational troubleshooting and release hashes.
-  Existing version, schema 13, memory floors, user data and host hardware
-  settings remain unchanged. Source tests do not establish live speed gains.
-
-
-## 14.6.6 demand-matched resource scheduling follow-up — 2026-11-05
-
-- Fixes unconditional donor quota reduction: CPU and RAM leases are transferred
-  only when a measured receiver has enough remaining burst capacity.
-- Balances responsiveness and utilization through priority-dependent CPU floors
-  rather than one uniform aggressive or overly restrictive reduction.
-- Protects memory cap decreases with cgroup `memory.current`, including charged
-  page cache; missing telemetry disables memory donation rather than guessing.
-- Allows fresh cgroup quota throttling to trigger an immediate CPU-only
-  rebalance during the normal cooldown. All conservation, DirectML, and model
-  floors remain in place.
-- Safely admits effective Hermes image-only Compose overrides without disabling
-  the burst controller; other user changes retain static fallback and precedence.
-- Extends the existing deterministic fixture with realistic donor/cap cases,
-  resource-neutral override tests, and broad CPU/RAM/DirectML portability sweeps.
-- Leaves v14.6.6, runtime schema 13, explicit WSL configuration, current host
-  memory reserve ratios, database identities, installer controls and services
-  unchanged. Source tests do not claim live performance gains.
-
-
-## 14.6.6 bounded-resource hotfix — 2026-11-04
-
-- Adds policy-v14 bounded, measurement-driven CPU and RAM rebalancing while
-  retaining canonical schema/policy v13 and its safe static fallback.
-- Adds per-container CPU shares and soft memory reservations, a non-root WSL
-  systemd controller with transaction recovery, pressure/OOM awareness, and
-  DirectML workload reserve protection.
-- Reduces the ordinary WSL host reservation from 12/15% to 10/13% and the
-  DirectML reservation ratio from 30% to 28%; all prior floors/caps and QMD
-  1024-MiB minima remain enforced.
-- Preserves user Compose overrides; repairs restore controller-derived limits
-  before canonical revalidation, and audits accept only exact validated
-  controller snapshots. Existing services are not restarted by the controller.
-- Includes controller-specific regression coverage, updated release tests, and
-  source manifest. Live Windows/WSL performance remains to be validated.
-
-## 14.6.6 — update-on-availability repair and Tailscale validation (2026-11-03)
-
-Existing-install Option 1 checks supported managed software versions every run, without relying on the legacy 30-day refresh window. It performs managed refresh only on demonstrated upstream or package drift; unknown availability is reported and does not automatically trigger updates. Option 6 remains the explicit force-refresh path. Preserves full 14.6.5 Tailscale IPv4/IPv6 verified-HTTPS correction, including proxy bypass and non-destructive handling of false-negative Windows listener checks. Maintains schema 24, policy 13, persistent data, user overrides, and previous Windows/WSL integration.
-
-
 #### 14.6.5 QMD memory-floor hotfix (same release version)
 
 Raised the canonical adaptive minimum for the QMD MCP/search role and CPU embedding indexer to 1024 MiB each, within the existing conserved container budget. This addresses repeated cgroup OOM kills during `embeddinggemma-300M-Q8_0` loading under a 304 MiB indexer ceiling. The existing canonical verifier invalidates undersized same-version allocations so Resume / repair applies changed Compose limits, while respecting user-owned overrides and refusing unsupported low-memory combinations. Added model-aware floor regression checks without touching existing identities or persisted QMD data.
@@ -2469,4 +2396,3 @@ The broader deterministic/static suite retains all prior v14.3.1–v14.3.7 hotfi
 ### 14.6.5 preservation correction
 
 The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.
-

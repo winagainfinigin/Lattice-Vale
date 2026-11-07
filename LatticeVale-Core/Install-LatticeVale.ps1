@@ -1649,11 +1649,8 @@ function Get-WindowsHostIpv4ForWsl([string]$Name) {
 
 function Get-LatticeValeNativeOllamaDirectPaths([string]$Name) {
     $native = Get-LatticeValeNativeServicePaths $Name
-    # Non-executable legacy state stays at its original per-user path to avoid
-    # changing direct-WSL transport identity during a security-only repair.
-    $stateDir = Join-Path $env:LOCALAPPDATA 'LatticeVale'
     return [pscustomobject]@{
-        State = (Join-Path $stateDir ("ollama-wsl-direct-$($native.RuleKey).json"))
+        State = (Join-Path $native.Directory ("ollama-wsl-direct-$($native.RuleKey).json"))
         RulePrefix = ("LatticeValeOllamaWslDirect-$($native.RuleKey)")
     }
 }
@@ -2609,12 +2606,7 @@ function Get-LatticeValeNativeServicePaths([string]$Name) {
     $taskName = Get-LatticeValeNativeServiceTaskName $Name
     $key = ([regex]::Replace($taskName, '[^A-Za-z0-9._-]', '_')).Trim('_')
     if ($key.Length -gt 96) { $key = $key.Substring(0, 96) }
-    # This scheduled task needs elevation for narrowly scoped firewall refreshes.
-    # Its executable script/configuration must not live in user-writable AppData:
-    # that combination would permit unelevated same-user script replacement.
-    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
-    if ([string]::IsNullOrWhiteSpace($programFiles)) { throw 'Protected Program Files directory is unavailable for the elevated native bridge.' }
-    $dir = Join-Path $programFiles 'LatticeVale-PrivilegedRelay'
+    $dir = Join-Path $env:LOCALAPPDATA 'LatticeVale'
     return [pscustomobject]@{
         Directory = $dir
         Script = (Join-Path $dir 'LatticeVale-WindowsNativeServiceRelay.ps1')
@@ -2622,81 +2614,6 @@ function Get-LatticeValeNativeServicePaths([string]$Name) {
         Log = (Join-Path $dir 'windows-native-service-relay.log')
         RuleKey = $key
         TaskName = $taskName
-    }
-}
-
-function Protect-LatticeValePrivilegedRelayDirectory([string]$Directory) {
-    # The elevated scheduled task must never run an AppData-writable script.
-    # Use a dedicated Program Files directory; do not modify neighboring app ACLs.
-    $programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
-    $expected = Join-Path $programFiles 'LatticeVale-PrivilegedRelay'
-    if (-not $Directory.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Refusing to stage the elevated native-service relay outside its protected installation directory.'
-    }
-    if (Test-Path -LiteralPath $Directory) {
-        $existing = Get-Item -LiteralPath $Directory -Force -ErrorAction Stop
-        if (-not $existing.PSIsContainer -or (($existing.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-            throw 'The protected native-service relay location is not an ordinary directory.'
-        }
-    } else {
-        New-Item -ItemType Directory -Path $Directory -Force -ErrorAction Stop | Out-Null
-    }
-    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
-    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
-    $inheritance = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-    $propagation = [System.Security.AccessControl.PropagationFlags]::None
-    $allow = [System.Security.AccessControl.AccessControlType]::Allow
-    $full = [System.Security.AccessControl.FileSystemRights]::FullControl
-    $acl = Get-Acl -LiteralPath $Directory -ErrorAction Stop
-    $acl.SetAccessRuleProtection($true, $false)
-    foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
-    $acl.SetOwner($admins)
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($admins,$full,$inheritance,$propagation,$allow)))
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system,$full,$inheritance,$propagation,$allow)))
-    Set-Acl -LiteralPath $Directory -AclObject $acl -ErrorAction Stop
-    # Fail closed if the ACL/owner could not actually be enforced.
-    $checked = Get-Acl -LiteralPath $Directory -ErrorAction Stop
-    if ($checked.Owner -notin @('BUILTIN\Administrators', $admins.Value)) {
-        try { if ($checked.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $admins.Value) { throw 'Unexpected privileged relay directory owner.' } }
-        catch { throw 'Could not verify the privileged relay directory owner.' }
-    }
-    foreach ($rule in @($checked.Access)) {
-        if ($rule.AccessControlType -ne 'Allow') { continue }
-        $sid = ''
-        try { $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }
-        if ($sid -notin @($admins.Value,$system.Value)) { throw 'Unexpected write-capable principal on privileged relay directory.' }
-    }
-}
-
-function Protect-LatticeValePrivilegedRelayFile([string]$FilePath, [string]$Directory) {
-    Protect-LatticeValePrivilegedRelayDirectory $Directory
-    if (-not $FilePath.StartsWith(($Directory.TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Refusing to trust a privileged relay file outside the protected directory.'
-    }
-    $file = Get-Item -LiteralPath $FilePath -Force -ErrorAction Stop
-    if ($file.PSIsContainer -or (($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0)) {
-        throw 'Refusing a redirected or non-file privileged relay artifact.'
-    }
-    $admins = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-32-544')
-    $system = New-Object System.Security.Principal.SecurityIdentifier('S-1-5-18')
-    $rights = [System.Security.AccessControl.FileSystemRights]::FullControl
-    $allow = [System.Security.AccessControl.AccessControlType]::Allow
-    $acl = Get-Acl -LiteralPath $FilePath -ErrorAction Stop
-    $acl.SetAccessRuleProtection($true,$false)
-    foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleAll($rule) }
-    $acl.SetOwner($admins)
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($admins,$rights,$allow)))
-    $acl.AddAccessRule((New-Object System.Security.AccessControl.FileSystemAccessRule($system,$rights,$allow)))
-    Set-Acl -LiteralPath $FilePath -AclObject $acl -ErrorAction Stop
-    $checked = Get-Acl -LiteralPath $FilePath -ErrorAction Stop
-    if ($checked.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $admins.Value) {
-        throw 'Privileged relay file owner verification failed.'
-    }
-    foreach ($rule in @($checked.Access)) {
-        if ($rule.AccessControlType -ne 'Allow') { continue }
-        $sid = ''
-        try { $sid = $rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { }
-        if ($sid -notin @($admins.Value,$system.Value)) { throw 'Unexpected privileged relay file access rule.' }
     }
 }
 
@@ -3213,13 +3130,7 @@ function Get-LatticeValeRepairOriginInfo(
     } else { $versionMismatch = $true }
     $schemaMismatch = ($optionSchema -ne $CurrentSchema)
     $metadataMismatch = (-not [string]::IsNullOrWhiteSpace($optionVersion) -and -not [string]::IsNullOrWhiteSpace($stateVersion) -and $optionVersion -ne $stateVersion)
-    # A same-schema 14.6.5 -> 14.6.6 maintenance upgrade is not a
-    # cumulative architecture migration. The regular repair still stages the
-    # current bundle; only a confirmed upstream update should trigger the
-    # expensive managed software refresh. Older releases keep universal repair.
-    $maintenanceUpgrade = ($BundleVersion -eq '14.6.6' -and $optionVersion -eq '14.6.5' -and
-        ($stateVersion -eq '' -or $stateVersion -eq '14.6.5') -and $optionSchema -eq $CurrentSchema)
-    $needsMigration = ($versionMismatch -and -not $maintenanceUpgrade) -or $schemaMismatch -or $metadataMismatch
+    $needsMigration = $versionMismatch -or $schemaMismatch -or $metadataMismatch
 
     $origin = if (-not [string]::IsNullOrWhiteSpace($optionVersion)) { $optionVersion } elseif (-not [string]::IsNullOrWhiteSpace($stateVersion)) { $stateVersion } else { 'legacy/unknown' }
     return [pscustomobject]@{
@@ -5165,7 +5076,7 @@ function Get-WindowsTailscaleStatus([string]$TailscaleExe) {
                     $parsed = $null
                     if (-not [System.Net.IPAddress]::TryParse([string]$candidate,[ref]$parsed)) { continue }
                     if (-not $ipv4 -and $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork -and ([string]$candidate).StartsWith('100.')) { $ipv4 = [string]$candidate }
-                    if (-not $ipv6 -and $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6 -and ([string]$candidate) -match '(?i)^fd7a:') { $ipv6 = [string]$candidate }
+                    if (-not $ipv6 -and $parsed.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6 -and ([string]$candidate).StartsWith('fd7a:')) { $ipv6 = [string]$candidate }
                 }
                 $certDomains = @()
                 if ($status.PSObject.Properties.Name -contains 'CertDomains' -and $status.CertDomains) {
@@ -5286,51 +5197,26 @@ function Ensure-WindowsTailscaleRemoteAccessPreferences([string]$TailscaleExe) {
     return [pscustomobject]$result
 }
 
-function Test-WindowsTailscaleDnsResolution([string]$DnsName, [string]$ExpectedIpv4, [string]$ExpectedIpv6 = '') {
+function Test-WindowsTailscaleDnsResolution([string]$DnsName, [string]$ExpectedIpv4) {
     $result = [ordered]@{ Status='FAIL'; SystemResolution=$false; MagicDnsResolution=$false; Detail='' }
-    if ([string]::IsNullOrWhiteSpace($DnsName) -or (-not $ExpectedIpv4 -and -not $ExpectedIpv6)) {
-        $result.Detail = 'A Tailscale DNS name and at least one tailnet IP address are required.'
+    if ([string]::IsNullOrWhiteSpace($DnsName) -or [string]::IsNullOrWhiteSpace($ExpectedIpv4)) {
+        $result.Detail = 'A Tailscale DNS name and IPv4 address are required.'
         return [pscustomobject]$result
     }
-    # A or AAAA is sufficient: an unavailable address family is not a DNS failure.
-    # Query each family's local Quad100 resolver instead of requiring IPv4.
-    $matchedFamily = ''
-    $magicFamily = ''
-    foreach ($family in @(
-        @{ Type='A'; Address=$ExpectedIpv4; Server='100.100.100.100'; Label='IPv4' },
-        @{ Type='AAAA'; Address=$ExpectedIpv6; Server='fd7a:115c:a1e0::53'; Label='IPv6' }
-    )) {
-        if (-not $family.Address) { continue }
-        $expectedIp = [System.Net.IPAddress]::Parse([string]$family.Address)
-        $systemMatch = $false
-        $magicMatch = $false
-        try {
-            $answers = @(Resolve-DnsName -Name $DnsName -Type $family.Type -DnsOnly -ErrorAction Stop)
-            $systemMatch = @($answers | Where-Object {
-                $actualIp = $null
-                [System.Net.IPAddress]::TryParse([string]$_.IPAddress,[ref]$actualIp) -and $actualIp.Equals($expectedIp)
-            }).Count -gt 0
-        } catch { }
-        try {
-            $answers = @(Resolve-DnsName -Name $DnsName -Type $family.Type -Server $family.Server -DnsOnly -ErrorAction Stop)
-            $magicMatch = @($answers | Where-Object {
-                $actualIp = $null
-                [System.Net.IPAddress]::TryParse([string]$_.IPAddress,[ref]$actualIp) -and $actualIp.Equals($expectedIp)
-            }).Count -gt 0
-        } catch { }
-        if ($systemMatch) { $result.SystemResolution = $true }
-        if ($magicMatch) { $result.MagicDnsResolution = $true; $magicFamily = $family.Label }
-        if ($systemMatch -and $magicMatch) { $matchedFamily = $family.Label; break }
-    }
-    if ($matchedFamily) {
-        $result.Status = 'PASS'
-        $result.Detail = "$DnsName resolves through Windows DNS and Tailscale MagicDNS using $matchedFamily."
+    try {
+        $answers = @(Resolve-DnsName -Name $DnsName -Type A -DnsOnly -ErrorAction Stop)
+        if (@($answers | Where-Object { [string]$_.IPAddress -eq $ExpectedIpv4 }).Count -gt 0) { $result.SystemResolution = $true }
+    } catch { }
+    try {
+        $answers = @(Resolve-DnsName -Name $DnsName -Type A -Server '100.100.100.100' -DnsOnly -ErrorAction Stop)
+        if (@($answers | Where-Object { [string]$_.IPAddress -eq $ExpectedIpv4 }).Count -gt 0) { $result.MagicDnsResolution = $true }
+    } catch { }
+    if ($result.SystemResolution -and $result.MagicDnsResolution) {
+        $result.Status = 'PASS'; $result.Detail = "$DnsName resolves to $ExpectedIpv4 through Windows DNS and the Tailscale MagicDNS resolver."
     } elseif ($result.MagicDnsResolution) {
-        $result.Status = 'PARTIAL'
-        $result.Detail = "Tailscale MagicDNS resolves $DnsName using $magicFamily, but matching Windows-system resolution was not verified."
+        $result.Status = 'PARTIAL'; $result.Detail = "MagicDNS resolves $DnsName to $ExpectedIpv4, but the Windows system resolver does not."
     } else {
-        $result.Status = 'FAIL'
-        $result.Detail = "Neither available address family resolved $DnsName through Tailscale MagicDNS."
+        $result.Status = 'FAIL'; $result.Detail = "The Tailscale MagicDNS resolver did not return $ExpectedIpv4 for $DnsName."
     }
     Write-RemoteAccessLog ("DNS validation: {0}; {1}" -f $result.Status,$result.Detail)
     return [pscustomobject]$result
@@ -5977,33 +5863,14 @@ function Register-LatticeValeBridgeRefreshTask([object]$Paths, [bool]$StartAtLog
     try {
         $powershell = Select-LatticeValeRelayPowerShell $Paths $EnsureStackRunning
         if ([string]::IsNullOrWhiteSpace($powershell)) { return $false }
-        # Only loopback TCP sockets and the user's existing WSL distro are needed;
-        # no administrator token is necessary for this passive Tailscale relay. PowerShell 7
+        # This task is intentionally long-running. Use the same elevated interactive
+        # user context that proved reliable during live troubleshooting. PowerShell 7
         # is preferred when available; Windows PowerShell 5.1 is accepted only when
         # this exact relay/config passes a bounded self-test under that engine.
-        # A long-running pwsh.exe scheduled action can leave a visible console even
-        # with -WindowStyle Hidden. Launch it with SW_HIDE from the windowless WSH
-        # process instead; keep the existing Limited principal and relay arguments.
-        $wscript = Join-Path $env:SystemRoot 'System32\wscript.exe'
-        if (-not (Test-Path -LiteralPath $wscript -PathType Leaf)) { throw 'Windows Script Host is unavailable for the hidden relay task.' }
-        $relayKey = [IO.Path]::GetFileNameWithoutExtension([string]$Paths.Config) -replace '^bridge-', ''
-        $hiddenLauncher = Join-Path $Paths.Directory ("LatticeVale-HiddenWslRelay-$relayKey.vbs")
-        $launcherCode = @'
-Option Explicit
-If WScript.Arguments.Count <> 4 Then WScript.Quit 2
-Dim q, command, shell
-q = Chr(34)
-command = q & WScript.Arguments(0) & q & " -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass -File " & q & WScript.Arguments(1) & q & " -ConfigPath " & q & WScript.Arguments(2) & q & " -WaitSeconds 120 -RefreshSeconds 15"
-If WScript.Arguments(3) = "1" Then command = command & " -EnsureDistroRunning"
-Set shell = CreateObject("WScript.Shell")
-WScript.Quit shell.Run(command, 0, True)
-'@
-        [System.IO.File]::WriteAllText($hiddenLauncher, ($launcherCode + "`r`n"), [System.Text.UTF8Encoding]::new($false))
-        $taskArgv = @('//B','//Nologo',$hiddenLauncher,$powershell,[string]$Paths.Script,[string]$Paths.Config, $(if ($EnsureStackRunning) { '1' } else { '0' }))
-        $taskArgLine = (($taskArgv | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }) -join ' ')
-        $action = New-ScheduledTaskAction -Execute $wscript -Argument $taskArgLine -WorkingDirectory $Paths.Directory
+        $argLine = (((Get-LatticeValeRelayArguments $Paths $EnsureStackRunning) | ForEach-Object { ConvertTo-WindowsProcessArgument ([string]$_) }) -join ' ')
+        $action = New-ScheduledTaskAction -Execute $powershell -Argument $argLine -WorkingDirectory $Paths.Directory
         $windowsIdentity = Get-CurrentWindowsIdentityName
-        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Limited
+        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Highest
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1)
         if ($StartAtLogon) {
             $atLogon = New-ScheduledTaskTrigger -AtLogOn -User $windowsIdentity
@@ -6015,7 +5882,7 @@ WScript.Quit shell.Run(command, 0, True)
             Register-ScheduledTask -TaskName $Paths.TaskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
         }
         $mode = if ($StartAtLogon -and $EnsureStackRunning) { 'at-logon stack recovery' } elseif ($StartAtLogon) { 'at-logon passive relay' } else { 'on-demand passive relay' }
-        Add-Content -LiteralPath (Join-Path $Paths.Directory 'native-relay.log') -Value ("{0} Registered relay task '{1}' using windowless WSH -> {2} at Limited run level ({3})." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Paths.TaskName,$powershell,$mode) -Encoding UTF8
+        Add-Content -LiteralPath (Join-Path $Paths.Directory 'native-relay.log') -Value ("{0} Registered relay task '{1}' using {2} at Highest run level ({3})." -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'),$Paths.TaskName,$powershell,$mode) -Encoding UTF8
         Write-Info "Registered Windows-native relay task '$($Paths.TaskName)' using $powershell ($mode mode)."
         return $true
     } catch {
@@ -6057,10 +5924,7 @@ function Remove-LatticeValeBridgeSupport([string]$Name, [switch]$PreserveArtifac
         Write-Info "Preserved failed relay script/config for diagnostics: $($paths.Script) ; $($paths.Config)"
         return
     }
-    [void](Stop-LatticeValeOwnedBridgeProcesses $paths)
     Remove-Item -LiteralPath $paths.Config,$paths.Script -Force -ErrorAction SilentlyContinue
-    $relayKey = [IO.Path]::GetFileNameWithoutExtension([string]$paths.Config) -replace '^bridge-', ''
-    Remove-Item -LiteralPath (Join-Path $paths.Directory ("LatticeVale-HiddenWslRelay-$relayKey.vbs")) -Force -ErrorAction SilentlyContinue
     # Remove the old v13.12 helper only from LatticeVale's own application-data directory.
     Remove-Item -LiteralPath (Join-Path $paths.Directory 'Refresh-HermesWslBridge.ps1') -Force -ErrorAction SilentlyContinue
 }
@@ -6070,7 +5934,7 @@ function Write-LatticeValeNativeOllamaBridgeConfig([string]$Name, [int]$BridgePo
     if ($TargetPort -lt 1 -or $TargetPort -gt 65535) { throw "Invalid native Ollama target port: $TargetPort" }
     if ([string]::IsNullOrWhiteSpace($TargetAddress)) { throw 'Native Ollama target address is empty.' }
     $paths = Get-LatticeValeNativeServicePaths $Name
-    Protect-LatticeValePrivilegedRelayDirectory $paths.Directory
+    New-Item -ItemType Directory -Path $paths.Directory -Force | Out-Null
     $source = Join-Path $PSScriptRoot 'windows\LatticeVale-WindowsNativeServiceRelay.ps1'
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Native Windows service relay source is missing: $source" }
     Copy-Item -LiteralPath $source -Destination $paths.Script -Force
@@ -6092,8 +5956,6 @@ function Write-LatticeValeNativeOllamaBridgeConfig([string]$Name, [int]$BridgePo
     }
     $json = $config | ConvertTo-Json -Depth 8
     [System.IO.File]::WriteAllText($paths.Config, ($json + "`r`n"), [System.Text.UTF8Encoding]::new($false))
-    Protect-LatticeValePrivilegedRelayFile $paths.Script $paths.Directory
-    Protect-LatticeValePrivilegedRelayFile $paths.Config $paths.Directory
     return $paths
 }
 
@@ -6122,8 +5984,6 @@ function Select-LatticeValeNativeServicePowerShell([object]$Paths) {
 
 function Register-LatticeValeNativeServiceTask([object]$Paths, [bool]$StartAtLogon) {
     try {
-        Protect-LatticeValePrivilegedRelayFile $Paths.Script $Paths.Directory
-        Protect-LatticeValePrivilegedRelayFile $Paths.Config $Paths.Directory
         Stop-ScheduledTask -TaskName $Paths.TaskName -ErrorAction SilentlyContinue
         Unregister-ScheduledTask -TaskName $Paths.TaskName -Confirm:$false -ErrorAction SilentlyContinue
         $powershell = Select-LatticeValeNativeServicePowerShell $Paths
@@ -6627,18 +6487,12 @@ function Get-WindowsTailscaleServePortState(
     $result.Targets = @($targets | Select-Object -Unique)
     $result.RootTargets = @($rootTargets | Select-Object -Unique)
     if ($ExpectedBackendPort -gt 0 -and $result.InUse) {
-        # A matching root route is not proof of exclusive ownership when other
-        # handlers on the same Serve listener point to unrelated backends.
-        # Never adopt/disable such a mixed user-managed Serve configuration.
-        $hasExpectedRoot = $false
-        $allTargetsOwned = ($result.Targets.Count -gt 0)
         foreach ($target in $result.RootTargets) {
-            if (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort) { $hasExpectedRoot = $true }
+            if (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort) {
+                $result.MatchesExpected = $true
+                break
+            }
         }
-        foreach ($target in $result.Targets) {
-            if (-not (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort)) { $allTargetsOwned = $false; break }
-        }
-        $result.MatchesExpected = ($hasExpectedRoot -and $allTargetsOwned)
     }
     return [pscustomobject]$result
 }
@@ -6718,67 +6572,45 @@ function Test-WindowsTailscaleServeListener(
     [string]$Ipv4,
     [string]$Ipv6 = ''
 ) {
-    # Windows TCP listener inventory is advisory: Tailscale can successfully serve
-    # HTTPS without exposing both IP families as separate MSFT_NetTCPConnection rows.
     $result = [ordered]@{ Pass=$false; Ipv4=$false; Ipv6=$false; Detail='' }
     try {
         $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction Stop)
-        if ($Ipv4) { $result.Ipv4 = @($listeners | Where-Object { [string]$_.LocalAddress -eq $Ipv4 -or [string]$_.LocalAddress -eq '0.0.0.0' }).Count -gt 0 }
-        if ($Ipv6) { $result.Ipv6 = @($listeners | Where-Object { [string]$_.LocalAddress -eq $Ipv6 -or [string]$_.LocalAddress -eq '::' }).Count -gt 0 }
-        $result.Pass = [bool]($result.Ipv4 -or $result.Ipv6)
-        $result.Detail = "HTTPS $Port listener observation: IPv4=$($result.Ipv4); IPv6=$($result.Ipv6); at least one=$($result.Pass)."
+        if ($Ipv4) { $result.Ipv4 = @($listeners | Where-Object { [string]$_.LocalAddress -eq $Ipv4 }).Count -gt 0 }
+        if ($Ipv6) { $result.Ipv6 = @($listeners | Where-Object { [string]$_.LocalAddress -eq $Ipv6 }).Count -gt 0 } else { $result.Ipv6 = $true }
+        $result.Pass = (($Ipv4 -and $result.Ipv4) -and $result.Ipv6)
+        $result.Detail = "HTTPS $Port listener: IPv4=$($result.Ipv4); IPv6=$($result.Ipv6)."
     } catch {
-        $result.Detail = "Could not inspect HTTPS $Port listener (advisory only): $($_.Exception.Message)"
+        $result.Detail = "Could not inspect HTTPS $Port listener: $($_.Exception.Message)"
     }
     Write-RemoteAccessLog $result.Detail
     return [pscustomobject]$result
 }
 
-# Retain the historical function name/signature for compatibility with the existing
-# callers and fixtures; an optional IPv6 address now provides a verified fallback.
 function Invoke-TailscaleHttpsProbeViaIpv4(
     [string]$DnsName,
     [string]$Ipv4,
     [int]$Port,
-    [string]$Path = '/',
-    [string]$Ipv6 = ''
+    [string]$Path = '/'
 ) {
     $result = [ordered]@{ Success=$false; HttpStatus=0; Body=''; Detail='' }
-    if (-not $DnsName -or (-not $Ipv4 -and -not $Ipv6) -or $Port -le 0) {
-        $result.Detail='Missing DNS name, tailnet IP address, or port'
-        return [pscustomobject]$result
-    }
+    if (-not $DnsName -or -not $Ipv4 -or $Port -le 0) { $result.Detail='Missing DNS name, IPv4, or port'; return [pscustomobject]$result }
     $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
     if (-not $curl) { $result.Detail='curl.exe is unavailable'; return [pscustomobject]$result }
     if (-not $Path.StartsWith('/')) { $Path = '/' + $Path }
     $url = (Get-TailscaleHttpsUrl $DnsName $Port).TrimEnd('/') + $Path
+    $resolve = "$DnsName`:$Port`:$Ipv4"
     $marker = '__LATTICEVALE_HTTP_STATUS__:'
-    $failures = [System.Collections.Generic.List[string]]::new()
-    foreach ($candidate in @($Ipv4,$Ipv6)) {
-        if (-not $candidate) { continue }
-        $ip = $null
-        if (-not [System.Net.IPAddress]::TryParse([string]$candidate,[ref]$ip)) { continue }
-        $isV6 = $ip.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetworkV6
-        $familyLabel = if ($isV6) { 'IPv6' } else { 'IPv4' }
-        $address = if ($isV6) { '[' + $ip.ToString() + ']' } else { $ip.ToString() }
-        $resolve = "$DnsName`:$Port`:$address"
-        # Bypass system proxies so success proves direct tailnet connectivity.
-        # --resolve keeps the original hostname for SNI and certificate checking.
-        $probe = Invoke-NativeProcessCapture $curl.Source @('--silent','--show-error','--noproxy','*','--connect-timeout','5','--max-time','15','--resolve',$resolve,'--write-out',("`n$marker%{http_code}"),$url) 20
-        $stdout = [string]$probe.StdOut
-        $statusMatch = [regex]::Match($stdout, [regex]::Escape($marker) + '(\d{3})\s*$')
-        $result.HttpStatus = 0
-        $result.Body = if ($statusMatch.Success) { $stdout.Substring(0,$statusMatch.Index).TrimEnd("`r","`n") } else { $stdout.Trim() }
-        if ($statusMatch.Success) { $result.HttpStatus = [int]$statusMatch.Groups[1].Value }
-        if ($probe.Success -and $result.HttpStatus -ge 200 -and $result.HttpStatus -lt 400) {
-            $result.Success = $true
-            $result.Detail = "$url returned HTTP $($result.HttpStatus) directly through $familyLabel $($ip.ToString()) with certificate validation enabled."
-            Write-RemoteAccessLog $result.Detail
-            return [pscustomobject]$result
-        }
-        $failures.Add("${familyLabel}: " + (Get-SafeDiagnosticExcerpt $probe.Text 240))
+    $probe = Invoke-NativeProcessCapture $curl.Source @('--silent','--show-error','--connect-timeout','5','--max-time','15','--resolve',$resolve,'--write-out',("`n$marker%{http_code}"),$url) 20
+    $stdout = [string]$probe.StdOut
+    $statusMatch = [regex]::Match($stdout, [regex]::Escape($marker) + '(\d{3})\s*$')
+    if ($statusMatch.Success) {
+        $result.HttpStatus = [int]$statusMatch.Groups[1].Value
+        $result.Body = $stdout.Substring(0,$statusMatch.Index).TrimEnd("`r","`n")
+    } else {
+        $result.Body = $stdout.Trim()
     }
-    $result.Detail = "$url did not pass direct HTTPS validation on any available IP family: " + ($failures -join '; ')
+    $result.Success = ($probe.Success -and $result.HttpStatus -ge 200 -and $result.HttpStatus -lt 400)
+    $result.Detail = if ($result.Success) { "$url returned HTTP $($result.HttpStatus) through $Ipv4 with certificate validation enabled." } else { "$url failed through ${Ipv4}: " + (Get-SafeDiagnosticExcerpt $probe.Text 420) }
     Write-RemoteAccessLog $result.Detail
     return [pscustomobject]$result
 }
@@ -6788,11 +6620,10 @@ function Test-MatrixTailscaleClientPathViaIpv4(
     [string]$DnsName,
     [string]$Ipv4,
     [int]$HttpsPort,
-    [string]$MatrixServerName,
-    [string]$Ipv6 = ''
+    [string]$MatrixServerName
 ) {
     $result = [ordered]@{ Pass=$false; Transport=$false; ClientApi=$false; MxidAutodiscovery=$false; Versions=$false; Discovery=$false; Login=$false; Detail='' }
-    $versions = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/_matrix/client/versions' $Ipv6
+    $versions = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/_matrix/client/versions'
     $result.Transport = $versions.Success
     if ($versions.Success) {
         try {
@@ -6800,7 +6631,7 @@ function Test-MatrixTailscaleClientPathViaIpv4(
             if (@($json.versions).Count -gt 0) { $result.Versions = $true }
         } catch { }
     }
-    $discovery = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/.well-known/matrix/client' $Ipv6
+    $discovery = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/.well-known/matrix/client'
     if ($discovery.Success) {
         try {
             $json = $discovery.Body | ConvertFrom-Json -ErrorAction Stop
@@ -6812,7 +6643,7 @@ function Test-MatrixTailscaleClientPathViaIpv4(
             }
         } catch { }
     }
-    $login = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/_matrix/client/v3/login' $Ipv6
+    $login = Invoke-TailscaleHttpsProbeViaIpv4 $DnsName $Ipv4 $HttpsPort '/_matrix/client/v3/login'
     if ($login.Success) {
         try {
             $json = $login.Body | ConvertFrom-Json -ErrorAction Stop
@@ -6946,8 +6777,7 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
     }
     Write-Info "Windows Tailscale client: RUNNING$(if ($tsStatus.DNSName) { " ($($tsStatus.DNSName))" } else { '' })"
     Write-Info "Windows Tailscale authentication: $(if ($tsStatus.Authenticated) { 'READY' } else { 'MISSING' })"
-    Write-Info "Windows Tailscale IPv4: $(if ($tsStatus.IPv4) { $tsStatus.IPv4 } else { 'UNAVAILABLE' })"
-    Write-Info "Windows Tailscale IPv6: $(if ($tsStatus.IPv6) { $tsStatus.IPv6 } else { 'UNAVAILABLE' })"
+    Write-Info "Windows Tailscale IPv4: $(if ($tsStatus.IPv4) { $tsStatus.IPv4 } else { 'MISSING' })"
     Write-Info "Tailscale HTTPS capability: $(if ($tsStatus.HttpsEnabled) { 'READY' } else { 'MISSING' })"
     $auditPrefs = Get-WindowsTailscalePreferences $tsExe
     if ($auditPrefs.Known) {
@@ -7087,7 +6917,6 @@ $requiredBundleFiles = @(
     'stack\gateway-multiplex-verify.py',
     'stack\manage.sh',
     'stack\managed-upstreams.py',
-    'stack\resource-burst-controller.py',
     'stack\state-audit.py',
     'stack\latticevale_readonly.py',
     'stack\repair-plan.py',
@@ -7194,7 +7023,7 @@ switch ($stackState) {
         if ($null -ne $existingOptions) { Show-WindowsRecoveryAudit $DistroName $linuxUser $existingOptions }
 
         $modeChoice = Read-MenuExplicit 'Choose how to handle the existing LatticeVale stack:' @(
-            'Resume / repair installation - recommended; check latest supported managed software on every run and apply available updates only; preserve user overrides and state',
+            'Resume / repair installation - recommended; reuse previous choices and repair failed/incomplete/stale stages (targeted managed software also refreshes when the periodic window is due)',
             'Change installed components - reuse the stack but choose options again',
             'Verify installation only - read-only audit; make no changes',
             'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',
@@ -7411,7 +7240,7 @@ if ($repairMaintenance) {
     } elseif ($forceManagedUpdate) {
         Write-Info 'Managed update enabled: this run forces latest-supported stable installer-managed application channels/sources now, while preserving compatible stateful majors and explicit overrides, then runs normal live repair verification. Persistent application data is preserved.'
     } else {
-        Write-Info 'Repair maintenance enabled: Option 1 checks latest-supported managed software on every run, and updates only when availability is established. Other repair modes remain local-first unless the user explicitly selects Update / repair or a proven migration requires it. Persistent data and user overrides are preserved.'
+        Write-Info "Repair maintenance enabled: Resume / repair can refresh installer-managed prerequisites, Docker packages, application images/builds, and supported stable sources when the $((Get-LatticeValeCompatibility).ManagedRepairRefreshDays)-day managed refresh is due (or when the refresh policy changes). Between refresh windows it remains local-first and is not a blanket update. Stateful compatibility boundaries, persistent application data, and explicit custom overrides are preserved."
     }
 }
 
@@ -8675,39 +8504,6 @@ $skipPreInstallBackup = $false
 if ($repairMaintenance) {
     $skipPreInstallBackup = Read-ChoiceExplicit 'Skip the pre-install safety backup for this run?' 'A verified managed-stack backup is normally created before this repair/reconciliation changes installer-managed files. Choose YES only if you accept proceeding without a fresh rollback point. This choice applies to this run only.' 'The verified pre-install safety backup will run.' $false $false
 }
-# v14.6.6: Option 1 performs a source-aware update availability check on every
-# ordinary resume. No age-gate or forced blanket refresh is used when all selected
-# managed components are current. A failed remote check is reported as unverified,
-# never interpreted as a successful update or used to override local-first repair.
-if ($repairMaintenance -and $installMode -eq 'resume' -and -not $forceManagedUpdate) {
-    $updateCheckFile = Join-Path $PSScriptRoot 'linux\check-managed-updates.py'
-    if (-not (Test-Path -LiteralPath $updateCheckFile -PathType Leaf)) {
-        throw "Required v14.6.6 managed-update checker is missing: $updateCheckFile"
-    }
-    Write-Step 'Checking latest-supported managed software for Option 1'
-    $updateCheck = Invoke-NativeProcessCapture 'wsl.exe' @('-d', $DistroName, '-u', 'root', '--', 'python3', '-', $stackLinuxPath) 600 $updateCheckFile
-    $updateVerdict = 'unknown'
-    if ($updateCheck.Success) {
-        $updateMatch = [regex]::Match([string]$updateCheck.StdOut, '(?m)^LATTICEVALE_MANAGED_UPDATE_STATUS=(available|none|unknown)\s*$')
-        if ($updateMatch.Success) { $updateVerdict = $updateMatch.Groups[1].Value }
-    }
-    foreach ($line in @(([string]$updateCheck.StdOut) -split "`n")) {
-        if ($line -match '^(UPDATE:|UNVERIFIED:)') { Write-Info $line.Trim() }
-    }
-    if ($updateVerdict -eq 'available') {
-        $forceManagedUpdate = $true
-        $options['forceManagedUpdate'] = $true
-        Write-Info 'At least one newer/missing managed component was detected. Running the existing compatibility-bounded controlled update and repair; explicit overrides are preserved.'
-    } elseif ($updateVerdict -eq 'none') {
-        Write-Info 'All checked installer-managed software is current; proceeding with local-first repair without pulling/rebuilding unchanged components.'
-    } else {
-        Write-Warning 'At least one update source could not be verified. Option 1 will preserve the existing stack and use local-first repair; Option 6 remains available for an explicit forced refresh.'
-        if (-not $updateCheck.Success) {
-            $detail = Get-SafeDiagnosticExcerpt $updateCheck.Text 480
-            if ($detail) { Write-Warning "Managed-update checker diagnostic: $detail" }
-        }
-    }
-}
 $skipUbuntuAptRefresh = $false
 $aptRefreshNeeded = (-not $repairMaintenance) -or $forceManagedUpdate
 if ($repairMaintenance -and -not $forceManagedUpdate) {
@@ -8724,15 +8520,19 @@ if [[ ! -f "$compat" || -L "$compat" ]]; then
 else
   # shellcheck disable=SC1090
   . "$compat"
-  # The 30-day gate is retired in 14.6.6. APT candidate changes are checked
-  # independently during Option 1's read-only availability phase. Here only an
-  # interrupted incompatible root-package phase or missing prerequisites requires
-  # another APT-index refresh prompt.
+  days="${MANAGED_REPAIR_REFRESH_DAYS:-30}"
   revision="${MANAGED_REPAIR_REFRESH_REVISION:-1}"
   pending="$stack/.repair-package-refresh-pending"
+  state="$stack/.repair-package-refresh"
   if [[ -f "$pending" ]]; then
     pending_revision="$(sed -n 's/^POLICY_REVISION=//p' "$pending" 2>/dev/null | head -n1 || true)"
     [[ "$pending_revision" == "$revision" ]] || need=true
+  else
+    last_epoch="$(sed -n 's/^LAST_SUCCESS_EPOCH=//p' "$state" 2>/dev/null | head -n1 || true)"
+    last_revision="$(sed -n 's/^POLICY_REVISION=//p' "$state" 2>/dev/null | head -n1 || true)"
+    if [[ ! "$days" =~ ^[0-9]+$ || ! "$revision" =~ ^[0-9]+$ || ! "$last_epoch" =~ ^[0-9]+$ || "$last_revision" != "$revision" ]] || (( $(date +%s) - last_epoch >= days * 86400 )); then
+      need=true
+    fi
   fi
 fi
 installed() { dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -qx 'install ok installed'; }
@@ -8915,7 +8715,7 @@ if (-not $mkdirProbe.Success) {
 try {
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'compatibility.conf') "$stageLinux/compatibility.conf" '0600'
     Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot 'linux\bootstrap.sh') "$stageLinux/linux/bootstrap.sh" '0600'
-    foreach ($file in @('compose.yaml','Dockerfile.qmd','configure-stack.sh','gateway-multiplex-verify.py','manage.sh','managed-upstreams.py','state-audit.py','latticevale_readonly.py','latticevale_arch.py','hardware-capabilities.py','backend-capabilities.py','runtime-policy.py','resource-burst-controller.py','diagnostics.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
+    foreach ($file in @('compose.yaml','Dockerfile.qmd','configure-stack.sh','gateway-multiplex-verify.py','manage.sh','managed-upstreams.py','state-audit.py','latticevale_readonly.py','latticevale_arch.py','hardware-capabilities.py','backend-capabilities.py','runtime-policy.py','diagnostics.py','repair-plan.py','audit-free.py','checkpoint-metadata.json','qmd-index-cycle.sh','native-ollama-relay.py','native-ollama-relay.sh','directml-gateway.py','directml-gateway.sh','directml-requirements.txt')) {
         Copy-LocalFileToWslRoot $DistroName (Join-Path $PSScriptRoot "stack\$file") "$stageLinux/stack/$file" '0600'
     }
     $optionsJson = $options | ConvertTo-Json -Depth 8 -Compress
@@ -9096,8 +8896,8 @@ if ($tailscale) {
                 $tailscaleFailureCategory = 'CLIENT'
                 Write-RemoteAccessLog $tailscalePrerequisiteFailure
                 Write-Warning $tailscalePrerequisiteFailure
-            } elseif (-not $tsStatus.IPv4 -and -not $tsStatus.IPv6) {
-                $tailscalePrerequisiteFailure = 'Windows Tailscale is Running but did not report either a valid tailnet IPv4 or IPv6 address.'
+            } elseif (-not $tsStatus.IPv4) {
+                $tailscalePrerequisiteFailure = 'Windows Tailscale is Running but did not report a valid 100.x tailnet IPv4 address.'
                 $tailscaleFailureCategory = 'CLIENT'
                 Write-RemoteAccessLog $tailscalePrerequisiteFailure
                 Write-Warning $tailscalePrerequisiteFailure
@@ -9112,7 +8912,7 @@ if ($tailscale) {
                 Write-RemoteAccessLog $tailscalePrerequisiteFailure
                 Write-Warning $tailscalePrerequisiteFailure
             } else {
-                $tailscaleDnsValidation = Test-WindowsTailscaleDnsResolution $tsStatus.DNSName $tsStatus.IPv4 $tsStatus.IPv6
+                $tailscaleDnsValidation = Test-WindowsTailscaleDnsResolution $tsStatus.DNSName $tsStatus.IPv4
                 if ($tailscaleDnsValidation.Status -eq 'FAIL') {
                     $tailscalePrerequisiteFailure = $tailscaleDnsValidation.Detail
                     $tailscaleFailureCategory = 'DNS'
@@ -9225,13 +9025,10 @@ if ($tailscale) {
             if (-not $tailscalePrerequisiteFailure -and $tailscaleDashboard -and $trackedDashboardPort -eq $tailscaleDashboardPort -and $dnsName) {
                 $dashboardPublicUrl = Get-TailscaleHttpsUrl $dnsName $tailscaleDashboardPort
                 $dashboardListener = Test-WindowsTailscaleServeListener $tailscaleDashboardPort $tsStatus.IPv4 $tsStatus.IPv6
-                $dashboardProbe = Invoke-TailscaleHttpsProbeViaIpv4 $dnsName $tsStatus.IPv4 $tailscaleDashboardPort '/' $tsStatus.IPv6
-                if ($dashboardProbe.Success -and -not $dashboardListener.Pass) {
-                    Write-RemoteAccessLog 'Dashboard HTTPS validation passed; Windows listener inventory was inconclusive and is advisory only.'
-                }
-                if (-not $dashboardProbe.Success) {
+                $dashboardProbe = Invoke-TailscaleHttpsProbeViaIpv4 $dnsName $tsStatus.IPv4 $tailscaleDashboardPort '/'
+                if (-not ($dashboardListener.Pass -and $dashboardProbe.Success)) {
                     $tailscaleFailureCategory = 'SERVE'
-                    Write-Warning "Dashboard Tailscale URL did not pass direct-IP HTTPS validation: $dashboardPublicUrl"
+                    Write-Warning "Dashboard Tailscale URL did not pass listener + direct-IP HTTPS validation: $dashboardPublicUrl"
                     [void](Disable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')
                     $trackedDashboardPort = 0
                 }
@@ -9250,16 +9047,13 @@ if ($tailscale) {
                 if ($matrixBaseUrlReady) {
                     $matrixListener = Test-WindowsTailscaleServeListener $tailscaleMatrixPort $tsStatus.IPv4 $tsStatus.IPv6
                     $matrixListenerReady = $matrixListener.Pass
-                    $matrixPath = Test-MatrixTailscaleClientPathViaIpv4 $matrixPublicUrl $dnsName $tsStatus.IPv4 $tailscaleMatrixPort $matrixIdentityDomain $tsStatus.IPv6
+                    $matrixPath = Test-MatrixTailscaleClientPathViaIpv4 $matrixPublicUrl $dnsName $tsStatus.IPv4 $tailscaleMatrixPort $matrixIdentityDomain
                     Write-Info ("Matrix remote diagnostics: transport={0}; client API={1}; MXID autodiscovery={2}." -f $matrixPath.Transport,$matrixPath.ClientApi,$matrixPath.MxidAutodiscovery)
                     $matrixVersionsReady = $matrixPath.Versions
                     $matrixDiscoveryReady = $matrixPath.Discovery
                     $matrixLoginReady = $matrixPath.Login
                 }
-                if ($matrixBaseUrlReady -and $matrixPath -and $matrixPath.Pass -and -not $matrixListenerReady) {
-                    Write-RemoteAccessLog 'Matrix HTTPS client validation passed; Windows listener inventory was inconclusive and is advisory only.'
-                }
-                if (-not ($matrixBaseUrlReady -and $matrixVersionsReady -and $matrixDiscoveryReady -and $matrixLoginReady)) {
+                if (-not ($matrixBaseUrlReady -and $matrixListenerReady -and $matrixVersionsReady -and $matrixDiscoveryReady -and $matrixLoginReady)) {
                     $tailscaleFailureCategory = 'MATRIX'
                     Write-Warning "Matrix Tailscale client validation failed (public_baseurl=$matrixBaseUrlReady, listener=$matrixListenerReady, versions=$matrixVersionsReady, discovery=$matrixDiscoveryReady, login=$matrixLoginReady): $matrixPublicUrl"
                     [void](Disable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')
@@ -9391,7 +9185,7 @@ if ($tailscale) {
         $tailscaleDetail = if ($tailscalePrerequisiteFailure) { "[$tailscaleFailureCategory] Remote-access prerequisite failed: $tailscalePrerequisiteFailure" } elseif ($tailscaleFailureCategory -ne 'NONE') { "[$tailscaleFailureCategory] One or more requested Windows Tailscale Serve/relay mappings did not complete or validate." } else { 'One or more requested Windows Tailscale Serve/relay mappings did not complete or validate.' }
     } else {
         $tailscaleState = 'PASS'
-        $tailscaleDetail = 'Windows Tailscale prerequisites, relay, direct certificate-validated HTTPS, and Matrix client API passed local checks. Windows listener inventory is advisory. Remote-device page validation is not part of installation; permitted tailnet devices use the configured service URL.'
+        $tailscaleDetail = 'Windows Tailscale prerequisites, relay, Serve listener, and Matrix client API passed local checks. Remote-device page validation is not part of installation; permitted tailnet devices use the configured service URL.'
     }
 } elseif ($finalTailscaleInfo.Count -gt 0) {
     $tailscaleState = 'PARTIAL'
@@ -9424,7 +9218,7 @@ if ($autoStart) {
         $action = New-ScheduledTaskAction -Execute $wslExe -Argument $taskArgs
         $windowsIdentity = Get-CurrentWindowsIdentityName
         $trigger = New-ScheduledTaskTrigger -AtLogOn -User $windowsIdentity
-        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Limited
+        $principal = New-ScheduledTaskPrincipal -UserId $windowsIdentity -LogonType Interactive -RunLevel Highest
         $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
         Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
     } catch {

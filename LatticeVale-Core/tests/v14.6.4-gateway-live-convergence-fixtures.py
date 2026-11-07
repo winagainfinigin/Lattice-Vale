@@ -59,43 +59,6 @@ for roster in (configure_roster, manage_roster):
     assert "exists but has no config.yaml" in roster
     assert "continue" in roster
 
-# Profile topology edits must be pushed to a running Hermes multiplexer before
-# exact convergence checks or standalone profile activation can race its watcher.
-rescan_configure = CONFIGURE[CONFIGURE.index("request_gateway_profile_rescan_configure() {"):CONFIGURE.index("verify_live_multiplex_gateway_configure() {")]
-rescan_manage = MANAGE[MANAGE.index("request_gateway_profile_rescan_manage() {"):MANAGE.index("verify_live_multiplex_gateway_manage() {")]
-for rescan in (rescan_configure, rescan_manage):
-    assert "rescan_gateway_profiles" in rescan
-    assert 'Path("/opt/data")' in rescan
-    assert "periodic-rescan" in rescan
-integrations = CONFIGURE[CONFIGURE.index("stage_integrations() {"):CONFIGURE.index("stage_reconcile() {")]
-assert integrations.index("request_gateway_profile_rescan_configure") > integrations.index("apply_matrix_runtime_env")
-profile_stage = CONFIGURE[CONFIGURE.index("stage_profiles() {"):CONFIGURE.index("stage_matrix_profiles()")]
-assert "prepare_managed_profiles_for_gateway_activation_configure" in profile_stage
-assert profile_stage.index("prepare_managed_profiles_for_gateway_activation_configure") < profile_stage.index("request_gateway_profile_rescan_configure")
-# Hermes profile creation can supply standalone=true even when LatticeVale's fresh
-# install options did not select an independent gateway. Record that generated
-# default before restoring temporary topology and verifying the shared roster.
-fresh_gateway_baseline = CONFIGURE[CONFIGURE.index("record_fresh_profile_gateway_baselines_configure() {"):CONFIGURE.index("prepare_managed_profiles_for_gateway_activation_configure() {")]
-assert '[[ "$(opt_text installerMode)" == fresh ]]' in fresh_gateway_baseline
-assert "worker.get('clone') is True" in fresh_gateway_baseline
-assert "state[name]={'present':False,'value':None}" in fresh_gateway_baseline
-assert profile_stage.index("record_fresh_profile_gateway_baselines_configure") < profile_stage.index("prepare_managed_profiles_for_gateway_activation_configure")
-matrix_profiles = CONFIGURE[CONFIGURE.index("stage_matrix_profiles() ("):CONFIGURE.index("stage_matrix_profile_cross_signing() {")]
-assert matrix_profiles.index("prepare_managed_profiles_for_gateway_activation_configure") < matrix_profiles.index("request_gateway_profile_rescan_configure") < matrix_profiles.index("ensure_matrix_online")
-assert matrix_profiles.index("request_gateway_profile_rescan_configure") < matrix_profiles.index("start_or_restart_profile_gateway_exact")
-profile_cross_signing = CONFIGURE[CONFIGURE.index("stage_matrix_profile_cross_signing() {"):CONFIGURE.index("stage_integrations() {")]
-assert profile_cross_signing.index("prepare_managed_profiles_for_gateway_activation_configure") < profile_cross_signing.index("request_gateway_profile_rescan_configure") < profile_cross_signing.index("start_or_restart_profile_gateway_exact")
-prepare_gateways = CONFIGURE[CONFIGURE.index("prepare_managed_profiles_for_gateway_activation_configure() {"):CONFIGURE.index("verify_live_multiplex_gateway_configure() {")]
-assert prepare_gateways.index("atomic_write(ownership") < prepare_gateways.index("for path,cfg,mode in changes")
-restore_start = CONFIGURE.index("# Restore only temporary standalone flags")
-reconcile_restore = CONFIGURE[restore_start:CONFIGURE.index("verify_live_resource_policy_limits", restore_start)]
-assert reconcile_restore.index("record_fresh_profile_gateway_baselines_configure") < reconcile_restore.index("PY_RESTORE_TEMP_GATEWAYS")
-assert reconcile_restore.index("PY_RESTORE_TEMP_GATEWAYS") < reconcile_restore.index("request_gateway_profile_rescan_configure") < reconcile_restore.index("wait_live_multiplex_gateway_configure 12")
-assert reconcile_restore.index("hermes gateway migrate --multiplex -y") < reconcile_restore.rindex("request_gateway_profile_rescan_configure") < reconcile_restore.index("if ! wait_live_multiplex_gateway_configure 15;")
-startup_restore = MANAGE[MANAGE.index("start_selected_matrix_profile_gateways() {"):MANAGE.index("refresh_adaptive_resource_policy() {")]
-assert startup_restore.index("PY_RESTORE_TEMP_GATEWAYS") < startup_restore.index("request_gateway_profile_rescan_manage") < startup_restore.index("wait_live_multiplex_gateway_manage 12")
-assert startup_restore.index("hermes gateway migrate --multiplex -y") < startup_restore.rindex("request_gateway_profile_rescan_manage") < startup_restore.index("if ! wait_live_multiplex_gateway_manage 15;")
-
 # Speculative checkpoint verification must be silent. A stopped/settling service is
 # a reason to run its stage, not a user-visible installer failure. Post-stage verification
 # remains unsuppressed and therefore retains authoritative diagnostics.
@@ -196,9 +159,9 @@ with tempfile.TemporaryDirectory() as td:
     (stack / "data/hermes/profiles/assistant/gateway_state.json").write_text(json.dumps(standalone_record), encoding="utf-8")
     def fake_run(cmd, cwd=None, timeout=8):
         joined = " ".join(cmd)
-        if "s6-svstat" in joined and "default" in joined:
+        if "/run/service/gateway-default" in joined:
             return 0, "up (pid 5799 pgid 5799) 1 seconds"
-        if "s6-svstat" in joined and "assistant" in joined:
+        if "/run/service/gateway-assistant" in joined:
             return 0, "up (pid 5800 pgid 5800) 1 seconds"
         return 127, ""
     audit.run = fake_run
