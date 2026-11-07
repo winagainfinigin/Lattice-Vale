@@ -1815,8 +1815,10 @@ for name in sorted(expected): print(name)
 PY_MANAGED_MULTIPLEX_CONFIGURE
 }
 
-# Explicitly refresh Hermes' in-memory profile roster after config.yaml changes.
-# A missing acknowledgement falls back to its periodic watcher and bounded checks.
+# Ask the already-running Hermes multiplexer to reconcile profile topology after
+# LatticeVale changes gateway.standalone. The Hermes watcher also rescans
+# periodically, so a missing acknowledgement is recoverable through the existing
+# bounded live-verification/migration path below.
 request_gateway_profile_rescan_configure() {
   local result
   if result="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from pathlib import Path; from gateway.control_socket import rescan_gateway_profiles; result = rescan_gateway_profiles(Path("/opt/data"), timeout=8.0); print(result if result is not None else "NO_ACK"); raise SystemExit(0 if result is not None else 2)' 2>&1)"; then
@@ -1827,9 +1829,70 @@ request_gateway_profile_rescan_configure() {
   return 0
 }
 
-# Temporarily isolate installer-managed worker profiles while provider/Matrix
-# state is written. Keep a durable rollback record so interrupted repair restores
-# the original user-selected gateway.standalone values.
+# Hermes currently creates named profiles with gateway.standalone enabled by
+# default. On a fresh LatticeVale install, that is an upstream bootstrap default,
+# not a user-selected topology. Record the intended final value before shared
+# gateway reconciliation so Resume / repair can remove this temporary exclusion.
+record_fresh_profile_gateway_baselines_configure() {
+  [[ "$(opt_text installerMode)" == fresh ]] || return 0
+  python3 - install-options.json data/hermes .installer-temporary-standalone-profiles.json <<'PY_RECORD_FRESH_PROFILE_GATEWAYS'
+from pathlib import Path
+import json,os,re,sys,tempfile,yaml
+options_path=Path(sys.argv[1]); root=Path(sys.argv[2]); ownership=Path(sys.argv[3])
+options=json.loads(options_path.read_text(encoding='utf-8'))
+workers=options.get('workers') if isinstance(options,dict) else None
+if not isinstance(workers,list): raise SystemExit('Fresh-install worker roster is malformed; preserving gateway configuration.')
+try: state=json.loads(ownership.read_text(encoding='utf-8')) if ownership.exists() else {}
+except Exception: raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
+if not isinstance(state,dict): raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
+changed=False
+default_cfg_path=root/'config.yaml'
+for worker in workers:
+    if not isinstance(worker,dict): raise SystemExit('Fresh-install worker record is malformed; preserving gateway configuration.')
+    name=str(worker.get('name') or '').strip()
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,31}',name): raise SystemExit(f'invalid managed profile name: {name!r}')
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file():
+        if path.parent.exists(): raise SystemExit(f"managed profile '{name}' exists but has no config.yaml")
+        continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    if not isinstance(cfg,dict): raise SystemExit(f"managed profile '{name}' config.yaml is not a mapping")
+    gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict): raise SystemExit(f"managed profile '{name}' gateway settings are malformed")
+    if gateway.get('standalone') is not True or name in state: continue
+
+    # Cloned profiles inherit the default profile's explicit topology. A profile
+    # created without cloning has no standalone choice in LatticeVale's install
+    # options, so its fresh-install default is the shared gateway.
+    if worker.get('clone') is True:
+        if default_cfg_path.is_file():
+            default_cfg=yaml.safe_load(default_cfg_path.read_text(encoding='utf-8')) or {}
+            if not isinstance(default_cfg,dict): raise SystemExit('Default Hermes config is not a mapping; preserving profile configuration.')
+            default_gateway=default_cfg.get('gateway') or {}
+            if not isinstance(default_gateway,dict): raise SystemExit('Default Hermes gateway settings are malformed; preserving profile configuration.')
+            state[name]={'present':'standalone' in default_gateway,'value':default_gateway.get('standalone')}
+        else:
+            state[name]={'present':False,'value':None}
+    else:
+        state[name]={'present':False,'value':None}
+    changed=True
+
+if changed:
+    fd,tmp=tempfile.mkstemp(prefix='.'+ownership.name+'.',dir=str(ownership.parent))
+    try:
+        with os.fdopen(fd,'w',encoding='utf-8') as handle:
+            json.dump(state,handle,indent=2,sort_keys=True); handle.write('\n')
+        os.chmod(tmp,0o600); os.replace(tmp,ownership)
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+PY_RECORD_FRESH_PROFILE_GATEWAYS
+}
+
+# Isolate all managed workers before any earlier Matrix stage can launch their
+# own gateways. Save the prior standalone values before writing profile configs so
+# Resume / repair can restore the user's topology after migration.
 prepare_managed_profiles_for_gateway_activation_configure() {
   python3 - data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY_PREPARE_MANAGED_PROFILE_GATEWAYS'
 from pathlib import Path
@@ -1852,7 +1915,8 @@ for name in names:
     gateway=cfg.get('gateway') or {}
     if not isinstance(gateway,dict): raise SystemExit(f"managed profile '{name}' gateway settings are malformed")
     if gateway.get('standalone') is True: continue
-    if name not in state: state[name]={'present':'standalone' in gateway,'value':gateway.get('standalone')}
+    if name not in state:
+        state[name]={'present':'standalone' in gateway,'value':gateway.get('standalone')}
     gateway['standalone']=True; cfg['gateway']=gateway
     changes.append((path,cfg,stat.S_IMODE(path.stat().st_mode)))
 
@@ -1866,9 +1930,12 @@ def atomic_write(path,data,mode):
         except OSError: pass
         raise
 
-# Persist ownership first so Resume / repair can restore state after interruption.
-if state: atomic_write(ownership,json.dumps(state,indent=2,sort_keys=True)+'\n',0o600)
-for path,cfg,mode in changes: atomic_write(path,yaml.safe_dump(cfg,sort_keys=False),mode)
+# Persist rollback ownership first; a process interruption during the subsequent
+# config updates still leaves enough information for Resume / repair to restore.
+if state:
+    atomic_write(ownership,json.dumps(state,indent=2,sort_keys=True)+'\n',0o600)
+for path,cfg,mode in changes:
+    atomic_write(path,yaml.safe_dump(cfg,sort_keys=False),mode)
 PY_PREPARE_MANAGED_PROFILE_GATEWAYS
 }
 
@@ -4939,14 +5006,12 @@ if m.get('provider')=='custom' and m.get('default')==sys.argv[2] and m.get('base
     p.write_text(yaml.safe_dump(cfg,sort_keys=False),encoding='utf-8')
 PY_REPAIR_CLONED_LOCAL_OLLAMA
   fi
+
 done
 if ((${#requested_workers[@]})); then
+  record_fresh_profile_gateway_baselines_configure
   prepare_managed_profiles_for_gateway_activation_configure
   request_gateway_profile_rescan_configure
-  wait_live_multiplex_gateway_configure 15 || {
-    echo 'Hermes shared gateway did not drop temporarily standalone worker profiles before later profile activation.' >&2
-    return 1
-  }
 fi
 return 0
 }
@@ -4956,13 +5021,12 @@ stage_matrix_profiles() (
   [[ "$(opt_bool matrix)" != true ]] && return 0
   mapfile -t matrix_workers < <(jq -c '.workers[]? | select(.matrix.enabled == true)' install-options.json)
   ((${#matrix_workers[@]})) || return 0
-  # Resume may enter this checkpoint without rerunning profile setup.
+
+  # This stage can be resumed independently after the profiles checkpoint was
+  # adopted. Reapply temporary isolation before any profile-owned gateway starts.
   prepare_managed_profiles_for_gateway_activation_configure
   request_gateway_profile_rescan_configure
-  wait_live_multiplex_gateway_configure 15 || {
-    echo 'Hermes shared gateway profile roster did not settle before Matrix profile activation.' >&2
-    return 1
-  }
+
   ensure_matrix_online 90
   [[ -s .matrix-info && -s secrets/matrix-bot.env ]] || { echo 'Default Matrix bootstrap must be healthy before profile-specific Matrix provisioning.' >&2; return 1; }
   mkdir -p secrets/matrix-profiles .matrix-profiles
@@ -5437,13 +5501,10 @@ stage_matrix_profile_cross_signing() {
   [[ "$(opt_bool matrix)" != true ]] && return 0
   mapfile -t matrix_workers < <(jq -c '.workers[]? | select(.matrix.enabled == true)' install-options.json)
   ((${#matrix_workers[@]})) || return 0
-  # Resume may enter here without rerunning Matrix provisioning.
+  # A resumed cross-signing stage may activate a profile gateway without rerunning
+  # the earlier Matrix provisioning stage; reconcile the profile set first.
   prepare_managed_profiles_for_gateway_activation_configure
   request_gateway_profile_rescan_configure
-  wait_live_multiplex_gateway_configure 15 || {
-    echo 'Hermes shared gateway profile roster did not settle before Matrix cross-signing.' >&2
-    return 1
-  }
   local worker name pdir penv secret recovery host_once token
   for worker in "${matrix_workers[@]}"; do
     name="$(jq -r '.name' <<<"$worker")"
@@ -6043,6 +6104,12 @@ fi
 if [[ "$(opt_bool matrix)" == true && -e .matrix-configured && -s secrets/matrix-bot.env ]]; then
   apply_matrix_runtime_env secrets/matrix-bot.env
 fi
+# The worker profiles were deliberately marked standalone while their individual
+# Matrix/provider setup ran. Reconcile that topology now so the default multiplexer
+# drops those profiles before their standalone s6 gateways are activated.
+if [[ -s .installer-managed-profiles ]]; then
+  request_gateway_profile_rescan_configure
+fi
 return 0
 }
 
@@ -6136,6 +6203,9 @@ fi
 # Hermes migration respects that user choice. The profile ownership list bounds the
 # restoration to profiles LatticeVale manages.
 if [[ -s .installer-managed-profiles ]]; then
+  # A fresh non-cloned profile may inherit Hermes' default standalone=true without
+  # an ownership marker. Record that generated default as temporary before restore.
+  record_fresh_profile_gateway_baselines_configure
   if [[ -s .installer-temporary-standalone-profiles.json ]]; then
     python3 - data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY_RESTORE_TEMP_GATEWAYS'
 from pathlib import Path
@@ -6155,8 +6225,10 @@ for name,original in state.items():
 PY_RESTORE_TEMP_GATEWAYS
   fi
 
-  # Restoring original standalone settings changes the roster served by the host
-  # multiplexer. Refresh it before deciding whether migration is required.
+  # Restoring the original standalone values changes the set the shared gateway
+  # must serve. Trigger the Hermes control-socket rescan before checking the live
+  # served_profiles list; otherwise a healthy multiplexer can remain stale until
+  # its periodic scan and falsely fail this bounded reconcile.
   request_gateway_profile_rescan_configure
 
   # A same-version repair may arrive after migration already converged, after a
@@ -6208,8 +6280,9 @@ PY_UNOWNED_GATEWAY_CANDIDATES
           echo "Hermes gateway migration exited with status $migration_rc; allowing a bounded settle window and checking exact live convergence before deciding repair failed." >&2
         fi
       fi
-      # Migration can change the eligible shared roster; refresh before the
-      # authoritative live served_profiles verification.
+      # Migration may stop the prior per-profile gateways and make their homes
+      # eligible for the shared process. Rescan once more after that transition,
+      # immediately before the authoritative served-profile verification.
       request_gateway_profile_rescan_configure
       if ! wait_live_multiplex_gateway_configure 15; then
         echo 'Live gateway verification failed after the bounded settle window; preserving Hermes migration/profile state for Resume / repair.' >&2
@@ -6488,4 +6561,3 @@ state_finish
 echo
 echo 'Recovery-aware configuration complete.'
 echo 'Run ./manage.sh audit for the state-aware verification report.'
-

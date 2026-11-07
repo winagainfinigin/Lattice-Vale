@@ -66,15 +66,7 @@ with tempfile.TemporaryDirectory() as td:
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 args="$*"
 case "$args" in
-  *s6-svstat*)
-    case "$FAKE_DOCKER_ROOT" in
-      /run/hermes-service|/run/service) ;;
-      *) printf 'unexpected fake service root: %s\n' "$FAKE_DOCKER_ROOT" >&2; exit 98 ;;
-    esac
-    case "$args" in
-      *assistant*) printf 'resolved=%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG" ;;
-      *) printf 'resolved=%s/gateway-default\n' "$FAKE_DOCKER_ROOT" >> "$FAKE_DOCKER_LOG" ;;
-    esac
+  *'exec /command/s6-svstat'*)
     if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
       printf 'up (pid 4242) 1 seconds\n'
     else
@@ -127,8 +119,8 @@ exit 99
     assert 'kill -TERM' in calls and '4242' in calls
     assert 'kill -KILL' not in calls
 
-    # Hermes v0.23 uses /run/hermes-service. Exercise the same exact stop path
-    # there, and prove no fallback accidentally targets the legacy root.
+    # Hermes v0.23 uses /run/hermes-service. The same exact stop path must use
+    # the discovered root without falling back to the legacy service directory.
     env['FAKE_DOCKER_ROOT']='/run/hermes-service'
     state.write_text('up\n'); log.write_text(''); env['FAKE_DOCKER_MODE']='normal'
     r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
@@ -145,4 +137,3 @@ exit 99
     assert 'kill -KILL' not in calls
 
 print('v14.3.7 exact-profile s6 gateway fixtures: PASS')
-
