@@ -32,7 +32,7 @@ d1a864fdd17db474b41f436ea746a9b36a74db901291294030aedce6dc5ed111  LatticeVale-Co
 b30b4538394033e0de69003532ad604ecf49f81ce079a42a398537e1a18717eb  LatticeVale-Core/stack/hardware-capabilities.py
 6f8378888a1f63e2594a875cfd68a3755ce1742a9ccfc9cc9ef9686d0921109a  LatticeVale-Core/stack/latticevale_arch.py
 33c50d94ad611a722e843da47fa107c5e378f8e119e757692f3696ba1d5efdb5  LatticeVale-Core/stack/latticevale_readonly.py
-2f5c6444b2e44dec1cb8f996885aa39753e5b9f36bbf21f80c64037bcb4c2afb  LatticeVale-Core/stack/manage.sh
+1d6ace54c93a13509bf2bf44574736121c19c4ca3f411b2f781f2e05162945b8  LatticeVale-Core/stack/manage.sh
 fa912cb240ac4e239427c6ca866b2fa8e283639a40315fdc8d6867631dbb7764  LatticeVale-Core/stack/managed-upstreams.py
 ac1d928b07d18192f370814f2124ddfa219bffc3e300a0d4cb835583a0b3e9d7  LatticeVale-Core/stack/native-ollama-relay.py
 32a36db4f3d9da46ca8f7a5d22ab51f61fd633d65579b905cc5b2e6c3d9a5ecf  LatticeVale-Core/stack/native-ollama-relay.sh
@@ -138,7 +138,7 @@ c71e6bbc3270a26fc3af1facd60527235c432c5fb19df0f0927c8bcdaa484ee1  LatticeVale-Co
 3d6f7608568d2082226bf682f621ab89377763e7dc8942e1f674dc245a86ac31  LatticeVale-Core/tests/v14.3.5-gpu-prerequisite-repair-fixtures.py
 a845a54f46374790b541a8dcabf8c744d0ebe5247b2629d6d8f50b6c5c08d09f  LatticeVale-Core/tests/v14.3.5-native-windows-ollama-fixtures.py
 e69a0008f84a5fd2f57bd002b2e3c5978ae9b26a17248d85f2512021489d90ea  LatticeVale-Core/tests/v14.3.6-matrix-first-bootstrap-pipefail-fixtures.py
-5cea5130c44aa025b91e782adc8b313c9a9f47fe49f3e43cffc396eafffb732a  LatticeVale-Core/tests/v14.3.7-profile-gateway-s6-fixtures.py
+d3dec95841a63080c71213decc07efa2fa8a4bd94ff5c487227244529f167671  LatticeVale-Core/tests/v14.3.7-profile-gateway-s6-fixtures.py
 87cfa5c2a5519678d647eb6bd939db142a33bcfe66beaa472098e522cce92933  LatticeVale-Core/tests/v14.3.8-matrix-v10-online-order-fixtures.py
 441d67dd1cfa8fa7390e0ad13c3ddd6a87e4f357c3243e467d0c2c3f6b6e4808  LatticeVale-Core/tests/v14.3.9-profile-matrix-gateway-start-fixtures.py
 7fcdc9bba6b0a01ad9723b4f79a886e448b0c0e237bb0f16de1cc2d77a748daa  LatticeVale-Core/tests/v14.4.0-documentation-audit-fixtures.py
@@ -189,7 +189,7 @@ fe893142d7318117d52fa2998b3001c85f5eab14d541a09dab054f686d0ed63d  LatticeVale-Co
 a36263c175145f52e5f0f1e711774a0e96ae56bf27608b39c953b29a3f712641  LatticeVale-Core/tests/v14.6.2-hotfix-bootstrap-staging-fixtures.py
 63273a205452ceb30babd5315fdf4bbb203994f84df14ab364de043d3e58e889  LatticeVale-Core/tests/v14.6.2-latest-supported-upstream-fixtures.py
 e344336f9667233c0a5ddfb156607d5f35922ff56fc4ae70cbfc66f53bbe4991  LatticeVale-Core/tests/v14.6.3-matrix-identity-gateway-hotfix-fixtures.py
-a0a66ebade6f71f5bc1ab20649fe97862c41de313599a2de3cefab716da0e4c2  LatticeVale-Core/tests/v14.6.4-gateway-live-convergence-fixtures.py
+bbef78efe01a309f673152a6973ff42c78f989d8e155065ee05e924a5bb77e4d  LatticeVale-Core/tests/v14.6.4-gateway-live-convergence-fixtures.py
 eff877cfa14224c983efb470cff73438b5301b090aa7cbdd6a4bdf0b1450492c  LatticeVale-Core/tests/v14.6.5-preservation-hotfix-fixtures.py
 24cde6f9a1e9490fe08f065b0a4b912767f219b5c16afc644236099f4de4cfc6  LatticeVale-Core/tests/v14.6.6-availability-refresh-fixtures.py
 d44a254520c58fab34fb8d16b5ce4200275d8455e19b645b0e7128eb977591cb  LatticeVale-Core/tests/v14.6.6-burst-resource-fixtures.py

@@ -80,7 +80,7 @@ assert '[[ "$(opt_text installerMode)" == fresh ]]' in fresh_gateway_baseline
 assert "worker.get('clone') is True" in fresh_gateway_baseline
 assert "state[name]={'present':False,'value':None}" in fresh_gateway_baseline
 assert profile_stage.index("record_fresh_profile_gateway_baselines_configure") < profile_stage.index("prepare_managed_profiles_for_gateway_activation_configure")
-matrix_profiles = CONFIGURE[CONFIGURE.index("stage_matrix_profiles() ("):CONFIGURE.index("stage_matrix_cross_signing()")]
+matrix_profiles = CONFIGURE[CONFIGURE.index("stage_matrix_profiles() ("):CONFIGURE.index("stage_matrix_profile_cross_signing() {")]
 assert matrix_profiles.index("prepare_managed_profiles_for_gateway_activation_configure") < matrix_profiles.index("request_gateway_profile_rescan_configure") < matrix_profiles.index("ensure_matrix_online")
 assert matrix_profiles.index("request_gateway_profile_rescan_configure") < matrix_profiles.index("start_or_restart_profile_gateway_exact")
 profile_cross_signing = CONFIGURE[CONFIGURE.index("stage_matrix_profile_cross_signing() {"):CONFIGURE.index("stage_integrations() {")]

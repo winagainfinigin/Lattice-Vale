@@ -66,6 +66,14 @@ with tempfile.TemporaryDirectory() as td:
 printf '%s\n' "$*" >> "$FAKE_DOCKER_LOG"
 args="$*"
 case "$args" in
+  *'exec hermes-agent /command/s6-svstat '*gateway-*)
+    if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
+      printf 'up (pid 4242) 1 seconds\n'
+    else
+      printf 'down (exitcode 0) 1 seconds, normally down\n'
+    fi
+    exit 0
+    ;;
   *'exec /command/s6-svstat'*)
     if [ "$(cat "$FAKE_DOCKER_STATE")" = up ]; then
       printf 'up (pid 4242) 1 seconds\n'
