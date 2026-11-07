@@ -1,3 +1,14 @@
+> **14.6.6 Hermes gateway service-root hotfix:** Hermes may expose dynamic
+> profile gateway slots under `/run/hermes-service` instead of the legacy
+> `/run/service` directory. The hotfix discovers the exact existing profile slot
+> from the running container and uses that path for s6 status, start/restart,
+> stop, and audit verification. This prevents a healthy gateway from appearing
+> absent and avoids unnecessary slot re-registration during fresh install or
+> Resume / repair. The change retains release version 14.6.6 and existing data
+> schemas. Regression fixtures cover both supported directory layouts and the
+> installer/resume lifecycle; the source checksum manifest is refreshed. See
+> the canonical chronology in [CHANGELOG.md](CHANGELOG.md).
+
 > **14.6.6 demand-matched resource scheduler follow-up hotfix:** Corrects the
 > original v14 scheduler's unconditional idle-donor quota reductions by
 > reassigning only capacity that a verified busy receiver can accept. Uses

@@ -1,5 +1,16 @@
 # Changelog
 
+## 14.6.6 Hermes gateway service-root hotfix — 2026-11-06
+
+- Resolve each Hermes profile's exact s6 gateway slot from the service directory
+  exposed by the running Hermes image, supporting `/run/hermes-service` and the
+  legacy `/run/service` layout. Apply the resolved path consistently to status,
+  lifecycle recovery, and runtime audit checks so a valid gateway is not mistaken
+  for a missing slot during install or Resume / repair.
+- Keep the existing 14.6.6 version and data schemas. Update the source manifest
+  and regression fixtures for both service-root layouts.
+- Detailed implementation context: [`PATCH-NOTES.md`](PATCH-NOTES.md).
+
 ## 14.6.6 portable CPU priorities and image-only override timer fix — 2026-11-05
 
 - Reweights canonical static CPU quotas toward Hermes and CPU/Vulkan Ollama
