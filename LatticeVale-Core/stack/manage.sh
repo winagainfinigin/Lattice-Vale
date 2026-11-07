@@ -666,53 +666,20 @@ selected_matrix_profile_names() {
   return 0
 }
 
-profile_gateway_s6_service_path_exact() {
-  local name="$1" service
-  [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || return 1
-  if ! service="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent sh -c '
-name="$1"
-for root in /run/hermes-service /run/service; do
-  svc="$root/gateway-$name"
-  if [ -d "$svc" ]; then
-    printf "%s\n" "$svc"
-    exit 0
-  fi
-done
-exit 1
-' sh "$name" 2>/dev/null)"; then
-    return 1
-  fi
-  case "$service" in
-    "/run/hermes-service/gateway-$name"|"/run/service/gateway-$name") printf '%s\n' "$service" ;;
-    *) return 1 ;;
-  esac
-}
-
-profile_gateway_s6_status_exact() {
-  local name="$1" out
-  [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || return 1
+profile_gateway_s6_state_exact() {
+  local name="$1" service out
+  service="/run/service/gateway-$name"
   if ! out="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent sh -c '
-name="$1"
-for root in /run/hermes-service /run/service; do
-  svc="$root/gateway-$name"
-  if [ -d "$svc" ]; then
-    exec /command/s6-svstat "$svc"
-  fi
-done
-printf "absent\\n"
-' sh "$name" 2>/dev/null)"; then
+svc="$1"
+if [ ! -d "$svc" ]; then
+  printf "absent\\n"
+  exit 0
+fi
+exec /command/s6-svstat "$svc"
+' sh "$service" 2>/dev/null)"; then
     printf 'unknown\n'
     return 1
   fi
-  case "$out" in
-    "up "*|"down "*|absent) printf '%s\n' "$out" ;;
-    *) printf 'unknown\n'; return 1 ;;
-  esac
-}
-
-profile_gateway_s6_state_exact() {
-  local out
-  out="$(profile_gateway_s6_status_exact "$1")" || { printf 'unknown\n'; return 1; }
   case "$out" in
     up\ *) printf 'up\n' ;;
     down\ *) printf 'down\n' ;;
@@ -797,6 +764,7 @@ fi
 
 start_profile_gateway_exact_manage() {
   local name="$1" state service
+  service="/run/service/gateway-$name"
   state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
   case "$state" in
     up) return 0 ;;
@@ -812,10 +780,6 @@ start_profile_gateway_exact_manage() {
       return 1
       ;;
   esac
-  service="$(profile_gateway_s6_service_path_exact "$name")" || {
-    echo "Exact s6 service path is unavailable for profile '$name'." >&2
-    return 1
-  }
 
   if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes -p "$name" gateway start >/dev/null; then
     wait_profile_gateway_up_exact "$name" 60 && return 0
@@ -842,6 +806,7 @@ start_profile_gateway_exact_manage() {
 
 reconcile_default_gateway_manage() {
   local state action service lifecycle_ok=false
+  service="/run/service/gateway-default"
   state="$(profile_gateway_s6_state_exact default 2>/dev/null || true)"
   case "$state" in
     up) action=restart ;;
@@ -856,10 +821,6 @@ reconcile_default_gateway_manage() {
       return 1
       ;;
   esac
-  service="$(profile_gateway_s6_service_path_exact default)" || {
-    echo 'Exact s6 service path is unavailable for the default gateway.' >&2
-    return 1
-  }
 
   if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway "$action" >/dev/null 2>&1; then
     lifecycle_ok=true
@@ -883,6 +844,7 @@ reconcile_default_gateway_manage() {
 
 reconcile_profile_gateway_exact_manage() {
   local name="$1" state action service
+  service="/run/service/gateway-$name"
   state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
   case "$state" in
     up) action=restart ;;
@@ -897,10 +859,6 @@ reconcile_profile_gateway_exact_manage() {
       return 1
       ;;
   esac
-  service="$(profile_gateway_s6_service_path_exact "$name")" || {
-    echo "Exact s6 service path is unavailable for profile '$name'." >&2
-    return 1
-  }
 
   if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes -p "$name" gateway "$action" >/dev/null 2>&1; then
     wait_profile_gateway_up_exact "$name" 60 && return 0
@@ -922,13 +880,12 @@ reconcile_profile_gateway_exact_manage() {
 }
 
 stop_profile_gateway_exact_manage() {
-  local name="$1" state service
+  local name="$1" state
   timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes -p "$name" gateway stop >/dev/null 2>&1 || true
   sleep 1
   state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
   if [[ "$state" == up ]]; then
-    service="$(profile_gateway_s6_service_path_exact "$name")" || return 1
-    timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svc -d "$service" >/dev/null 2>&1 || true
+    timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svc -d "/run/service/gateway-$name" >/dev/null 2>&1 || true
   fi
 }
 
@@ -1006,7 +963,7 @@ wait_hermes_gateway_surfaces_manage() {
     sleep 2
   done
   echo "Hermes API/Dashboard did not recover after ${context}." >&2
-  profile_gateway_s6_status_exact default >&2 || true
+  timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1 >&2 || true
   timeout --foreground --kill-after=5s 15s docker logs --tail 120 hermes-agent 2>&1 | tail -n 120 >&2 || true
   return 1
 }
@@ -1077,11 +1034,11 @@ verify_live_multiplex_gateway_manage() {
   local -a profiles=()
   profiles_text="$(managed_multiplex_profiles_manage)" || return 1
   [[ -n "$profiles_text" ]] && mapfile -t profiles <<< "$profiles_text"
-  s6_status="$(profile_gateway_s6_status_exact default)" || return 1
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
   [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid="${BASH_REMATCH[1]}"
   timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "$s6_pid" "${profiles[@]}" < gateway-multiplex-verify.py || return 1
-  s6_status_after="$(profile_gateway_s6_status_exact default)" || return 1
+  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
   [[ "$s6_pid_after" == "$s6_pid" ]]
@@ -1111,7 +1068,7 @@ PY_PROFILE_STANDALONE_MANAGE
 
 verify_matrix_adapter_runtime_manage() {
   local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after
-  s6_status="$(profile_gateway_s6_status_exact "$service_name")" || return 1
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
   [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid="${BASH_REMATCH[1]}"
   python3 - "$state_path" "$s6_pid" "$platform_key" <<'PY_MATRIX_ADAPTER_RUNTIME_MANAGE' || return 1
@@ -1137,7 +1094,7 @@ platforms=record.get('platforms')
 row=platforms.get(key) if isinstance(platforms,dict) else None
 if not isinstance(row,dict) or str(row.get('state') or '').strip().lower()!='connected': raise SystemExit(1)
 PY_MATRIX_ADAPTER_RUNTIME_MANAGE
-  s6_status_after="$(profile_gateway_s6_status_exact "$service_name")" || return 1
+  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
   [[ "$s6_pid_after" == "$s6_pid" ]]
