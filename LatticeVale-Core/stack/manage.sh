@@ -668,8 +668,8 @@ selected_matrix_profile_names() {
 
 profile_gateway_s6_state_exact() {
   local name="$1" service out
-  service="/run/service/gateway-$name"
-  if ! out="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent sh -c '
+  service="/run/hermes-service/gateway-$name"
+  if ! out="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent sh -c '
 svc="$1"
 if [ ! -d "$svc" ]; then
   printf "absent\\n"
@@ -728,16 +728,27 @@ register_missing_gateway_slot_exact_manage() {
   echo "Repairing missing exact Hermes s6 gateway slot 'gateway-$name' from preserved profile state." >&2
   if ! timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent python -c '
 import sys
-from hermes_cli.service_manager import detect_service_manager, get_service_manager
+from hermes_cli.service_manager import (S6_DYNAMIC_SCANDIR, detect_service_manager,
+                                        get_service_manager, validate_profile_name)
 name=sys.argv[1]
+validate_profile_name(name)
 if detect_service_manager() != "s6":
     raise SystemExit("Hermes container is not using the expected s6 service manager")
 mgr=get_service_manager()
 supports=getattr(mgr, "supports_runtime_registration", None)
 if not callable(supports) or not supports():
     raise SystemExit("Hermes s6 manager does not support runtime gateway registration")
-mgr.register_profile_gateway(name)
-' "$name" >/dev/null 2>&1; then
+try:
+    # Registration owns only the slot. The caller performs the explicit start/restart.
+    mgr.register_profile_gateway(name, start_now=False)
+except ValueError:
+    # An upstream boot reconciler may have published the exact slot first.
+    if not (S6_DYNAMIC_SCANDIR / ("gateway-" + name)).is_dir():
+        raise SystemExit("Hermes dynamic gateway slot was rejected (ValueError)")
+except Exception as exc:
+    # Do not print upstream exception text: it could include sensitive configuration.
+    raise SystemExit("Hermes dynamic gateway registration failed (" + type(exc).__name__ + ")")
+' "$name" >/dev/null; then
     wait_profile_gateway_registered_exact_manage "$name" 5 && return 0
     echo "Hermes runtime registration failed for exact gateway slot 'gateway-$name'." >&2
     return 1
@@ -764,7 +775,7 @@ fi
 
 start_profile_gateway_exact_manage() {
   local name="$1" state service
-  service="/run/service/gateway-$name"
+  service="/run/hermes-service/gateway-$name"
   state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
   case "$state" in
     up) return 0 ;;
@@ -791,7 +802,7 @@ start_profile_gateway_exact_manage() {
   # -U both requests the exact service up and removes a stale ./down marker that may
   # have been left by a prior profile-scoped stop. This is intentionally narrower
   # than restarting the container/default gateway or searching/killing by process name.
-  if ! timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1; then
+  if ! timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1; then
     echo "Exact s6 gateway start fallback failed for profile '$name'." >&2
     profile_gateway_log_tail_exact_manage "$name"
     return 1
@@ -806,7 +817,7 @@ start_profile_gateway_exact_manage() {
 
 reconcile_default_gateway_manage() {
   local state action service lifecycle_ok=false
-  service="/run/service/gateway-default"
+  service="/run/hermes-service/gateway-default"
   state="$(profile_gateway_s6_state_exact default 2>/dev/null || true)"
   case "$state" in
     up) action=restart ;;
@@ -826,13 +837,13 @@ reconcile_default_gateway_manage() {
     lifecycle_ok=true
     wait_profile_gateway_up_exact default 60 && return 0
     echo "WARNING: Hermes default gateway $action returned before its exact s6 service became stably ready; reasserting only that service slot." >&2
-    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
+    timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
   else
     echo "WARNING: Hermes default gateway $action failed; retrying only its exact s6 service slot." >&2
     if [[ "$action" == start ]]; then
-      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
+      timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
     else
-      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
+      timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
     fi
   fi
 
@@ -844,7 +855,7 @@ reconcile_default_gateway_manage() {
 
 reconcile_profile_gateway_exact_manage() {
   local name="$1" state action service
-  service="/run/service/gateway-$name"
+  service="/run/hermes-service/gateway-$name"
   state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
   case "$state" in
     up) action=restart ;;
@@ -863,13 +874,13 @@ reconcile_profile_gateway_exact_manage() {
   if timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes -p "$name" gateway "$action" >/dev/null 2>&1; then
     wait_profile_gateway_up_exact "$name" 60 && return 0
     echo "WARNING: Hermes profile '$name' gateway $action returned before its exact s6 service became stably ready; reasserting only that service slot." >&2
-    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
+    timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
   else
     echo "WARNING: Hermes profile '$name' gateway $action failed; retrying only its exact s6 service slot." >&2
     if [[ "$action" == start ]]; then
-      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
+      timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || return 1
     else
-      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
+      timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || return 1
     fi
   fi
 
@@ -885,7 +896,7 @@ stop_profile_gateway_exact_manage() {
   sleep 1
   state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
   if [[ "$state" == up ]]; then
-    timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svc -d "/run/service/gateway-$name" >/dev/null 2>&1 || true
+    timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svc -d "/run/hermes-service/gateway-$name" >/dev/null 2>&1 || true
   fi
 }
 
@@ -963,7 +974,7 @@ wait_hermes_gateway_surfaces_manage() {
     sleep 2
   done
   echo "Hermes API/Dashboard did not recover after ${context}." >&2
-  timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1 >&2 || true
+  timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1 >&2 || true
   timeout --foreground --kill-after=5s 15s docker logs --tail 120 hermes-agent 2>&1 | tail -n 120 >&2 || true
   return 1
 }
@@ -1034,11 +1045,11 @@ verify_live_multiplex_gateway_manage() {
   local -a profiles=()
   profiles_text="$(managed_multiplex_profiles_manage)" || return 1
   [[ -n "$profiles_text" ]] && mapfile -t profiles <<< "$profiles_text"
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || return 1
   [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid="${BASH_REMATCH[1]}"
   timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "$s6_pid" "${profiles[@]}" < gateway-multiplex-verify.py || return 1
-  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
+  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
   [[ "$s6_pid_after" == "$s6_pid" ]]
@@ -1068,7 +1079,7 @@ PY_PROFILE_STANDALONE_MANAGE
 
 verify_matrix_adapter_runtime_manage() {
   local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || return 1
   [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid="${BASH_REMATCH[1]}"
   python3 - "$state_path" "$s6_pid" "$platform_key" <<'PY_MATRIX_ADAPTER_RUNTIME_MANAGE' || return 1
@@ -1094,7 +1105,7 @@ platforms=record.get('platforms')
 row=platforms.get(key) if isinstance(platforms,dict) else None
 if not isinstance(row,dict) or str(row.get('state') or '').strip().lower()!='connected': raise SystemExit(1)
 PY_MATRIX_ADAPTER_RUNTIME_MANAGE
-  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
+  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
   [[ "$s6_pid_after" == "$s6_pid" ]]

@@ -63,7 +63,7 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
         if [[ "$1" == "exec" ]]; then
           # Model the exact healthy default-gateway supervisor state required by
           # production before LatticeVale performs a gateway lifecycle mutation.
-          if [[ "$*" == *"/command/s6-svstat"* && "$*" == *"/run/service/gateway-default"* ]]; then
+          if [[ "$*" == *"/command/s6-svstat"* && "$*" == *"/run/hermes-service/gateway-default"* ]]; then
             echo 'up (pid 4242) 1 seconds'
             exit 0
           fi

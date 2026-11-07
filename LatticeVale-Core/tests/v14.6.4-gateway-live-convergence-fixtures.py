@@ -35,6 +35,21 @@ AUDIT = (ROOT / "stack/state-audit.py").read_text(encoding="utf-8")
 BOOTSTRAP = (ROOT / "linux/bootstrap.sh").read_text(encoding="utf-8")
 INSTALLER = (ROOT / "Install-LatticeVale.ps1").read_text(encoding="utf-8-sig")
 
+# Upstream Hermes dynamically registers gateways beneath a hermes-owned nested s6 tree.
+# Root's /run/service scandir is for static s6-rc services and must never be used for
+# dynamic gateway lifecycle, health, or audit operations.
+for script in (CONFIGURE, MANAGE, AUDIT):
+    assert '/run/service/gateway-' not in script
+    assert '/run/hermes-service/gateway-' in script
+for script in (CONFIGURE, MANAGE):
+    assert 'register_profile_gateway(name, start_now=False)' in script
+    assert 'S6_DYNAMIC_SCANDIR' in script
+    assert 'docker exec -u hermes hermes-agent /command/s6-svc' in script
+    assert 'docker exec hermes-agent /command/s6-svc' not in script
+    assert 'Hermes dynamic gateway registration failed (' in script
+    assert '"$name" >/dev/null; then' in script
+assert 'f"/run/hermes-service/gateway-{name}"' in AUDIT
+
 # The verifier is release content and is staged into every managed stack.
 assert BOOTSTRAP.count("gateway-multiplex-verify.py") >= 5
 assert '"$bundle_root/stack/gateway-multiplex-verify.py" "$stack_dir/gateway-multiplex-verify.py"' in BOOTSTRAP
@@ -159,9 +174,9 @@ with tempfile.TemporaryDirectory() as td:
     (stack / "data/hermes/profiles/assistant/gateway_state.json").write_text(json.dumps(standalone_record), encoding="utf-8")
     def fake_run(cmd, cwd=None, timeout=8):
         joined = " ".join(cmd)
-        if "/run/service/gateway-default" in joined:
+        if "/run/hermes-service/gateway-default" in joined:
             return 0, "up (pid 5799 pgid 5799) 1 seconds"
-        if "/run/service/gateway-assistant" in joined:
+        if "/run/hermes-service/gateway-assistant" in joined:
             return 0, "up (pid 5800 pgid 5800) 1 seconds"
         return 127, ""
     audit.run = fake_run
@@ -183,5 +198,54 @@ assert 'rm -rf "data/hermes/profiles/$name/skills"' not in profile_stage
 # imply that every Matrix-enabled secondary profile owns a resident gateway process.
 assert "secondary Matrix profile workload(s)" in CONFIGURE
 assert "secondary Matrix gateway(s)" not in CONFIGURE
+
+# Exercise the actual embedded upstream-registration Python body from each shell
+# call site with a fake upstream module. This covers registration ownership, an
+# already-published exact slot, and error redaction without Docker or networking.
+import os
+import re
+import subprocess
+for shell_source in (CONFIGURE, MANAGE):
+    bodies = re.findall(r"docker exec -u hermes hermes-agent python -c '\n(.*?)\n' \"\$name\" >/dev/null; then", shell_source, re.S)
+    assert len(bodies) == 1, len(bodies)
+    body = bodies[0]
+    with tempfile.TemporaryDirectory() as td:
+        td = Path(td)
+        module = td / "hermes_cli"
+        module.mkdir()
+        (module / "__init__.py").write_text("", encoding="utf-8")
+        (module / "service_manager.py").write_text('''
+import os
+from pathlib import Path
+S6_DYNAMIC_SCANDIR = Path(os.environ["TEST_DYNAMIC_SCANDIR"])
+def validate_profile_name(name):
+    if name not in {"default", "assistant"}: raise ValueError("invalid profile")
+def detect_service_manager(): return "s6"
+class Manager:
+    def supports_runtime_registration(self): return True
+    def register_profile_gateway(self, name, *, start_now=True):
+        Path(os.environ["TEST_REGISTRATION_RECORD"]).write_text(f"{name}:{start_now}")
+        mode = os.environ.get("TEST_REGISTRATION_MODE", "ok")
+        if mode == "race":
+            (S6_DYNAMIC_SCANDIR / ("gateway-" + name)).mkdir()
+            raise ValueError("already registered")
+        if mode == "fail":
+            raise RuntimeError("SECRET_API_KEY=should-never-appear")
+def get_service_manager(): return Manager()
+''', encoding="utf-8")
+        scan = td / "dynamic"
+        scan.mkdir()
+        record = td / "registration.txt"
+        base_env = {**os.environ, "PYTHONPATH": str(td), "TEST_DYNAMIC_SCANDIR": str(scan), "TEST_REGISTRATION_RECORD": str(record)}
+        for name in ("default", "assistant"):
+            for mode, expected_code in (("ok", 0), ("race", 0), ("fail", 1)):
+                slot = scan / ("gateway-" + name)
+                if slot.exists(): slot.rmdir()
+                result = subprocess.run([sys.executable, "-c", body, name], env={**base_env, "TEST_REGISTRATION_MODE": mode}, capture_output=True, text=True, timeout=10)
+                assert result.returncode == expected_code, (name, mode, result.stderr)
+                assert record.read_text() == f"{name}:False", (name, mode, record.read_text())
+                assert "SECRET_API_KEY" not in result.stderr, result.stderr
+                if mode == "fail":
+                    assert "RuntimeError" in result.stderr, result.stderr
 
 print("PASS shared-gateway convergence, quiet speculative verification, bounded settle windows, same-version idempotency, timeout convergence, Matrix routing, explicit standalone preservation, audit live-state semantics, and existing-profile filesystem preservation")

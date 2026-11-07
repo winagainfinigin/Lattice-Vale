@@ -78,7 +78,7 @@ timeout() {
 }
 ''' + default_func + r'''
 start_or_restart_default_gateway_exact
-grep -q '/command/s6-svc -U /run/service/gateway-default' "$calls"
+grep -q '/command/s6-svc -U /run/hermes-service/gateway-default' "$calls"
 rm -f "$calls"
 '''
 r = subprocess.run(['bash', '-c', mock], capture_output=True, text=True)
@@ -90,7 +90,7 @@ assert r.returncode == 0, (r.stdout, r.stderr)
 # this exact purpose.
 for text in (cfg, manage):
     assert 'register_missing_gateway_slot_exact' in text
-    assert 'register_profile_gateway(name)' in text
+    assert 'register_profile_gateway(name, start_now=False)' in text
 assert 'Default gateway has no registered s6 service slot; refusing to guess or recreate it automatically.' not in cfg
 assert 'Default gateway has no exact s6 service slot; Matrix runtime cannot be reconciled safely.' not in manage
 assert "reconcile) printf '5'" in cfg

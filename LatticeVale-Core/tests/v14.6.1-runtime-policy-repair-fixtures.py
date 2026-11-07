@@ -171,7 +171,7 @@ assert 'Existing Docker/service infrastructure did not become healthy' in stage
 # S6ServiceManager.register_profile_gateway() and then continue normal lifecycle.
 manage_text = (ROOT / 'stack/manage.sh').read_text(encoding='utf-8')
 for source in (cfg, manage_text):
-    assert 'register_profile_gateway(name)' in source
+    assert 'register_profile_gateway(name, start_now=False)' in source
     assert 'Repairing missing exact Hermes s6 gateway slot' in source
 assert 'Default gateway has no registered s6 service slot; refusing to guess or recreate it automatically.' not in cfg
 checkpoint = cfg[cfg.index('checkpoint_revision() {'):cfg.index('matrix_profile_activation_pending()')]

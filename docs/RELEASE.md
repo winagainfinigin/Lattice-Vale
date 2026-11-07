@@ -1,3 +1,5 @@
+> **v14.6.6 Hermes dynamic s6 compatibility (2026-11-07):** Verify gateway slots under `/run/hermes-service/gateway-*`, preserving upstream `/run/service` for root-supervised static services. Use unprivileged s6 lifecycle operations, non-starting registration, bounded race handling, and secret-safe error types. Confirm fresh-install and Resume / repair with a live current Hermes image before declaring end-to-end success.
+
 > **v14.6.6 bounded resource-burst hotfix release gate:** Preserve public
 > 14.6.6 release identity; retain runtime-policy schema 13 and canonical
 > policy 13 while introducing v14 bounded scheduling metadata. Validate all

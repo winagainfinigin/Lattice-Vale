@@ -1,3 +1,5 @@
+> **v14.6.6 Hermes gateway runtime compatibility (2026-11-07):** Current upstream Hermes registers default and named gateways under the hermes-owned `/run/hermes-service` s6 scandir, not the static `/run/service` tree. LatticeVale now uses that exact dynamic location for state checks, bounded lifecycle control, and audits; direct s6 controls run as `hermes`. Missing-slot registration is non-starting and preserves boot-reconciler races. Registration failure diagnostics report a safe error type, not raw exception content. No Matrix identities, profiles, model settings, or resource policies are reset. Target-host Resume / repair must still verify live Matrix gateway convergence.
+
 > **14.6.6 demand-matched resource scheduler follow-up hotfix:** Corrects the
 > original v14 scheduler's unconditional idle-donor quota reductions by
 > reassigning only capacity that a verified busy receiver can accept. Uses
@@ -1124,7 +1126,7 @@ The initial Matrix-resilience work is downstream `14.3.35`; the installer-transa
 #### Exact profile gateway activation fallback
 
 - LatticeVale still uses Hermes' normal named-profile gateway lifecycle command first.
-- If that command fails while the exact profile-specific s6 service slot is proven to exist, LatticeVale falls back only to `/run/service/gateway-<profile>`.
+- If that command fails while the exact profile-specific s6 service slot is proven to exist, LatticeVale falls back only to `/run/hermes-service/gateway-<profile>`.
 - A stopped exact slot is activated with `s6-svc -U`, allowing a stale profile-specific persistent-down marker to be cleared without restarting or killing another profile/default gateway.
 - Missing or ambiguous exact service slots fail safely; there is no profile-blind process kill/restart fallback.
 

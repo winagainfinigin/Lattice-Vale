@@ -52,7 +52,7 @@ Windows host snapshot + live WSL probes
 
 ## Hermes gateway topology
 
-The canonical steady state has one default host gateway with `gateway.multiplex_profiles: true`. Installer-managed named profiles without an explicit `gateway.standalone: true` opt-out are served by that process and appear in the default gateway's live `served_profiles` record. Explicit standalone profiles retain their exact `/run/service/gateway-<profile>` s6 slot. `.installer-gateway-multiplex-owned` records LatticeVale ownership only; repair/start/audit verify live PID, heartbeat freshness, served-profile membership, PID stability, and enabled Matrix adapter connectivity independently before treating the topology as healthy. A healthy connected gateway is preserved rather than restarted or remigrated merely because a lifecycle command was invoked again.
+The canonical steady state has one default host gateway with `gateway.multiplex_profiles: true`. Installer-managed named profiles without an explicit `gateway.standalone: true` opt-out are served by that process and appear in the default gateway's live `served_profiles` record. Explicit standalone profiles retain their exact `/run/hermes-service/gateway-<profile>` s6 slot. `.installer-gateway-multiplex-owned` records LatticeVale ownership only; repair/start/audit verify live PID, heartbeat freshness, served-profile membership, PID stability, and enabled Matrix adapter connectivity independently before treating the topology as healthy. A healthy connected gateway is preserved rather than restarted or remigrated merely because a lifecycle command was invoked again.
 
 ## Ownership
 

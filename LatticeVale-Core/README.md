@@ -173,7 +173,7 @@ This directory contains the complete inspectable installer implementation. The r
 
 ## v14.3.7 changes
 
-- Named-profile gateway safety checks use the exact `/run/service/gateway-<profile>` s6 slot instead of parsing `hermes ... gateway status` text.
+- Named-profile gateway safety checks use the exact `/run/hermes-service/gateway-<profile>` s6 slot instead of parsing `hermes ... gateway status` text.
 - New-profile credential handoff uses a bounded exact-slot quiesce helper: Hermes stop, exact `s6-svc -d`, then exact-PID TERM/KILL only if the same named service remains alive.
 - Matrix profile runtime verification uses the same exact s6 state, preventing cross-profile status false positives.
 - `manage.sh` start/restart reconciliation uses the exact named s6 service too, so the same status ambiguity cannot reappear after installation.

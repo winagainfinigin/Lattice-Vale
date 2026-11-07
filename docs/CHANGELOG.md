@@ -1,5 +1,11 @@
 # Changelog
 
+## 14.6.6 Hermes dynamic gateway supervisor compatibility — 2026-11-07
+
+- Track Hermes runtime-registered default and named gateway services in `/run/hermes-service/gateway-*`; the root-owned static s6 scandir `/run/service` is untouched.
+- Run direct dynamic s6 control as the `hermes` user, register missing slots without auto-start, accept bounded boot-reconciler races, and surface type-only registration failures without leaking credentials.
+- Preserve managed Matrix identities/rooms, user-owned standalone profiles, model/provider configuration, and the existing resource policy.
+
 ## 14.6.6 portable CPU priorities and image-only override timer fix — 2026-11-05
 
 - Reweights canonical static CPU quotas toward Hermes and CPU/Vulkan Ollama
@@ -617,7 +623,7 @@ Matrix resilience patch.
 
 - Secondary/profile Matrix provisioning may remain explicitly `pending-manual` after identity, token, encrypted-room, runtime-environment, and authentication resources verify, without aborting the whole clean install or Resume / repair.
 - Pending secondary profiles are retried by repair/start lifecycle paths and remain visibly pending rather than being reported fully healthy.
-- Hermes' normal named-profile gateway lifecycle command remains first choice; when that command fails and the exact `/run/service/gateway-<profile>` s6 slot is proven to exist, LatticeVale may activate only that exact slot with `s6-svc -U`.
+- Hermes' normal named-profile gateway lifecycle command remains first choice; when that command fails and the exact `/run/hermes-service/gateway-<profile>` s6 slot is proven to exist, LatticeVale may activate only that exact slot with `s6-svc -U`.
 - Secondary Matrix cross-signing/recovery-key persistence has explicit pending/complete state; preserved legacy default identities may retain the installer's existing pending marker without blocking unrelated repair work, while fresh identities remain strict.
 
 ## 14.3.34 - 2026-08-19
@@ -860,7 +866,7 @@ WSL host-audit and preservation-first regression patch.
 
 ## 14.3.7 — 2026-08-17
 
-- Fixed new Hermes profile setup aborting after `profile create` when `hermes -p <profile> gateway stop/status` did not reliably reflect the exact supervised process. Credential handoff now keys off `/command/s6-svstat /run/service/gateway-<profile>` instead of profile CLI status text.
+- Fixed new Hermes profile setup aborting after `profile create` when `hermes -p <profile> gateway stop/status` did not reliably reflect the exact supervised process. Credential handoff now keys off `/command/s6-svstat /run/hermes-service/gateway-<profile>` instead of profile CLI status text.
 - Added a bounded, profile-scoped quiesce path: request the normal Hermes stop first, then request `s6-svc -d` only for the exact named service, and only if necessary TERM/KILL the PID freshly reported by that same service. No `pkill`, `killall`, all-profile stop, or process-name matching is used.
 - Matrix profile verification and later `manage.sh` start/restart reconciliation now use the same exact s6 service state, avoiding cross-profile `gateway status` false positives.
 - Resume / repair preserves a profile directory already created by the interrupted v14.3.6 run and continues provider/Matrix provisioning after the exact service is safe for credential writes.
@@ -2403,11 +2409,11 @@ v14.3.6 is a preservation-focused Matrix bootstrap hotfix. On the first Matrix i
 
 ## Scope
 
-v14.3.7 is a preservation-focused Hermes named-profile gateway lifecycle hotfix. A v14.3.6 run could successfully create a profile and then abort because the installer parsed `hermes -p <name> gateway status` and saw `running` after requesting stop. Upstream Hermes Docker uses one s6 slot per profile and exposes `/command/s6-svstat /run/service/gateway-<name>` as raw supervisor state; current upstream issue reports also document cross-profile status false positives and dynamic-s6 stop races.
+v14.3.7 is a preservation-focused Hermes named-profile gateway lifecycle hotfix. A v14.3.6 run could successfully create a profile and then abort because the installer parsed `hermes -p <name> gateway status` and saw `running` after requesting stop. Upstream Hermes Docker uses one s6 slot per profile and exposes `/command/s6-svstat /run/hermes-service/gateway-<name>` as raw supervisor state; current upstream issue reports also document cross-profile status false positives and dynamic-s6 stop races.
 
 ## Invariants
 
-- Credential handoff is gated by the exact `/run/service/gateway-<profile>` service state, not another profile's status.
+- Credential handoff is gated by the exact `/run/hermes-service/gateway-<profile>` service state, not another profile's status.
 - Normal `hermes -p <profile> gateway stop` remains the first action so Hermes can persist its intended stopped state.
 - If necessary, LatticeVale requests `s6-svc -d` only for the same exact profile service.
 - A final fallback may signal only the service PID freshly reported by that exact `s6-svstat` result. PID state is re-read before KILL escalation so a recycled/unrelated PID is never intentionally targeted.

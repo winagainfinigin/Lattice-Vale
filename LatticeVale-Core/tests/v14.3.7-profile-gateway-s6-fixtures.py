@@ -18,10 +18,10 @@ for token in (
     'profile_gateway_s6_state()',
     'profile_gateway_is_running_exact()',
     'quiesce_profile_gateway_for_credential_write()',
-    'service="/run/service/gateway-$name"',
+    'service="/run/hermes-service/gateway-$name"',
     '/command/s6-svstat "$service"',
     '/command/s6-svc -d "$service"',
-    '/command/s6-svc -U "/run/service/gateway-$name"',
+    '/command/s6-svc -U "/run/hermes-service/gateway-$name"',
     'quiesce_profile_gateway_for_credential_write "$name"',
 ):
     assert token in cfg, token
@@ -110,7 +110,7 @@ exit 99
     r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
     assert r.returncode == 0, r.stdout+r.stderr
     calls=log.read_text()
-    assert '/run/service/gateway-assistant' in calls
+    assert '/run/hermes-service/gateway-assistant' in calls
     assert 'kill -TERM' in calls and '4242' in calls
     assert 'kill -KILL' not in calls
 
