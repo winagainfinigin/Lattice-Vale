@@ -1815,16 +1815,73 @@ for name in sorted(expected): print(name)
 PY_MANAGED_MULTIPLEX_CONFIGURE
 }
 
+# Explicitly refresh Hermes' in-memory profile roster after config.yaml changes.
+# A missing acknowledgement falls back to its periodic watcher and bounded checks.
+request_gateway_profile_rescan_configure() {
+  local result
+  if result="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent python -c 'import sys; sys.path.insert(0, "/opt/hermes"); from pathlib import Path; from gateway.control_socket import rescan_gateway_profiles; result = rescan_gateway_profiles(Path("/opt/data"), timeout=8.0); print(result if result is not None else "NO_ACK"); raise SystemExit(0 if result is not None else 2)' 2>&1)"; then
+    echo "Hermes gateway profile rescan acknowledged: $result"
+  else
+    echo "Hermes gateway profile rescan did not acknowledge; continuing with bounded periodic-rescan and exact live verification: $result" >&2
+  fi
+  return 0
+}
+
+# Temporarily isolate installer-managed worker profiles while provider/Matrix
+# state is written. Keep a durable rollback record so interrupted repair restores
+# the original user-selected gateway.standalone values.
+prepare_managed_profiles_for_gateway_activation_configure() {
+  python3 - data/hermes .installer-managed-profiles .installer-temporary-standalone-profiles.json <<'PY_PREPARE_MANAGED_PROFILE_GATEWAYS'
+from pathlib import Path
+import json,os,re,stat,sys,tempfile,yaml
+root=Path(sys.argv[1]); managed=Path(sys.argv[2]); ownership=Path(sys.argv[3])
+if not managed.is_file(): raise SystemExit('Installer-managed profile roster is missing')
+names=sorted({x.strip() for x in managed.read_text(encoding='utf-8').splitlines() if x.strip()})
+try: state=json.loads(ownership.read_text(encoding='utf-8')) if ownership.exists() else {}
+except Exception: raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
+if not isinstance(state,dict): raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
+changes=[]
+for name in names:
+    if not re.fullmatch(r'[a-z0-9][a-z0-9_-]{0,31}',name): raise SystemExit(f'invalid managed profile name: {name!r}')
+    path=root/'profiles'/name/'config.yaml'
+    if not path.is_file():
+        if path.parent.exists(): raise SystemExit(f"managed profile '{name}' exists but has no config.yaml")
+        continue
+    cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}
+    if not isinstance(cfg,dict): raise SystemExit(f"managed profile '{name}' config.yaml is not a mapping")
+    gateway=cfg.get('gateway') or {}
+    if not isinstance(gateway,dict): raise SystemExit(f"managed profile '{name}' gateway settings are malformed")
+    if gateway.get('standalone') is True: continue
+    if name not in state: state[name]={'present':'standalone' in gateway,'value':gateway.get('standalone')}
+    gateway['standalone']=True; cfg['gateway']=gateway
+    changes.append((path,cfg,stat.S_IMODE(path.stat().st_mode)))
+
+def atomic_write(path,data,mode):
+    fd,tmp=tempfile.mkstemp(prefix='.'+path.name+'.',dir=str(path.parent))
+    try:
+        with os.fdopen(fd,'w',encoding='utf-8') as handle: handle.write(data)
+        os.chmod(tmp,mode); os.replace(tmp,path)
+    except BaseException:
+        try: os.unlink(tmp)
+        except OSError: pass
+        raise
+
+# Persist ownership first so Resume / repair can restore state after interruption.
+if state: atomic_write(ownership,json.dumps(state,indent=2,sort_keys=True)+'\n',0o600)
+for path,cfg,mode in changes: atomic_write(path,yaml.safe_dump(cfg,sort_keys=False),mode)
+PY_PREPARE_MANAGED_PROFILE_GATEWAYS
+}
+
 verify_live_multiplex_gateway_configure() {
   local profiles_text s6_status s6_pid s6_status_after s6_pid_after
   local -a profiles=()
   profiles_text="$(managed_multiplex_profiles_configure)" || return 1
   [[ -n "$profiles_text" ]] && mapfile -t profiles <<< "$profiles_text"
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
+  s6_status="$(profile_gateway_s6_status_exact default)" || return 1
   [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid="${BASH_REMATCH[1]}"
   timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "$s6_pid" "${profiles[@]}" < gateway-multiplex-verify.py || return 1
-  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1)" || return 1
+  s6_status_after="$(profile_gateway_s6_status_exact default)" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
   [[ "$s6_pid_after" == "$s6_pid" ]]
@@ -1854,7 +1911,7 @@ PY_PROFILE_STANDALONE_CONFIGURE
 
 verify_matrix_adapter_runtime_configure() {
   local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
+  s6_status="$(profile_gateway_s6_status_exact "$service_name")" || return 1
   [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid="${BASH_REMATCH[1]}"
   python3 - "$state_path" "$s6_pid" "$platform_key" <<'PY_MATRIX_ADAPTER_RUNTIME_CONFIGURE' || return 1
@@ -1880,7 +1937,7 @@ platforms=record.get('platforms')
 row=platforms.get(key) if isinstance(platforms,dict) else None
 if not isinstance(row,dict) or str(row.get('state') or '').strip().lower()!='connected': raise SystemExit(1)
 PY_MATRIX_ADAPTER_RUNTIME_CONFIGURE
-  s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat "/run/service/gateway-$service_name" 2>&1)" || return 1
+  s6_status_after="$(profile_gateway_s6_status_exact "$service_name")" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
   [[ "$s6_pid_after" == "$s6_pid" ]]
@@ -2464,7 +2521,7 @@ wait_hermes_gateway_surfaces() {
     sleep 2
   done
   echo "Hermes gateway surfaces did not recover after ${context}: API health and/or Dashboard remained unavailable after the bounded wait." >&2
-  timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svstat /run/service/gateway-default 2>&1 >&2 || true
+  profile_gateway_s6_status_exact default >&2 || true
   timeout --foreground --kill-after=5s 15s docker logs --tail 120 hermes-agent 2>&1 | tail -n 120 >&2 || true
   return 1
 }
@@ -2745,20 +2802,53 @@ PY_LOCAL_PROVIDER_CHECK
   return 0
 }
 
-profile_gateway_s6_state() {
-  local name="$1" service out
-  service="/run/service/gateway-$name"
+profile_gateway_s6_service_path_exact() {
+  local name="$1" service
+  [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || return 1
+  if ! service="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent sh -c '
+name="$1"
+for root in /run/hermes-service /run/service; do
+  svc="$root/gateway-$name"
+  if [ -d "$svc" ]; then
+    printf "%s\n" "$svc"
+    exit 0
+  fi
+done
+exit 1
+' sh "$name" 2>/dev/null)"; then
+    return 1
+  fi
+  case "$service" in
+    "/run/hermes-service/gateway-$name"|"/run/service/gateway-$name") printf '%s\n' "$service" ;;
+    *) return 1 ;;
+  esac
+}
+
+profile_gateway_s6_status_exact() {
+  local name="$1" out
+  [[ "$name" =~ ^[a-z0-9][a-z0-9_-]{0,31}$ ]] || return 1
   if ! out="$(timeout --foreground --kill-after=5s 15s docker exec hermes-agent sh -c '
-svc="$1"
-if [ ! -d "$svc" ]; then
-  printf "absent\\n"
-  exit 0
-fi
-exec /command/s6-svstat "$svc"
-' sh "$service" 2>/dev/null)"; then
+name="$1"
+for root in /run/hermes-service /run/service; do
+  svc="$root/gateway-$name"
+  if [ -d "$svc" ]; then
+    exec /command/s6-svstat "$svc"
+  fi
+done
+printf "absent\\n"
+' sh "$name" 2>/dev/null)"; then
     printf 'unknown\n'
     return 1
   fi
+  case "$out" in
+    "up "*|"down "*|absent) printf '%s\n' "$out" ;;
+    *) printf 'unknown\n'; return 1 ;;
+  esac
+}
+
+profile_gateway_s6_state() {
+  local out
+  out="$(profile_gateway_s6_status_exact "$1")" || { printf 'unknown\n'; return 1; }
   case "$out" in
     up\ *) printf 'up\n' ;;
     down\ *) printf 'down\n' ;;
@@ -2873,7 +2963,7 @@ fi
 }
 
 start_or_restart_profile_gateway_exact() {
-  local name="$1" state action
+  local name="$1" state action service
   if ! state="$(profile_gateway_s6_state "$name")"; then
     echo "Unable to determine exact s6 state for profile '$name' before gateway activation." >&2
     return 1
@@ -2895,6 +2985,10 @@ start_or_restart_profile_gateway_exact() {
       return 1
       ;;
   esac
+  service="$(profile_gateway_s6_service_path_exact "$name")" || {
+    echo "Profile '$name' exact s6 gateway service path is unavailable." >&2
+    return 1
+  }
   if ! timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes -p "$name" gateway "$action" >/dev/null; then
     # Hermes' named-profile lifecycle command has had regressions where the profile
     # exists and its dynamic s6 slot is present, but `gateway start/restart` still
@@ -2903,13 +2997,13 @@ start_or_restart_profile_gateway_exact() {
     # -r restarts an already-wanted-up service. No profile-blind process action occurs.
     echo "WARNING: Profile '$name' Hermes gateway $action command failed; retrying through its exact s6 service slot." >&2
     if [[ "$action" == start ]]; then
-      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "/run/service/gateway-$name" >/dev/null 2>&1 || {
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || {
         echo "Profile '$name' exact s6 gateway start fallback failed." >&2
         profile_gateway_log_tail_exact "$name"
         return 1
       }
     else
-      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "/run/service/gateway-$name" >/dev/null 2>&1 || {
+      timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -r "$service" >/dev/null 2>&1 || {
         echo "Profile '$name' exact s6 gateway restart fallback failed." >&2
         profile_gateway_log_tail_exact "$name"
         return 1
@@ -2922,7 +3016,7 @@ start_or_restart_profile_gateway_exact() {
     # bounded readiness window. This is preservation-first: no profile recreation,
     # container-wide restart, or process-name kill is used.
     echo "WARNING: Profile '$name' exact s6 gateway service is still settling after $action; requesting the same exact service slot up and retrying readiness." >&2
-    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "/run/service/gateway-$name" >/dev/null 2>&1 || true
+    timeout --foreground --kill-after=5s 30s docker exec hermes-agent /command/s6-svc -U "$service" >/dev/null 2>&1 || true
     if ! wait_profile_gateway_up_exact "$name" 60; then
       echo "Profile '$name' exact s6 gateway service did not become stably running after bounded $action recovery." >&2
       profile_gateway_log_tail_exact "$name"
@@ -2934,7 +3028,7 @@ start_or_restart_profile_gateway_exact() {
 
 
 start_or_restart_default_gateway_exact() {
-  local state action service="/run/service/gateway-default"
+  local state action service
   if ! state="$(profile_gateway_s6_state default)"; then
     echo 'Unable to determine exact s6 state for the default gateway before activation.' >&2
     return 1
@@ -2956,6 +3050,10 @@ start_or_restart_default_gateway_exact() {
       return 1
       ;;
   esac
+  service="$(profile_gateway_s6_service_path_exact default)" || {
+    echo 'Default gateway exact s6 service path is unavailable.' >&2
+    return 1
+  }
   if ! timeout --foreground --kill-after=5s 60s docker exec -u hermes hermes-agent hermes gateway "$action" >/dev/null 2>&1; then
     echo "WARNING: Hermes default gateway $action command failed; retrying only its exact s6 service slot." >&2
     if [[ "$action" == start ]]; then
@@ -3000,9 +3098,10 @@ wait_profile_gateway_down_exact() {
 }
 
 stop_profile_gateway_exact() {
-  local name="$1" service="/run/service/gateway-$1"
+  local name="$1" service
   timeout --foreground --kill-after=5s 20s docker exec -u hermes hermes-agent hermes -p "$name" gateway stop >/dev/null 2>&1 || true
   wait_profile_gateway_down_exact "$name" && return 0
+  service="$(profile_gateway_s6_service_path_exact "$name")" || return 1
   timeout --foreground --kill-after=5s 15s docker exec hermes-agent /command/s6-svc -d "$service" >/dev/null 2>&1 || true
   wait_profile_gateway_down_exact "$name"
 }
@@ -3013,7 +3112,6 @@ stop_profile_gateway_after_matrix_failure() {
 
 quiesce_profile_gateway_for_credential_write() {
   local name="$1" service state raw pid current
-  service="/run/service/gateway-$name"
 
   # Upstream Hermes profile creation registers an s6 slot and may start it immediately.
   # Ask Hermes to persist an explicit stopped state first, then verify the exact profile
@@ -3028,6 +3126,10 @@ quiesce_profile_gateway_for_credential_write() {
     return 1
   fi
   [[ "$state" == up ]] || return 0
+  service="$(profile_gateway_s6_service_path_exact "$name")" || {
+    echo "Exact s6 service path is unavailable for new profile '$name'; refusing to use a guessed path." >&2
+    return 1
+  }
 
   # Defense against upstream dynamic-s6 stop races: request down directly on this one
   # service slot, never through a profile-blind process search or global gateway kill.
@@ -4838,6 +4940,14 @@ if m.get('provider')=='custom' and m.get('default')==sys.argv[2] and m.get('base
 PY_REPAIR_CLONED_LOCAL_OLLAMA
   fi
 done
+if ((${#requested_workers[@]})); then
+  prepare_managed_profiles_for_gateway_activation_configure
+  request_gateway_profile_rescan_configure
+  wait_live_multiplex_gateway_configure 15 || {
+    echo 'Hermes shared gateway did not drop temporarily standalone worker profiles before later profile activation.' >&2
+    return 1
+  }
+fi
 return 0
 }
 
@@ -4846,7 +4956,13 @@ stage_matrix_profiles() (
   [[ "$(opt_bool matrix)" != true ]] && return 0
   mapfile -t matrix_workers < <(jq -c '.workers[]? | select(.matrix.enabled == true)' install-options.json)
   ((${#matrix_workers[@]})) || return 0
-
+  # Resume may enter this checkpoint without rerunning profile setup.
+  prepare_managed_profiles_for_gateway_activation_configure
+  request_gateway_profile_rescan_configure
+  wait_live_multiplex_gateway_configure 15 || {
+    echo 'Hermes shared gateway profile roster did not settle before Matrix profile activation.' >&2
+    return 1
+  }
   ensure_matrix_online 90
   [[ -s .matrix-info && -s secrets/matrix-bot.env ]] || { echo 'Default Matrix bootstrap must be healthy before profile-specific Matrix provisioning.' >&2; return 1; }
   mkdir -p secrets/matrix-profiles .matrix-profiles
@@ -5321,6 +5437,13 @@ stage_matrix_profile_cross_signing() {
   [[ "$(opt_bool matrix)" != true ]] && return 0
   mapfile -t matrix_workers < <(jq -c '.workers[]? | select(.matrix.enabled == true)' install-options.json)
   ((${#matrix_workers[@]})) || return 0
+  # Resume may enter here without rerunning Matrix provisioning.
+  prepare_managed_profiles_for_gateway_activation_configure
+  request_gateway_profile_rescan_configure
+  wait_live_multiplex_gateway_configure 15 || {
+    echo 'Hermes shared gateway profile roster did not settle before Matrix cross-signing.' >&2
+    return 1
+  }
   local worker name pdir penv secret recovery host_once token
   for worker in "${matrix_workers[@]}"; do
     name="$(jq -r '.name' <<<"$worker")"
@@ -6032,6 +6155,10 @@ for name,original in state.items():
 PY_RESTORE_TEMP_GATEWAYS
   fi
 
+  # Restoring original standalone settings changes the roster served by the host
+  # multiplexer. Refresh it before deciding whether migration is required.
+  request_gateway_profile_rescan_configure
+
   # A same-version repair may arrive after migration already converged, after a
   # backup restore lost only the ownership marker, or after an interrupted run left
   # the marker stale. Prove live state first; never use the marker itself as health.
@@ -6081,6 +6208,9 @@ PY_UNOWNED_GATEWAY_CANDIDATES
           echo "Hermes gateway migration exited with status $migration_rc; allowing a bounded settle window and checking exact live convergence before deciding repair failed." >&2
         fi
       fi
+      # Migration can change the eligible shared roster; refresh before the
+      # authoritative live served_profiles verification.
+      request_gateway_profile_rescan_configure
       if ! wait_live_multiplex_gateway_configure 15; then
         echo 'Live gateway verification failed after the bounded settle window; preserving Hermes migration/profile state for Resume / repair.' >&2
         return 1
@@ -6358,3 +6488,4 @@ state_finish
 echo
 echo 'Recovery-aware configuration complete.'
 echo 'Run ./manage.sh audit for the state-aware verification report.'
+

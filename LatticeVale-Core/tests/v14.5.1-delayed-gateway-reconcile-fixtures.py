@@ -59,6 +59,7 @@ mock = r'''set -e
 wait_calls=0
 calls=$(mktemp)
 profile_gateway_s6_state() { printf 'up\n'; }
+profile_gateway_s6_service_path_exact() { printf '/run/service/gateway-%s\n' "$1"; }
 wait_profile_gateway_up_exact() {
   wait_calls=$((wait_calls+1))
   [ "$wait_calls" -ge 2 ]
@@ -146,7 +147,6 @@ mock = r'''set -e
 gateway_state=absent
 calls=$(mktemp)
 profile_gateway_s6_state() { printf '%s\n' "$gateway_state"; }
-profile_gateway_s6_service_path_exact() { printf '/run/service/gateway-%s\n' "$1"; }
 register_missing_gateway_slot_exact() { gateway_state=down; printf '%s\n' "register:$1" >> "$calls"; }
 wait_profile_gateway_up_exact() { return 0; }
 profile_gateway_log_tail_exact() { :; }
@@ -176,3 +176,4 @@ for f in ('configure-stack.sh', 'manage.sh'):
     assert r.returncode == 0, r.stderr
 
 print('v14.5.1 DELAYED GATEWAY RECONCILE FIXTURES: PASS')
+

@@ -131,3 +131,4 @@ print('INTERRUPTION/RESUME SIMULATION: PASS')
 print('- SIGINT during infrastructure is checkpointed as broken')
 print('- completed earlier stage is preserved')
 print('- next run resumes/reconciles and finishes successfully')
+

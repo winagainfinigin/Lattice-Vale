@@ -59,6 +59,40 @@ for roster in (configure_roster, manage_roster):
     assert "exists but has no config.yaml" in roster
     assert "continue" in roster
 
+# Hermes v0.23's control socket supports an immediate rescan. Keep profile
+# isolation and rescan coupled at every checkpoint that may activate a worker.
+rescan_configure = CONFIGURE[CONFIGURE.index("request_gateway_profile_rescan_configure() {"):CONFIGURE.index("verify_live_multiplex_gateway_configure() {")]
+rescan_manage = MANAGE[MANAGE.index("request_gateway_profile_rescan_manage() {"):MANAGE.index("verify_live_multiplex_gateway_manage() {")]
+for helper in (rescan_configure, rescan_manage):
+    assert "rescan_gateway_profiles" in helper
+    assert 'Path("/opt/data")' in helper
+    assert "periodic-rescan" in helper
+prepare = CONFIGURE[CONFIGURE.index("prepare_managed_profiles_for_gateway_activation_configure() {"):CONFIGURE.index("verify_live_multiplex_gateway_configure() {")]
+assert "standalone" in prepare and "atomic_write" in prepare
+assert "Installer temporary gateway ownership record" in prepare
+profiles_stage = CONFIGURE[CONFIGURE.index("stage_profiles() {"):CONFIGURE.index("stage_matrix_profiles()")]
+assert profiles_stage.index("prepare_managed_profiles_for_gateway_activation_configure") < profiles_stage.index("request_gateway_profile_rescan_configure") < profiles_stage.index("wait_live_multiplex_gateway_configure 15")
+matrix_stage = CONFIGURE[CONFIGURE.index("stage_matrix_profiles()"):CONFIGURE.index("stage_matrix_profile_cross_signing()")]
+assert matrix_stage.index("prepare_managed_profiles_for_gateway_activation_configure") < matrix_stage.index("request_gateway_profile_rescan_configure") < matrix_stage.index("wait_live_multiplex_gateway_configure 15") < matrix_stage.index("ensure_matrix_online")
+cross_signing = CONFIGURE[CONFIGURE.index("stage_matrix_profile_cross_signing() {"):CONFIGURE.index("stage_integrations() {")]
+assert cross_signing.index("prepare_managed_profiles_for_gateway_activation_configure") < cross_signing.index("request_gateway_profile_rescan_configure") < cross_signing.index("wait_live_multiplex_gateway_configure 15")
+reconcile = CONFIGURE[CONFIGURE.index("stage_reconcile() {"):CONFIGURE.index("stage_kanban_gateway() {")]
+restore_start = reconcile.index("PY_RESTORE_TEMP_GATEWAYS")
+first_rescan = reconcile.index("request_gateway_profile_rescan_configure", restore_start)
+first_live = reconcile.index("wait_live_multiplex_gateway_configure 12", first_rescan)
+migration = reconcile.index("hermes gateway migrate --multiplex -y")
+post_migration_rescan = reconcile.index("request_gateway_profile_rescan_configure", migration)
+post_migration_live = reconcile.index("wait_live_multiplex_gateway_configure 15", post_migration_rescan)
+assert restore_start < first_rescan < first_live < migration < post_migration_rescan < post_migration_live
+startup = MANAGE[MANAGE.index("start_selected_matrix_profile_gateways() {"):MANAGE.index("refresh_adaptive_resource_policy() {")]
+restore_start = startup.index("PY_RESTORE_TEMP_GATEWAYS")
+first_rescan = startup.index("request_gateway_profile_rescan_manage", restore_start)
+first_live = startup.index("wait_live_multiplex_gateway_manage 12", first_rescan)
+migration = startup.index("hermes gateway migrate --multiplex -y")
+post_migration_rescan = startup.index("request_gateway_profile_rescan_manage", migration)
+post_migration_live = startup.index("wait_live_multiplex_gateway_manage 15", post_migration_rescan)
+assert restore_start < first_rescan < first_live < migration < post_migration_rescan < post_migration_live
+
 # Speculative checkpoint verification must be silent. A stopped/settling service is
 # a reason to run its stage, not a user-visible installer failure. Post-stage verification
 # remains unsuppressed and therefore retains authoritative diagnostics.
@@ -116,6 +150,7 @@ assert 'wait_matrix_adapter_runtime_configure default data/hermes/gateway_state.
 # Audit semantics use authoritative s6 + runtime state and namespaced adapter state.
 assert "verify_shared_gateway_runtime" in AUDIT
 assert "verify_standalone_gateway_runtime" in AUDIT
+assert "for root in /run/hermes-service /run/service" in AUDIT
 assert 'f"{name}:matrix"' in AUDIT
 assert "Hermes shared host gateway is durably configured and live-verified" in AUDIT
 assert "explicit standalone gateway" in AUDIT
@@ -159,9 +194,9 @@ with tempfile.TemporaryDirectory() as td:
     (stack / "data/hermes/profiles/assistant/gateway_state.json").write_text(json.dumps(standalone_record), encoding="utf-8")
     def fake_run(cmd, cwd=None, timeout=8):
         joined = " ".join(cmd)
-        if "/run/service/gateway-default" in joined:
+        if "s6-svstat" in joined and "default" in joined:
             return 0, "up (pid 5799 pgid 5799) 1 seconds"
-        if "/run/service/gateway-assistant" in joined:
+        if "s6-svstat" in joined and "assistant" in joined:
             return 0, "up (pid 5800 pgid 5800) 1 seconds"
         return 127, ""
     audit.run = fake_run
@@ -184,4 +219,5 @@ assert 'rm -rf "data/hermes/profiles/$name/skills"' not in profile_stage
 assert "secondary Matrix profile workload(s)" in CONFIGURE
 assert "secondary Matrix gateway(s)" not in CONFIGURE
 
-print("PASS shared-gateway convergence, quiet speculative verification, bounded settle windows, same-version idempotency, timeout convergence, Matrix routing, explicit standalone preservation, audit live-state semantics, and existing-profile filesystem preservation")
+print("PASS shared-gateway convergence, profile rescan ordering, both Hermes s6 roots, bounded settle windows, Matrix routing, standalone preservation, audit live-state semantics, and existing-profile filesystem preservation")
+

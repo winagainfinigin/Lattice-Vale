@@ -60,8 +60,12 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
           # mutating a gateway. This simulation models a healthy default gateway,
           # so its fake docker CLI must return realistic s6-svstat output instead
           # of a successful command with an empty/ambiguous response.
-          if [[ "$*" == *"/command/s6-svstat"* && "$*" == *"/run/service/gateway-default"* ]]; then
+          if [[ "$*" == *"/command/s6-svstat"* && "$*" == *"default"* ]]; then
             echo 'up (pid 4242) 1 seconds'
+            exit 0
+          fi
+          if [[ "$*" == *"exec hermes-agent sh -c"* && "$*" == *"default"* && "$*" != *"s6-svstat"* ]]; then
+            echo '/run/service/gateway-default'
             exit 0
           fi
           if [[ "$*" == *"config get model.default"* ]]; then echo test/model; fi
@@ -135,3 +139,4 @@ print('- first run completes all twelve stages against a mocked healthy runtime'
 print('- targeted provider repair works while earlier stages live-verify and skip')
 print('- final rerun live-verifies and skips all twelve completed stages')
 print('- structured event log is written without terminal transcript capture')
+

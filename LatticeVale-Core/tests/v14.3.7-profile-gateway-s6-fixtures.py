@@ -18,10 +18,10 @@ for token in (
     'profile_gateway_s6_state()',
     'profile_gateway_is_running_exact()',
     'quiesce_profile_gateway_for_credential_write()',
-    'service="/run/service/gateway-$name"',
-    '/command/s6-svstat "$service"',
-    '/command/s6-svc -d "$service"',
-    '/command/s6-svc -U "/run/service/gateway-$name"',
+    'for root in /run/hermes-service /run/service; do',
+    '/command/s6-svstat "$svc"',
+    'profile_gateway_s6_service_path_exact "$name"',
+    '/command/s6-svc -U "$service"',
     'quiesce_profile_gateway_for_credential_write "$name"',
 ):
     assert token in cfg, token
@@ -57,7 +57,7 @@ assert r.returncode == 0, r.stderr
 # stop path and the upstream dynamic-s6 race where normal stop/down requests
 # report success but the exact service remains up until its exact service PID
 # receives TERM. `sleep` is stubbed so the bounded wait loops run instantly.
-helper=cfg[cfg.index('profile_gateway_s6_state() {'):cfg.index('verify_profiles() {')]
+helper=cfg[cfg.index('profile_gateway_s6_service_path_exact() {'):cfg.index('verify_profiles() {')]
 with tempfile.TemporaryDirectory() as td:
     td=Path(td)
     state=td/'state'; log=td/'docker.log'; bindir=td/'bin'; bindir.mkdir()
@@ -72,6 +72,10 @@ case "$args" in
     else
       printf 'down (exitcode 0) 1 seconds, normally down\n'
     fi
+    exit 0
+    ;;
+  *"exec hermes-agent sh -c"*gateway-*)
+    case "$args" in *assistant*) printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT";; *) printf '%s/gateway-default\n' "$FAKE_DOCKER_ROOT";; esac
     exit 0
     ;;
   *"gateway stop"*)
@@ -98,6 +102,7 @@ exit 99
         'PATH':str(bindir)+os.pathsep+env['PATH'],
         'FAKE_DOCKER_STATE':str(state),
         'FAKE_DOCKER_LOG':str(log),
+        'FAKE_DOCKER_ROOT':'/run/service',
     })
     script='set -Eeuo pipefail\n'+helper+'\nquiesce_profile_gateway_for_credential_write assistant\n'
 
@@ -114,4 +119,22 @@ exit 99
     assert 'kill -TERM' in calls and '4242' in calls
     assert 'kill -KILL' not in calls
 
+    # Hermes v0.23 uses /run/hermes-service. Exercise the same exact stop path
+    # there, and prove no fallback accidentally targets the legacy root.
+    env['FAKE_DOCKER_ROOT']='/run/hermes-service'
+    state.write_text('up\n'); log.write_text(''); env['FAKE_DOCKER_MODE']='normal'
+    r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
+    assert r.returncode == 0, r.stdout+r.stderr
+    assert '/run/hermes-service/gateway-assistant' in log.read_text()
+
+    state.write_text('up\n'); log.write_text(''); env['FAKE_DOCKER_MODE']='stuck'
+    r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
+    assert r.returncode == 0, r.stdout+r.stderr
+    calls=log.read_text()
+    assert '/run/hermes-service/gateway-assistant' in calls
+    assert '/run/service/gateway-assistant' not in calls
+    assert 'kill -TERM' in calls and '4242' in calls
+    assert 'kill -KILL' not in calls
+
 print('v14.3.7 exact-profile s6 gateway fixtures: PASS')
+

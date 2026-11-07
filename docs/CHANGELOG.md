@@ -1,14 +1,17 @@
 # Changelog
 
-## 14.6.6 Hermes gateway service-root hotfix — 2026-11-06
+## 14.6.6 Hermes profile-gateway convergence hotfix — 2026-11-06
 
-- Resolve each Hermes profile's exact s6 gateway slot from the service directory
-  exposed by the running Hermes image, supporting `/run/hermes-service` and the
-  legacy `/run/service` layout. Apply the resolved path consistently to status,
-  lifecycle recovery, and runtime audit checks so a valid gateway is not mistaken
-  for a missing slot during install or Resume / repair.
-- Keep the existing 14.6.6 version and data schemas. Update the source manifest
-  and regression fixtures for both service-root layouts.
+- Resolve each profile's exact s6 gateway slot from the running Hermes image,
+  supporting /run/hermes-service and the legacy /run/service layout. Use that
+  path consistently for status, lifecycle recovery, and runtime audit checks.
+- Temporarily isolate installer-managed worker profiles while provider and Matrix
+  settings are applied. Persist original standalone values for interruption-safe
+  recovery, then restore the user's topology and request Hermes' profile rescan
+  before shared-gateway convergence checks and after multiplex migration.
+- Extend regression fixtures for both service roots, profile activation/resume,
+  migration convergence, and the source checksum manifest. Retain version 14.6.6
+  and existing persistent data formats.
 - Detailed implementation context: [`PATCH-NOTES.md`](PATCH-NOTES.md).
 
 ## 14.6.6 portable CPU priorities and image-only override timer fix — 2026-11-05
@@ -2466,3 +2469,4 @@ The broader deterministic/static suite retains all prior v14.3.1–v14.3.7 hotfi
 ### 14.6.5 preservation correction
 
 The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.
+

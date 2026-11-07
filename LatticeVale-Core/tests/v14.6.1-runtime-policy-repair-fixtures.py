@@ -187,6 +187,7 @@ harness = r'''set -Eeuo pipefail
 gateway_state=absent
 calls=$(mktemp)
 profile_gateway_s6_state() { printf '%s\n' "$gateway_state"; }
+profile_gateway_s6_service_path_exact() { printf '/run/service/gateway-%s\n' "$1"; }
 register_missing_gateway_slot_exact() { gateway_state=down; printf 'register:%s\n' "$1" >> "$calls"; }
 wait_profile_gateway_up_exact() { return 0; }
 profile_gateway_log_tail_exact() { :; }
@@ -267,3 +268,4 @@ server.server_close()
 assert elapsed < 0.5, elapsed
 
 print('v14.6.2 runtime-policy/DirectML repair fixtures: PASS')
+

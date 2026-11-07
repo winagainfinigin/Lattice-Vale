@@ -1,13 +1,17 @@
-> **14.6.6 Hermes gateway service-root hotfix:** Hermes may expose dynamic
-> profile gateway slots under `/run/hermes-service` instead of the legacy
-> `/run/service` directory. The hotfix discovers the exact existing profile slot
-> from the running container and uses that path for s6 status, start/restart,
-> stop, and audit verification. This prevents a healthy gateway from appearing
-> absent and avoids unnecessary slot re-registration during fresh install or
-> Resume / repair. The change retains release version 14.6.6 and existing data
-> schemas. Regression fixtures cover both supported directory layouts and the
-> installer/resume lifecycle; the source checksum manifest is refreshed. See
-> the canonical chronology in [CHANGELOG.md](CHANGELOG.md).
+> **14.6.6 Hermes profile-gateway convergence hotfix:** Hermes v0.23 exposes
+> dynamic profile gateway services under /run/hermes-service; earlier images may
+> use /run/service. Resolve the exact existing slot from the running container
+> and use that path for status, activation, stop, restart, and runtime audit.
+> Before profile setup, temporarily isolate installer-managed worker gateways
+> while provider and Matrix settings are written, persisting each original
+> gateway.standalone value so interrupted Resume / repair can restore it.
+> Reconcile Hermes' live profile roster through its supported rescan control
+> socket after topology changes, before convergence checks, and after multiplex
+> migration. Verify live served_profiles, exact s6 PID, fresh gateway state, and
+> stable PID before recording migration ownership. Existing standalone choices,
+> profile data, and the v14.6.6 schema remain preserved. Regression fixtures
+> cover both service-root layouts and fresh install/resume/migration ordering.
+> See the canonical chronology in [CHANGELOG.md](CHANGELOG.md).
 
 > **14.6.6 demand-matched resource scheduler follow-up hotfix:** Corrects the
 > original v14 scheduler's unconditional idle-donor quota reductions by
@@ -1367,3 +1371,4 @@ These issue reports demonstrate that `E_UNEXPECTED` is generic and can survive b
 ### 14.6.5 preservation hotfix
 
 The Windows Obsidian check now verifies an executable through registered Windows application locations, uninstall records, common installations, and optional Winget inventory. Confirmed installations are preserved; inconclusive evidence remains UNKNOWN rather than being treated as absent. Resource-policy source-option identity now selects durable resource-relevant inputs rather than transient repair/backup/Windows integration controls; unchanged legacy full-options hashes with valid document integrity are accepted for compatibility. Pre-migration shared-gateway live readiness now receives up to twelve checks separated by two seconds, preserving already converging processes. Windows storage display normalizes a drive's trailing colon. Added deterministic preservation fixtures; the live Windows/WSL end-to-end path still requires verification on its target host.
+
