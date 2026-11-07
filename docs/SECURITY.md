@@ -1,3 +1,18 @@
+## v14.6.5 preservation-first Windows privilege hotfix (security-only overlay)
+
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
+
+> **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.
+
+
+The Windows-native **Ollama** bridge must refresh narrowly scoped Windows/Hyper-V firewall rules and therefore retains its elevated scheduled-task principal. Its script and per-distro JSON configuration are now staged under `%ProgramFiles%\LatticeVale-PrivilegedRelay` instead of the user-writable `%LOCALAPPDATA%\LatticeVale` directory. An administrator-owned, non-reparse-point directory and individual file ACLs are required before the elevated task is registered. The installer fails closed if ownership or permissions cannot be established. Existing Docker/WSL Ollama model data and transport choices are unchanged. Older AppData bridge files are not executed by the new task and may remain as preserved historical artifacts.
+
+The Windows Tailscale-to-WSL relay and optional WSL start-at-logon task do not require an elevated Windows token, so newly registered tasks run at **Limited** privilege. Their existing loopback targets, WSL user identities, startup options, and Tailscale HTTPS Serve mappings are unchanged. The native Ollama bridge remains elevated because of its explicit firewall maintenance requirements.
+
+A Tailscale Serve HTTPS listener is no longer treated as exclusively LatticeVale-owned merely because its root path routes to a familiar backend. When other handlers point to an unrelated backend, LatticeVale preserves the mixed listener rather than adopting or removing it. Such a user-defined Serve configuration may require manual review before the installer claims remote-access readiness.
+
+**Residual and user-controlled boundaries:** Opting into Tailscale access still requires inbound tailnet traffic and may require an all-interface Docker host binding under WSL NAT; the installer does not override tailnet ACL/grants. Untrusted content processed by privileged Hermes tools, inter-container trust, third-party `latest` image tags, and administrator-approved custom Compose overrides remain deployment-dependent risks. These are not silently restricted, to avoid breaking legitimate 14.6.5 workflows. The source tests cannot establish actual Windows firewall reachability, ACL behavior on every NTFS configuration, or remote Tailscale device access; verify those on a live Windows test system.
+
 ## v14.6.5 Matrix relay / managed-upstream security boundary
 
 > **v14.6.5:** Windows Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge. Permitted tailnet devices use the displayed service URL; exact matching Serve rules remain in place without a restart. Existing Synapse identity stays authoritative; Matrix ID domains, Element URLs, and Tailscale hostnames remain separate. Existing-stack repairs include pre-install backup progress with a per-run skip, planned Ubuntu APT refresh progress with a per-run skip, streamed cleanup output, and a fast path that skips unnecessary cache/staging cleanup when the WSL root has at least 2 GiB free. Schema 24 remains compatible.
@@ -9,7 +24,7 @@ Latest-supported refresh does not broaden LatticeVale's ownership of persistent 
 
 ## Inherited v14.6.1 derived-state and privilege boundary
 
-> **v14.6.5 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 
 Canonical architecture JSON is derived state, written atomically and validated before trust. Durable user intent remains separate. GPU probing does not grant permission to install/replace vendor drivers, and explicit adapter preference is not silently redirected. Diagnostic commands are read-only except that explicit `diagnose-gpu`/`diagnose-backends` refresh their installer-owned derived capability documents; they do not mutate application data or credentials. Existing least-privilege/root-scope and Docker-daemon environment sanitization requirements remain inherited.
@@ -250,3 +265,13 @@ Static/container tests cannot fully emulate Windows Task Scheduler, a real WSL V
 ## Global WSL configuration changes
 
 Global `.wslconfig` changes remain exceptional. v14.4.81 may offer only the documented mirrored→NAT compatibility recovery after persistent `E_UNEXPECTED`; it backs up the file and requires explicit approval. Any such change requires global `wsl --shutdown`, so LatticeVale checks for other running distros first and asks if that running-state check itself is unavailable. Declining leaves the setting unchanged. Other normal configuration flows do not take ownership of global WSL networking.
+
+### Resource-burst controller privilege boundary
+
+The optional WSL systemd timer invokes its oneshot controller as the selected
+non-root Ubuntu owner. It uses the same local Docker Engine access already
+required by LatticeVale; the Docker socket is not mounted in any new app
+container. It validates Compose project/service labels, container IDs,
+canonical policy identity and user override ownership before `docker update`.
+Controller state is stored mode 0600. Failure or missing telemetry retains the
+static resource policy. The timer is removed by the LatticeVale uninstaller.

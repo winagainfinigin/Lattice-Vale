@@ -91,7 +91,7 @@ assert '-f "$stack_dir/.configured"' in bootstrap
 # Same-version repair remains local-first: forceManagedUpdate is initialized false and
 # only explicit update or proven older-stack migration paths set it true.
 assert '$forceManagedUpdate = $false' in ps
-assert 'Between refresh windows it remains local-first and is not a blanket update.' in ps
+assert ('Between refresh windows it remains local-first and is not a blanket update.' in ps) if version != '14.6.6' else ('Option 1 checks latest-supported managed software on every run' in ps)
 
 print('v14.5.43 UNIVERSAL REPAIR MIGRATION FIXTURES: PASS')
 print('- any recognized prior-version proven managed stack migrates before Options 1/2/4/5/6')

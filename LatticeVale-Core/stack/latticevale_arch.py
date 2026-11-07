@@ -1126,7 +1126,7 @@ def host_memory_budget(mem_mib: int, accel: str, managed_ollama: bool, directml_
     # Keep ordinary WSL host headroom proportional to the actual allocation.  A
     # small fixed floor protects systemd/Docker/WSL services; the cap prevents a
     # large workstation from wasting an unbounded amount of RAM outside containers.
-    base_ratio = 0.12 if managed_ollama else 0.15
+    base_ratio = 0.10 if managed_ollama else 0.13
     base_cap = max(384, min(6144, mem_mib - 384))
     # Keep the host budget monotonic at MiB granularity. Rounding a percentage up
     # to a coarse quantum can make a machine with 1 MiB *more* RAM receive a
@@ -1145,7 +1145,7 @@ def host_memory_budget(mem_mib: int, accel: str, managed_ollama: bool, directml_
         # fail closed normally instead of being assigned a known-PC special case.
         directml_cap = max(384, min(8192, mem_mib - 384))
         dml_floor = min(2048, directml_cap)
-        directml = _clamp_int(int(mem_mib * 0.30), dml_floor, directml_cap)
+        directml = _clamp_int(int(mem_mib * 0.28), dml_floor, directml_cap)
         reserve = max(reserve, directml)
 
     budget = mem_mib - reserve
@@ -1402,6 +1402,31 @@ def service_memory_plan(
     return {name: alloc[name] for name in SERVICE_ORDER if name in alloc}
 
 
+
+# Policy-v14 burst allocations are a live, separate layer over the canonical
+# schema-13 safety envelope. Static CPU quotas remain a safe fallback.
+CPU_SOFT_WEIGHTS = {
+    # Shares are relative priority inside the container scheduler; actual
+    # CPU time is controlled independently by the bounded hard quota plan.
+    "hermes": 18, "synapse-db": 7, "synapse": 8,
+    "searxng-valkey": 3, "searxng": 4, "qmd": 6,
+    "qmd-indexer": 3, "ollama": 22, "honcho-db": 6,
+    "honcho-redis": 4, "honcho-api": 7, "honcho-deriver": 3,
+}
+
+
+def resource_burst_metadata(memory_budget_mib: int, *, matrix: bool, searxng: bool,
+                            qmd: bool, ollama: bool, honcho: bool,
+                            hermes_floor: int, ollama_floor: int) -> dict[str, dict[str, int]]:
+    """Return bounded, validated soft CPU weights and absolute memory floors."""
+    specs = _service_specs(memory_budget_mib, matrix=matrix, searxng=searxng,
+                           qmd=qmd, ollama=ollama, honcho=honcho,
+                           hermes_floor=hermes_floor, ollama_floor=ollama_floor)
+    return {name: {"cpuShares": CPU_SOFT_WEIGHTS[name] * 128,
+                   "memoryFloorMiB": minimum}
+            for name, _weight, minimum, _cap in specs}
+
+
 def cpu_envelope_plan(cpus: int, directml_selected: bool) -> dict[str, int]:
     """Return one conserved WSL-visible CPU envelope in milli-CPU units.
 
@@ -1444,12 +1469,18 @@ def cpu_quota_plan(
     # conserved aggregate ceiling. Increasing a service's weight redistributes CPU;
     # it cannot manufacture additional WSL CPU capacity.
     pressure = max(0, matrix_gateways - 1) * 0.35 + max(0, kanban_concurrency - 1) * 0.18
+    # Prioritize the interactive agent and CPU inference. With a fully enabled
+    # 4-vCPU stack, the old near-equal split stranded Ollama at ~0.55 CPU even
+    # while the other 10 roles were mostly idle. Dynamic borrowing is additional
+    # capacity; normal latency must not depend on the timer being installed.
+    # Weights scale with the *visible* WSL envelope, enabled roles, backend,
+    # profile count, and Kanban concurrency, not a fixed machine configuration.
     weights = {
-        "hermes": 8.0 + pressure,
+        "hermes": 27.0 + pressure,
         "synapse-db": 3.0, "synapse": 4.0,
         "searxng-valkey": 1.5, "searxng": 3.0,
         "qmd": 3.0, "qmd-indexer": 3.5,
-        "ollama": 8.0 if accel in ("cpu", "vulkan") else 5.0,
+        "ollama": 45.0 if accel in ("cpu", "vulkan") else 14.0,
         "honcho-db": 3.0, "honcho-redis": 1.5, "honcho-api": 3.5, "honcho-deriver": 4.0,
     }
     quantum = 50
@@ -1617,6 +1648,8 @@ def validate_runtime_policy_state(
     if state.get("RESOURCE_POLICY_MODE", "adaptive") != "adaptive":
         raise ValueError("RESOURCE_POLICY_MODE must be adaptive")
 
+    if state.get("RESOURCE_BURST_STRATEGY") not in (None, "bounded-v14"):
+        raise ValueError("Unsupported LatticeVale resource burst strategy")
     if "RAM_PROFILE" in state and state.get("RAM_PROFILE") != ram_profile(mem):
         raise ValueError(f"RAM_PROFILE mismatch: expected {ram_profile(mem)}, found {state.get('RAM_PROFILE')}")
     if "CPU_PROFILE" in state and state.get("CPU_PROFILE") != cpu_profile(cpus):
@@ -1654,6 +1687,21 @@ def validate_runtime_policy_state(
     if "CPU_DOCKER_ALLOCATED_MILLI" in state and _int_state(state, "CPU_DOCKER_ALLOCATED_MILLI", 0) != allocated_cpu:
         raise ValueError("CPU_DOCKER_ALLOCATED_MILLI does not match persisted service quotas")
 
+    if state.get("RESOURCE_BURST_STRATEGY") == "bounded-v14" and service_mem:
+        burst_meta = resource_burst_metadata(
+            actual["containerBudgetMiB"], matrix=matrix_enabled,
+            searxng=searxng_enabled, qmd=qmd_enabled, ollama=managed,
+            honcho=honcho_enabled, hermes_floor=_int_state(state, "HERMES_MIN_MIB", 1024),
+            ollama_floor=_int_state(state, "OLLAMA_MODEL_FLOOR_MIB", 0),
+        )
+        if set(burst_meta) != set(service_mem):
+            raise ValueError("Burst service topology differs from canonical memory plan")
+        for service, spec in burst_meta.items():
+            key = service.upper().replace("-", "_")
+            if _int_state(state, f"FLOOR_{key}_MIB", 1) != spec["memoryFloorMiB"]:
+                raise ValueError(f"Burst memory floor mismatch: {service}")
+            if _int_state(state, f"SHARES_{key}", 1) != spec["cpuShares"]:
+                raise ValueError(f"Burst CPU weight mismatch: {service}")
     if options is not None and service_mem:
         ollama_floor = _int_state(state, "OLLAMA_MODEL_FLOOR_MIB", 0)
         expected_mem = service_memory_plan(

@@ -11,7 +11,7 @@ cleanup = (ROOT / 'linux/cleanup-storage.sh').read_text(encoding='utf-8')
 
 # The existing six modes remain in the same order/wording; Cleanup is additive #7.
 existing = [
-    'Resume / repair installation - recommended; reuse previous choices and repair failed/incomplete/stale stages (targeted managed software also refreshes when the periodic window is due)',
+    'Resume / repair installation - recommended; check latest supported managed software on every run and apply available updates only; preserve user overrides and state',
     'Change installed components - reuse the stack but choose options again',
     'Verify installation only - read-only audit; make no changes',
     'Reconfigure providers/profiles - keep services/data but rerun Hermes provider setup',

@@ -1,14 +1,56 @@
-# LatticeVale 14.6.5 Test Confidence Levels
+# LatticeVale 14.6.6 Test Confidence Levels
+
+## Portable CPU-priority and timer-activation follow-up verification
+
+The same-version follow-up tests static CPU weights on 1, 2, 4, 8, 16, 32,
+and 64 logical CPUs, CPU/Vulkan/NVIDIA/AMD backend selections, optional local
+Ollama, and DirectML host reservation. They verify every enabled service's
+50-milli-CPU minimum, unchanged aggregate/system headroom, and higher Hermes
+and CPU-inference weighting where the envelope permits it. Synthetic high
+CPU PSI with low/high host runqueue load must not block **within-envelope**
+borrowing; genuine host contention suppresses additional DirectML reserve
+lending. Bootstrap must admit the same verified image-only override as the
+controller's resolved Compose comparison. Timer cadence and cooldown checks
+are covered. `--check-override` is read-only and needs no Docker socket inside
+Hermes. Full live behavior still requires Windows/WSL/Docker integration tests.
+
+## Demand-matched burst scheduler follow-up verification
+
+The updated `v14.6.6-burst-resource-fixtures.py` covers recipient-capacity
+matching, no speculative CPU/memory donation, priority-dependent idle service
+CPU floors, cgroup-charged memory protection and missing-telemetry fallback,
+measured CPU throttling bypass during cooldown, DirectML reserve recovery,
+Compose image-only override admission versus resource/env override rejection,
+transaction rollback, and deterministic CPU/RAM invariant sweeps. It also
+exercises WSL-visible processor counts of 1, 2, 4, 8, 16, 32, and 64, and
+RAM allocations from 2 through 128 GiB for both ordinary and DirectML
+planning. Impossible full-stack topologies fail instead of manufacturing
+capacity. The overall regression file count stays at 151.
+
+These tests prove **source behavior and conserved envelopes**, not deployment
+or speed. For real qualification, compare the pre-burst canonical v13 policy,
+original v14 scheduler, and demand-matched hotfix using equivalent WSL CPU/RAM
+settings and workloads. Observe p50/p95 interactive response time, throughput,
+per-container CPU throttling, memory PSI, `memory.events`, crashes, CPU/RAM
+quota restoration, DirectML activity, and Windows/WSL responsiveness. A few
+Docker stats snapshots alone cannot establish causality. Preserve explicit
+`.wslconfig` and user-owned Compose settings across comparisons.
+
+
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
+
+> **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.
+
 
 > **v14.6.5:** Windows Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge. Permitted tailnet devices use the displayed service URL; exact matching Serve rules remain in place without a restart. Existing Synapse identity stays authoritative; Matrix ID domains, Element URLs, and Tailscale hostnames remain separate. Existing-stack repairs include pre-install backup progress with a per-run skip, planned Ubuntu APT refresh progress with a per-run skip, streamed cleanup output, and a fast path that skips unnecessary cache/staging cleanup when the WSL root has at least 2 GiB free. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.5 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 
-## v14.6.5 current contract (inheriting v14.6.0 policy-13 architecture)
+## v14.6.6 current contract (inheriting v14.6.0 policy-13 architecture)
 
 The canonical architecture fixture includes a **3,328-case** CPU/backend/service-topology property sweep (13 CPU counts × 4 acceleration modes × 64 service/DirectML topologies), irregular RAM/resource sweeps, explicit boundary probes around host-reserve floor/ratio/cap transitions, GPU opt-out, DirectML fail-closed fallback, schema-21→23 and schema-22→23 migration, and aggregate CPU conservation. DirectML fixtures prohibit `torch.inference_mode()` and require `torch.no_grad()`, require the fail-closed fallback helper to exist, require bounded gateway diagnostics on a failed HTTP self-test, and require the version-gated Qwen2 `torch.where` compatibility path. The regression runner isolates each fixture in its own process group so descendants cannot retain CI pipes.
 
@@ -41,3 +83,15 @@ The Windows Obsidian check now verifies an executable through registered Windows
 ### QMD allocation correction regression (14.6.5)
 
 `tests/v14.6.5-qmd-resource-floor-fixtures.py` exercises minimum-fit, full multi-service budget conservation, monotonic service allocations, disabled-service identity, under-budget refusal, and the shipping generator/verifier's shared canonical resource formula. Verify that Resume / repair changes stale 304 MiB QMD indexer ceilings rather than concluding an unchanged policy fingerprint is current. Live WSL/Docker verification of the actual default QMD embedding workload remains necessary; fixture results do not prove `qmd embed` succeeds under every container/runtime environment.
+
+### v14.6.6 bounded resource-burst hotfix verification
+
+The 151-fixture suite adds `v14.6.6-burst-resource-fixtures.py`. It tests
+canonical host-budget relaxation, workload-derived CPU weights/memory floors,
+unused quota borrowing, aggregate conservation, DirectML transitions,
+CPU/memory/I/O pressure response, Docker OOM freshness, fake transaction
+rollback, and hundreds of arbitrary simulated loads. The fixture also checks
+timer registration, uninstall cleanup, source/Compose wiring, and read-only
+audit acceptance of exact dynamic snapshots. Live Windows/WSL/Docker
+reconciliation must still be verified on the target host; simulated tests
+are not an end-to-end performance result.

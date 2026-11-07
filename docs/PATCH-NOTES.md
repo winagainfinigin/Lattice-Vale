@@ -1,4 +1,73 @@
-# Current v14.6.5 patch notes
+> **14.6.6 demand-matched resource scheduler follow-up hotfix:** Corrects the
+> original v14 scheduler's unconditional idle-donor quota reductions by
+> reassigning only capacity that a verified busy receiver can accept. Uses
+> priority-aware CPU floors (65% background, 80% standard, 90% interactive),
+> cgroup `memory.current` and minimum headroom for any memory cap decrease,
+> and immediate CPU-only response to freshly measured quota throttling.
+> Accepts a Hermes image-only Compose override after verifying full effective
+> model equivalence; arbitrary user resource overrides still select static
+> fallback. Keeps canonical v13 policy schema, release version 14.6.6,
+> the current 10%/13%/28% host-memory reserves, selected WSL settings,
+> QMD/DirectML minima, and bounded conservation rules unchanged. Includes
+> portability/regression fixtures and updated diagnostics. Apply as a
+> changed-files overlay to the matching complete release, verify the merged
+> source manifest, and use normal Option 1 — Resume / repair. Live throughput
+> improvements require target-host measurements.
+
+> **14.6.6 bounded-resource hotfix (post-release):** The v14 scheduling layer
+> redistributes unused CPU and memory ceilings among the managed containers
+> while preserving aggregate WSL/DirectML headroom, service minima, explicit
+> overrides, and runtime-policy schema 13. Canonical host reserves become
+> 10%/13% (managed/non-managed Ollama) and 28% for DirectML, retaining original
+> floors/caps. Docker Compose gains soft CPU priority/memory reservation and
+> a host-side, user-owned 45-second systemd timer for bounded rebalancing when
+> cgroup/PSI and Docker state can be verified. An exact snapshot allows honest
+> repair/audit verification and safe restoration. This is a corrective-only
+> **14.6.6 hotfix**, not a version or database migration. See
+> [RESOURCE-POLICY.md](RESOURCE-POLICY.md).
+
+## v14.6.6 — update-on-availability repair and Tailscale dual-stack fix
+
+- Option 1 checks latest-supported, installer-owned package/image/QMD/Honcho versions on **every** run. The 30-day refresh gate is retired; normal repair stays local-first when the check proves there is no update.
+- The check refreshes Ubuntu APT index metadata for candidate comparison but does not install packages, pull images, fetch source revisions, or change persistent application data. A confirmed difference invokes the existing controlled update path. Remote-check failures are explicitly marked **unverified**, not interpreted as either an update or a successful currency check. Option 6 remains the deliberate full refresh.
+- Version-only 14.6.5→14.6.6 migration with unchanged schema 24 does not independently force broad software updates. Earlier upgrades still use cumulative migration when needed.
+- The v14.6.5 Tailscale IPv4/IPv6 correction is included: valid HTTPS over either family is sufficient; TLS stays verified; proxy bypass and listener-only diagnostic failures do not tear down functional Serve routes.
+- Existing Windows scripts/shortcuts, WSL keep-alive, Tailscale authentication, Matrix identities, QMD memory ceilings, Docker runtime/resource settings, and user-owned references retain their established behavior.
+- Online checks depend on network and registry availability. A failed check leaves the running installation unchanged and reports the incomplete verification; use Option 6 to force refresh where needed. Native Windows Ollama, WSL itself, and unrelated Ubuntu packages remain outside the managed-update scope.
+
+## v14.6.5 Tailscale HTTPS IPv4/IPv6 validation correction (same release identity)
+
+- Accepts an available IPv4 **or** IPv6 tailnet address; if both are available, one successful certificate-validated direct HTTPS path is enough. An IPv4-first probe falls back to IPv6, using bracketed IPv6 `curl --resolve` addresses and bypassing proxies. MagicDNS validation accepts an available A/AAAA family and uses each family's Quad100 resolver.
+- Windows TCP listener inventory is retained as diagnostic information, not a hard blocker when direct, certificate-validated HTTPS and Matrix API/discovery/login checks succeed. This corrects the observed HTTPS 9443 HTTP 302 with no listed listener, and HTTPS 443 HTTP 200 with an IPv4 listener but no IPv6 listener.
+- Keeps existing, functioning Tailscale Serve routes and Matrix `public_baseurl` if HTTPS is verified; real HTTPS or Matrix API failures still follow the prior conservative failure path. Does not change Tailscale identities, backend ports, bridge tasks, WSL keep-alive, resources, or Docker services.
+- Live Windows/second-device behavior has not been verified in this test environment. No claim of full remote connectivity is made until a live Windows check succeeds.
+
+## v14.6.5 security-only preservation hotfix (unchanged release identity)
+
+- Reduced privileges for Tailscale's passive Windows WSL relay and optional WSL autostart tasks (`RunLevel Limited`).
+- Protected the elevated native Windows Ollama relay script and configuration in an administrator-controlled Program Files directory with explicit owner and ACL verification, including reparse-point rejection.
+- Preserved direct-WSL Ollama state paths and existing user credentials; the uninstaller understands the protected native-bridge artifact location and the legacy path.
+- Refused to adopt or disable a Tailscale Serve HTTPS listener if any observed handler forwards to an unowned backend.
+- Retained the 14.6.5 resource-policy/QMD memory correction, Matrix identities, Tailscale authentication, user overrides and all selected application service configurations.
+- Live Windows native relay, NTFS ACL, Tailscale devices and LAN reachability have **not** been tested in this non-Windows execution environment; complete manual validation before deployment.
+
+# Current v14.6.6 patch notes
+
+**Portable CPU-priority and timer activation follow-up (same release version):**
+The canonical CPU split now prioritizes the interactive Hermes agent and
+CPU/Vulkan Ollama inference. Quotas scale with WSL logical CPU count and the
+installed service/backend topology, retaining the bounded host/system/DirectML
+envelopes. An image-only Hermes Compose override is checked by the installer
+and runtime using the same effective model criteria, permitting normal timer
+installation without changing user-owned Compose files. In-envelope CPU
+redistribution continues despite CPU PSI from hard quota throttling; high
+runqueue load protects the optional additional DirectML slice. The timer
+operates at 25-second intervals with a 45-second cooldown and measures fresh
+throttling over enough periods to exclude isolated wake-ups. Apply this ZIP
+as a **direct overwrite** of files in the extracted v14.6.6 source tree;
+previous same-version hotfixes require no rollback. Use Option 1 Resume /
+repair to activate the source changes. Live performance is unverified.
+
 
 ## v14.6.5 same-version public-installer hotfix
 
@@ -27,9 +96,9 @@
 
 ### 14.6.5 corrective hotfix — shared-gateway idempotency and audit
 
-The default Hermes host's nested `gateway.multiplex_profiles: true` is now treated as the valid post-migration steady state instead of a repair condition. Integration verification accepts that exact default setting while still rejecting top-level, worker-profile, disabled, malformed, and worker environment overrides. Resume/repair and normal startup prove the live default s6 PID, fresh `gateway_state.json`, complete managed non-standalone `served_profiles`, stable PID, and the expected Matrix adapter connection before treating a route as healthy; a stale/missing marker cannot substitute for that proof. A healthy connected default gateway is preserved without an unnecessary restart, while a disconnected adapter triggers the bounded recycle path only after Synapse is proven reachable. Shared named profiles require their namespaced `<profile>:matrix` adapter on the host gateway; explicit `gateway.standalone: true` profiles retain their own exact s6 gateway and `matrix` adapter. Matrix-profile audit reports those topologies distinctly. Existing profile data—including profile directories and a user-created skills symlink—is not recreated by same-version repair. The patch also retains the post-release QMD host-bind/allowed-host correction already present in current v14.6.5 source.
+The default Hermes host's nested `gateway.multiplex_profiles: true` is now treated as the valid post-migration steady state instead of a repair condition. Integration verification accepts that exact default setting while still rejecting top-level, worker-profile, disabled, malformed, and worker environment overrides. Resume/repair and normal startup prove the live default s6 PID, fresh `gateway_state.json`, complete managed non-standalone `served_profiles`, stable PID, and the expected Matrix adapter connection before treating a route as healthy; a stale/missing marker cannot substitute for that proof. A healthy connected default gateway is preserved without an unnecessary restart, while a disconnected adapter triggers the bounded recycle path only after Synapse is proven reachable. Shared named profiles require their namespaced `<profile>:matrix` adapter on the host gateway; explicit `gateway.standalone: true` profiles retain their own exact s6 gateway and `matrix` adapter. Matrix-profile audit reports those topologies distinctly. Existing profile data—including profile directories and a user-created skills symlink—is not recreated by same-version repair. The patch also retains the post-release QMD host-bind/allowed-host correction already present in current v14.6.6 source.
 
-The v14.6.5 release retains the v14.6.3 Matrix, Tailscale, and gateway behavior. Its gateway migration recovery accepts a nonzero Hermes migration result only when the live default s6 slot is up, the supervisor and Hermes state PIDs match, the state heartbeat is fresh, and all installer-managed non-standalone profiles are served. The Windows installer validates and stages the verifier into its private WSL bundle; bootstrap then installs it in the runtime stack directory and checks it with the other installer-owned files. Invalid or incomplete state remains a failure with a specific diagnostic. Verified convergence avoids another restart and leaves Hermes migration state intact. The v14.6.5 hotfix also recognizes Hermes' enabled default-profile multiplexer setting as healthy during the read-only topology audit, while retaining findings for misplaced top-level keys, managed worker-profile overrides, disabled or unrecognized values, and explicit standalone-profile checks. The current deterministic contract remains 148 fixtures across six shards. A same-version release-package correction also updates the stale upstream-channel fixture to validate the expanded staged-file set; this has no installer/runtime effect.
+The v14.6.5 release retains the v14.6.3 Matrix, Tailscale, and gateway behavior. Its gateway migration recovery accepts a nonzero Hermes migration result only when the live default s6 slot is up, the supervisor and Hermes state PIDs match, the state heartbeat is fresh, and all installer-managed non-standalone profiles are served. The Windows installer validates and stages the verifier into its private WSL bundle; bootstrap then installs it in the runtime stack directory and checks it with the other installer-owned files. Invalid or incomplete state remains a failure with a specific diagnostic. Verified convergence avoids another restart and leaves Hermes migration state intact. The v14.6.5 hotfix also recognizes Hermes' enabled default-profile multiplexer setting as healthy during the read-only topology audit, while retaining findings for misplaced top-level keys, managed worker-profile overrides, disabled or unrecognized values, and explicit standalone-profile checks. The v14.6.5 deterministic contract was 148 fixtures across six shards; the v14.6.6 release contract is 150 fixtures. A same-version release-package correction also updates the stale upstream-channel fixture to validate the expanded staged-file set; this has no installer/runtime effect.
 
 Historical v14.6.3 patch notes follow.
 

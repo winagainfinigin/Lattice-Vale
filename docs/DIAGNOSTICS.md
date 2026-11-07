@@ -1,10 +1,61 @@
-# LatticeVale 14.6.5 Diagnostics
+# LatticeVale 14.6.6 Diagnostics
+
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
+
+> **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.
+
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.5 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
+
+## v14.6.6 CPU bottleneck and controller activation diagnostics
+
+A missing `latticevale-resource-burst.timer` with an existing
+`RESOURCE_BURST_STRATEGY=bounded-v14` and an image-only Compose override may
+indicate an installer built before the image-only override/timer integration
+fix. Deploy the updated complete source via Option 1, then verify the timer.
+The controller's read-only `--check-override` uses the same effective Compose
+model admission rule as its runtime check. Failure with an override means
+static fallback is deliberately retained.
+
+A saturated Ollama cgroup with `cpu.max` equivalent to 0.55 CPU can produce
+~90% CPU PSI and 100% throttled periods even when WSL has four logical CPUs
+and a low load average. New CPU weights scale from current WSL CPU count and
+service/backend selections. The controller redistributes quotas **within**
+the unchanged aggregate envelope despite CPU PSI; a genuinely saturated host
+retains its additional DirectML CPU reserve. Check `docker inspect` NanoCpus,
+`cpu.stat` deltas, `cpu.pressure`, workload throughput, and timer journal for
+actual activation. `docker stats` alone cannot establish the root cause.
+
+## v14.6.6 demand-matched CPU/RAM diagnostic follow-up
+
+An idle container **can** temporarily donate quota, but the controller may
+only reduce its hard cap when a receiver can actually accept that capacity.
+CPU throttling is checked from **new per-cgroup** `nr_throttled` and
+`nr_periods` deltas, not from Ollama's `PROCESSOR=100% CPU` label (which
+means CPU-only placement, not saturation). New throttling can accelerate CPU
+rebalancing despite normal cooldown, while memory rebalancing respects cooldown.
+
+For memory cap reductions, `memory.current` supplies the full cgroup charge,
+including file cache omitted from Docker's user-facing stats calculation.
+Missing cgroup readings prohibit cap reductions, not all CPU balancing. Reclaim
+from over-baseline memory also respects the live charged-memory floor. Older
+OOMKilled markers do not prove a new OOM. Negative, missing, or reset throttling
+deltas must not be interpreted as fresh throttling evidence.
+
+Use `systemctl status latticevale-resource-burst.timer --no-pager`,
+`journalctl -u latticevale-resource-burst.service --no-pager -n 50`, and
+`python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack`.
+An inactive timer or a rejected Compose override means the **static fallback**;
+passing snapshot verification does not prove that any transfer or performance
+improvement occurred. For configured `compose.override.yaml`, only an effective
+Hermes image/pull-policy difference is permitted; other changes disable dynamic
+borrowing. Compare actual `docker inspect` ceilings and pressure before/after
+a real workload to judge improvements. Unsupported/missing cgroup v2 telemetry
+must not be repaired by weakening identity/fingerprint checks.
 
 ## Windows Tailscale remote-access diagnostics
 
@@ -68,3 +119,13 @@ For QMD indexer OOM findings, compare `docker inspect` live `State.OOMKilled`, `
 ### 14.6.5 QMD embedding CPU out-of-memory
 
 A QMD indexer that reports `Indexed: ... unchanged` followed by `Run 'qmd embed' ... need vectors`, `Model: embeddinggemma-300M-Q8_0.gguf`, and `Killed` has **not** finished semantic embedding. An `OOMKilled=true` Docker flag together with repeatable killed embedding attempts is evidence of cgroup memory exhaustion. The 14.6.5 QMD resource correction raises both managed QMD-role minima; run normal Resume / repair to generate and apply a new Compose memory limit. Confirm the effective value with `docker inspect -f '{{.HostConfig.Memory}}' hermes-qmd-indexer` inside the selected WSL distro and check `docker logs --tail 100 hermes-qmd-indexer` for a later successful embed. Docker OOM markers without timestamps do not establish whether an event occurred before or after reconciliation. A user-owned Compose override can supersede installer allocations. Do not remove indexes, models, vault notes or authentication data just to recover from this memory ceiling.
+
+### Bounded resource-burst diagnostics
+
+A live Docker limit differing from Compose is valid only when
+`resource-burst-controller.py --verify --stack ~/hermes-stack` confirms the
+policy fingerprint, exact service ownership, container IDs, and transaction
+snapshot. Otherwise the normal static policy mismatch remains reportable.
+The timer and service journal distinguish static fallback, sustained demand,
+contention-aware holds, and a safely applied rebalance. Read-only audits
+verify the snapshot without mutating it. See `RESOURCE-POLICY.md`.

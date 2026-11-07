@@ -1,11 +1,36 @@
-# LatticeVale v14.6.5
+# LatticeVale v14.6.6
+
+> **Downstream portable-performance resource hotfix (same 14.6.6 version):**
+> Canonical CPU quotas now prioritize Hermes and CPU/Vulkan Ollama within the
+> WSL-derived aggregate Docker envelope, scaling with enabled services,
+> acceleration mode, profiles, and worker concurrency. The optional bounded
+> resource controller can be enabled alongside a *verified image-only*
+> Hermes Compose override; CPU-quota-induced stall pressure no longer blocks
+> in-envelope borrowing. Apply the changed-files ZIP over an **extracted
+> complete 14.6.6 source tree**, then use normal Windows installer Option 1
+> Resume / repair. A changed-files ZIP is not a standalone release. This
+> downstream change requires live Windows/WSL/Docker performance qualification.
+> See [Resource Policy](docs/RESOURCE-POLICY.md) and
+> [Release Verification](docs/RELEASE.md).
+
+> **14.6.6 resource-usage hotfix:** Optional bounded-burst controller
+> reallocates unused CPU and memory headroom among selected LatticeVale
+> containers using live Docker/cgroup/WSL pressure evidence. Canonical
+> conservative fallback, QMD/model safety floors, DirectML host reserves, and
+> `compose.override.yaml` ownership are preserved. Installer Option 1
+> reconciles it; see [Resource Policy](docs/RESOURCE-POLICY.md).
+
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
+
+> **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.
+
 
 > **v14.6.5 corrective hotfix:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge, and keeps exact matching Serve routes in place. Installer-managed non-standalone Hermes profiles converge to the shared host gateway while explicit `gateway.standalone: true` profiles remain independent. Repair and normal start preserve an already healthy gateway instead of restarting or remigrating it, but only after exact s6 PID, fresh gateway state, complete `served_profiles`, stable-PID, and Matrix-adapter checks pass. The post-release 14.6.5 hotfix keeps speculative checkpoint probes silent, gives a just-started shared gateway a bounded settle window before migration, and treats an upstream migration timeout as recoverable only when strict live convergence subsequently proves the gateway healthy. Current resource diagnostics describe Matrix-enabled secondary profiles as shared-gateway workload rather than implying one resident gateway per profile. Existing-stack runs include backup progress and a per-run backup skip; planned Ubuntu APT refresh includes elapsed progress and a per-run skip. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.5 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
+> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.6 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
 
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
@@ -113,7 +138,7 @@ Native Windows Ollama remains externally owned. LatticeVale recommends one loade
 
 Resource policy v11 is finalized once into a canonical installer-owned policy object. Generated Compose CPU/RAM limits, `.latticevale-resource-state`, audit expectations, and the human-readable `resource-policy-report.txt` consume that same finalized object instead of independently recalculating ceilings. The state records separate hardware and policy SHA-256 fingerprints, so audit/repair can distinguish a hardware/topology change from policy/configuration drift. The report contains no credentials and records the RAM/CPU profile, acceleration/offload status, GPU topology, DirectML/Ollama coordination, context/model floor, and generated service ceilings.
 
-Current v14.6.5 release qualification requires exactly 148 deterministic fixtures across six shards, both resume simulations, PowerShell parsing under Windows PowerShell 5.1 and PowerShell 7, exact source-manifest verification, and a fresh release ZIP whose extracted files match the qualified source tree. Historical v14.5.42 qualification used a 135-fixture suite and its own patch-lineage reconstruction; those historical numbers do not describe the current release gate.
+Current v14.6.6 release qualification requires exactly 151 deterministic fixtures across six shards, both resume simulations, PowerShell parsing under Windows PowerShell 5.1 and PowerShell 7, exact source-manifest verification, and a fresh release ZIP whose extracted files match the qualified source tree. Historical v14.5.42 qualification used a 135-fixture suite and its own patch-lineage reconstruction; those historical numbers do not describe the current release gate.
 
 ### v14.5.4 — DirectML VRAM guard + 16 GB-class RAM efficiency
 
@@ -614,7 +639,8 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.6.2 Hotfix** | Prior install release | Latest-supported managed upstream resolution for Options 1/6, stable Honcho tag tracking, compatible stateful-major bounds, exact resolved-artifact recording, and inherited preservation-first repair |
 | **v14.6.3** | Prior install release | Matrix identity/route hotfix and managed Hermes profile migration to the shared gateway while preserving standalone choices |
 | **v14.6.4** | Prior install release | Local Tailscale/Matrix route validation without a second-device challenge, backup and Ubuntu refresh progress with run-level skips, streamed cleanup, and schema-24 compatibility |
-| **v14.6.5** | **Current install release** | Shared-gateway idempotency, live s6/gateway-state/served-profile convergence proof, route-aware Matrix adapter verification, explicit standalone preservation, and no unnecessary healthy-gateway restart/remigration |
+| **v14.6.6** | **Current install release** | Update-on-availability Option 1, retired refresh age gate, verified IPv4/IPv6 HTTPS without listener-only rollback; same schema 24 |
+| **v14.6.5** | Previous release | Shared-gateway idempotency, live s6/gateway-state/served-profile convergence proof, route-aware Matrix adapter verification, explicit standalone preservation, and no unnecessary healthy-gateway restart/remigration |
 
 ### v14.4.1
 

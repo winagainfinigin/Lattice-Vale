@@ -1,17 +1,17 @@
-# LatticeVale v14.6.5 — Stable
+# LatticeVale v14.6.6 — Stable
 
 > **v14.6.5:** Windows Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge. Permitted tailnet devices use the displayed service URL; exact matching Serve rules remain in place without a restart. Existing Synapse identity stays authoritative; Matrix ID domains, Element URLs, and Tailscale hostnames remain separate. The same-version hotfix keeps speculative repair probes quiet, waits boundedly for shared-gateway convergence before migration decisions, and accepts migration timeout/nonzero status only after strict live convergence succeeds. Existing-stack repairs include pre-install backup progress with a per-run skip, planned Ubuntu APT refresh progress with a per-run skip, streamed cleanup output, and a fast path that skips unnecessary cache/staging cleanup when the WSL root has at least 2 GiB free. Schema 24 remains compatible.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> **v14.6.5 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
+> **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 
 > **Current documentation set:** v14.6.5. Repository/release packaging rules are documented in [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md); historical v13 notes are repository-only archives.
 
 
-**Current release:** v14.6.5 retains the canonical architecture and adds latest-supported managed upstream resolution while preserving hardware discovery, backend capability/health/selection, resource-policy calculation, canonical validation, diagnostics, and repair dependency tracking. Start with [QUICKSTART.md](QUICKSTART.md); task-oriented current docs are now separate from historical changelog material.
+**Current release:** v14.6.6 retains the canonical architecture and adds latest-supported managed upstream resolution while preserving hardware discovery, backend capability/health/selection, resource-policy calculation, canonical validation, diagnostics, and repair dependency tracking. Start with [QUICKSTART.md](QUICKSTART.md); task-oriented current docs are now separate from historical changelog material.
 
 **Architecture:** durable choices stay in `install-options.json`; generated Windows/WSL hardware, backend, health, and resource-policy state lives under `data/latticevale/` with explicit schemas and fingerprints. DirectML, CUDA, ROCm, Vulkan, native-Windows Ollama, and CPU are capabilities rather than vendor assumptions.
 
@@ -19,7 +19,7 @@
 
 **GPU paths:** managed Ollama supports Auto, CPU, NVIDIA CUDA, AMD/ROCm, and Vulkan; DirectML remains an optional WSL-host text backend with Ollama fallback; native Windows Ollama remains user-owned. Vulkan requires an existing WSL `/dev/dri/renderD*` device and real `ollama ps` offload proof before GPU execution is trusted. LatticeVale never installs/replaces Windows/vendor display drivers.
 
-**Release qualification:** the current v14.6.5 hotfix requires exactly 148 deterministic fixtures across six shards, both resume simulations, source-tree contamination checks, the 14.6.2 and 14.6.4 upgrade baselines, exact declarative release-content/source-manifest verification, and fresh-extraction ZIP byte equivalence before artifacts are publishable.
+**Release qualification:** the current v14.6.6 release requires exactly 151 deterministic fixtures across six shards, both resume simulations, source-tree contamination checks, the 14.6.2 and 14.6.4 upgrade baselines, exact declarative release-content/source-manifest verification, and fresh-extraction ZIP byte equivalence before artifacts are publishable.
 
 **Resource diagnostics:** `~/hermes-stack/resource-policy-report.txt` remains the secret-free explanation of resource policy v13, GPU/offload state, generated ceilings, and hardware/policy fingerprints; `./manage.sh audit` independently verifies the same state.
 
@@ -39,7 +39,7 @@ LatticeVale deploys and repairs Hermes Agent inside an **existing supported Ubun
 
 **v14.4.6 corrects adaptive-resource audit fingerprinting when WSL is processor-limited below the Windows host and avoids version-only managed refreshes.** The audit now uses the process-visible CPU set, matching the `nproc` semantics used to generate and refresh policy v3. Resume / repair no longer pulls/rebuilds managed components merely because `VERSION.txt` changed; refresh is driven by the managed-refresh revision, 30-day age gate, missing legacy state, or explicit Option 6. This means 14.4.5→14.4.6 can apply the audit fix without rebuilding healthy images, while 14.4.2→14.4.6 still adopts the cumulative component/runtime changes because its refresh revision and adaptive-policy version are older.
 
-**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retained those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4; v14.5.1 advanced enabled adaptive state to policy v9; v14.5.2 retained that policy unchanged while adding cleanup/recovery; v14.5.4 advanced the DirectML/low-memory branch to policy v10; and v14.5.42 advanced enabled adaptive state to policy v11; v14.5.47 retained policy v11 and the v14.5.44 DirectML/v14.5.43 migration work; current v14.6.5 retains canonical policy v13 while retaining those repair-convergence, Hermes/web maintenance, and managed-refresh guarantees.
+**v14.4.5 introduced the current repair-convergence mechanics over v14.4.4.** It makes adaptive RAM policy v3 an explicit repair obligation instead of relying on a possibly completed `prepare_config` checkpoint, reconciles changed Compose resource policy into running containers, and prevents final success while runtime policy is stale. v14.4.85 retained those mechanics and the v14.4.83 migration of enabled policy-v3 state to policy v4; v14.5.1 advanced enabled adaptive state to policy v9; v14.5.2 retained that policy unchanged while adding cleanup/recovery; v14.5.4 advanced the DirectML/low-memory branch to policy v10; and v14.5.42 advanced enabled adaptive state to policy v11; v14.5.47 retained policy v11 and the v14.5.44 DirectML/v14.5.43 migration work; current v14.6.6 retains canonical policy v13 while retaining those repair-convergence, Hermes/web maintenance, and managed-refresh guarantees.
 
 For detailed history, use `CHANGELOG.md`. Detailed implementation/audit notes for the v14.x patch line are consolidated in `PATCH-NOTES.md`; the v13 archive remains under `legacy-patch-notes/`.
 
@@ -172,7 +172,7 @@ Upstream contributions should remain portable and preservation-first, but a priv
 ## Quick start
 
 1. Download the versioned release ZIP from GitHub and extract it. The ZIP filename may include the release version, but its single top-level folder is always named `Lattice-Vale`.
-2. Open the extracted `LatticeVale` folder.
+2. Open the extracted `Lattice-Vale` folder.
 3. Optionally verify source hashes:
 
 ```powershell
@@ -365,3 +365,10 @@ The original granular pre-LatticeVale v13 patch notes from the v13.16.6 bundle a
 ## GitHub repository and release packaging
 
 See [GITHUB-REPOSITORY.md](GITHUB-REPOSITORY.md) for repository-size/path constraints, community-health file locations, archive-root requirements, release-content policy, and pre-publication checks.
+
+### 14.6.6 resource-burst hotfix
+
+The bounded CPU/RAM borrowing controller retains the canonical static v13
+fallback and integrates with repair/audit. [RESOURCE-POLICY.md](RESOURCE-POLICY.md)
+is the authoritative description of v14 scheduling, memory/CPU safety
+ceilings, verification, and optional systemd timer requirements.
