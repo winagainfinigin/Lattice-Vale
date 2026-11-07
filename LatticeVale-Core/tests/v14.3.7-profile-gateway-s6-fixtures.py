@@ -94,6 +94,14 @@ esac
 exit 99
 ''',encoding='utf-8')
     os.chmod(bindir/'docker',0o755); os.chmod(bindir/'sleep',0o755)
+    # The installer now records ownership before using Hermes' parking stop.
+    # Supply a real named-profile home for the offline Docker mock.
+    from shutil import copy2
+    copy2(ROOT/'stack/gateway-park-policy.py', td/'gateway-park-policy.py')
+    profile = td/'data/hermes/profiles/assistant'
+    profile.mkdir(parents=True)
+    (profile/'config.yaml').write_text('gateway: {}\n', encoding='utf-8')
+    (td/'.installer-managed-profiles').write_text('assistant\n', encoding='utf-8')
     env=os.environ.copy(); env.update({
         'PATH':str(bindir)+os.pathsep+env['PATH'],
         'FAKE_DOCKER_STATE':str(state),
@@ -102,12 +110,12 @@ exit 99
     script='set -Eeuo pipefail\n'+helper+'\nquiesce_profile_gateway_for_credential_write assistant\n'
 
     state.write_text('up\n'); log.write_text(''); env['FAKE_DOCKER_MODE']='normal'
-    r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
+    r=subprocess.run(['bash','-c',script],cwd=td,env=env,capture_output=True,text=True,timeout=20)
     assert r.returncode == 0, r.stdout+r.stderr
     assert 'kill -TERM' not in log.read_text()
 
     state.write_text('up\n'); log.write_text(''); env['FAKE_DOCKER_MODE']='stuck'
-    r=subprocess.run(['bash','-c',script],env=env,capture_output=True,text=True,timeout=20)
+    r=subprocess.run(['bash','-c',script],cwd=td,env=env,capture_output=True,text=True,timeout=20)
     assert r.returncode == 0, r.stdout+r.stderr
     calls=log.read_text()
     assert '/run/hermes-service/gateway-assistant' in calls

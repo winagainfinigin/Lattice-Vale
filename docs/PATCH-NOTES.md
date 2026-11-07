@@ -55,6 +55,11 @@
 
 # Current v14.6.6 patch notes
 
+## v14.6.6 Hermes shared-gateway parked-profile compatibility (also affects 14.6.5 upgrades)
+
+Hermes `hermes -p NAME gateway stop` writes a persistent `gateway.parked` marker. During fresh and resume setup, LatticeVale now tracks its own temporary stop operations for **every managed profile** and removes only those installer-owned markers before shared-gateway convergence. On existing 14.6.5/14.6.6 installations, parked managed non-standalone profiles without an ownership receipt are listed and require a one-time interactive approval; a user-origin park cannot safely be distinguished retrospectively. Explicit standalone and unrelated profiles are preserved. The shared gateway must still report the complete expected served-profile roster; the verifier has not been weakened. Normal startup does not silently unpark ambiguous historical state. This is an overwrite patch for 14.6.6 source bundles, not a version upgrade; the same failure can originate in 14.6.5 state.
+
+
 **Portable CPU-priority and timer activation follow-up (same release version):**
 The canonical CPU split now prioritizes the interactive Hermes agent and
 CPU/Vulkan Ollama inference. Quotas scale with WSL logical CPU count and the

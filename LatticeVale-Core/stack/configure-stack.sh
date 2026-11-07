@@ -1793,6 +1793,37 @@ remove_legacy_gateway_multiplex_off() {
   esac
 }
 
+# Manage only profile gateway parks owned by this installer. Hermes gateway stop
+# writes gateway.parked (not merely an s6 down file), which excludes the named
+# profile from multiplex discovery. Unknown legacy 14.6.5/14.6.6 parks need
+# one explicit approval; never silently override a user's own stop request.
+reconcile_managed_gateway_parks_configure() {
+  local pending_json approval=false name first_unparked='' result
+  pending_json="$(python3 gateway-park-policy.py pending data/hermes .installer-managed-profiles)" || return 1
+  mapfile -t legacy_names < <(jq -r '.legacy[]' <<< "$pending_json")
+  if ((${#legacy_names[@]})); then
+    echo "Existing managed Hermes profiles were parked without a LatticeVale ownership record: ${legacy_names[*]}" >&2
+    echo 'This can be left by 14.6.5/14.6.6, but could also be a deliberate user stop.' >&2
+    [[ -t 0 ]] || { echo 'Resume / repair interactively to approve unpark; no user-owned marker was changed.' >&2; return 1; }
+    read -r -p "Allow LatticeVale to unpark these ${#legacy_names[@]} managed profile(s) for shared-gateway service? [y/N]: " answer
+    [[ "$answer" == y || "$answer" == Y ]] || { echo 'Parked profiles preserved; shared gateway cannot be verified until they are explicitly enabled.' >&2; return 1; }
+    approval=true
+  fi
+  if [[ "$approval" == true ]]; then
+    result="$(python3 gateway-park-policy.py reconcile data/hermes .installer-managed-profiles --approve-legacy)" || return 1
+  else
+    result="$(python3 gateway-park-policy.py reconcile data/hermes .installer-managed-profiles)" || return 1
+  fi
+  [[ -n "$result" ]] || return 0
+  printf '%s\n' "$result"
+  first_unparked="$(sed -n 's/^Unparked managed profile: //p' <<< "$result" | head -n1)"
+  if [[ -n "$first_unparked" ]]; then
+    # One notification rescans the entire profile directory, regardless of count.
+    timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent python -c 'import sys; from hermes_cli.gateway_multiplex_served import notify_multiplexer_profiles_changed; notify_multiplexer_profiles_changed(sys.argv[1], timeout=8.0)' "$first_unparked" >/dev/null 2>&1 || true
+    LATTICEVALE_GATEWAY_UNPARKED=true
+  fi
+}
+
 managed_multiplex_profiles_configure() {
   python3 - data/hermes .installer-managed-profiles <<'PY_MANAGED_MULTIPLEX_CONFIGURE'
 from pathlib import Path
@@ -3012,6 +3043,7 @@ wait_profile_gateway_down_exact() {
 
 stop_profile_gateway_exact() {
   local name="$1" service="/run/hermes-service/gateway-$1"
+  python3 gateway-park-policy.py prepare-stop data/hermes .installer-managed-profiles --name "$name" || return 1
   timeout --foreground --kill-after=5s 20s docker exec -u hermes hermes-agent hermes -p "$name" gateway stop >/dev/null 2>&1 || true
   wait_profile_gateway_down_exact "$name" && return 0
   timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svc -d "$service" >/dev/null 2>&1 || true
@@ -3029,6 +3061,7 @@ quiesce_profile_gateway_for_credential_write() {
   # Upstream Hermes profile creation registers an s6 slot and may start it immediately.
   # Ask Hermes to persist an explicit stopped state first, then verify the exact profile
   # slot rather than trusting `gateway status` (which has had cross-profile false positives).
+  python3 gateway-park-policy.py prepare-stop data/hermes .installer-managed-profiles --name "$name" || return 1
   timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes -p "$name" gateway stop >/dev/null 2>&1 || true
   if wait_profile_gateway_down_exact "$name"; then
     return 0
@@ -6043,6 +6076,11 @@ for name,original in state.items():
 PY_RESTORE_TEMP_GATEWAYS
   fi
 
+  # Release only installer-owned gateway parks, or legacy parks explicitly approved
+  # by the operator. The list is derived from ALL managed names, not two profiles.
+  LATTICEVALE_GATEWAY_UNPARKED=false
+  reconcile_managed_gateway_parks_configure || return 1
+
   # A same-version repair may arrive after migration already converged, after a
   # backup restore lost only the ownership marker, or after an interrupted run left
   # the marker stale. Prove live state first; never use the marker itself as health.
@@ -6053,7 +6091,12 @@ PY_RESTORE_TEMP_GATEWAYS
   mapfile -t managed_profiles < <(grep -E '^[a-z0-9][a-z0-9_-]{0,31}$' .installer-managed-profiles | sort -u)
   if ((${#managed_profiles[@]})); then
     gateway_converged=false
-    if wait_live_multiplex_gateway_configure 12; then
+    if [[ "$LATTICEVALE_GATEWAY_UNPARKED" == true ]]; then
+      convergence_wait=45  # Hermes also rescans profiles every 30 seconds.
+    else
+      convergence_wait=12
+    fi
+    if wait_live_multiplex_gateway_configure "$convergence_wait"; then
       gateway_converged=true
       echo 'Hermes shared gateway is already live and serves every managed non-standalone profile; preserving it without replaying migration.'
     fi
@@ -6092,7 +6135,7 @@ PY_UNOWNED_GATEWAY_CANDIDATES
           echo "Hermes gateway migration exited with status $migration_rc; allowing a bounded settle window and checking exact live convergence before deciding repair failed." >&2
         fi
       fi
-      if ! wait_live_multiplex_gateway_configure 15; then
+      if ! wait_live_multiplex_gateway_configure 45; then
         echo 'Live gateway verification failed after the bounded settle window; preserving Hermes migration/profile state for Resume / repair.' >&2
         return 1
       fi
@@ -6159,6 +6202,10 @@ while IFS= read -r managed_profile; do
   if [[ "$profile_matrix_enabled" != true ]]; then
     if profile_gateway_is_explicit_standalone_configure "$managed_profile"; then
       echo "Preserving user-owned standalone gateway for profile '$managed_profile'."
+    elif [[ -e .installer-gateway-multiplex-owned ]]; then
+      # The shared host may serve a profile for Kanban/API even if Matrix is off.
+      # Stopping its named slot via Hermes CLI would persistently park it.
+      :
     elif ! stop_profile_gateway_exact "$managed_profile"; then
       echo "WARNING: profile '$managed_profile' is not Matrix-enabled but its non-standalone exact gateway could not be stopped cleanly; preserved profile state was not deleted." >&2
     fi

@@ -50,6 +50,77 @@ for script in (CONFIGURE, MANAGE):
     assert '"$name" >/dev/null; then' in script
 assert 'f"/run/hermes-service/gateway-{name}"' in AUDIT
 
+# The parked-marker fix works for arbitrary named profiles (including 14.6.5
+# upgrades). LatticeVale-owned stop receipts are durable; legacy/unowned markers
+# require an explicit approval; user standalone/unmanaged markers stay untouched.
+import subprocess
+import os
+from pathlib import Path as _Path
+PARK_POLICY = ROOT / "stack/gateway-park-policy.py"
+assert PARK_POLICY.is_file()
+assert "profile_is_parked" not in PARK_POLICY.read_text(encoding="utf-8") or "gateway.parked" in PARK_POLICY.read_text(encoding="utf-8")
+assert BOOTSTRAP.count("gateway-park-policy.py") >= 4
+assert "'stack\\gateway-park-policy.py'" in INSTALLER
+for script in (CONFIGURE, MANAGE):
+    assert 'gateway-park-policy.py prepare-stop' in script
+    assert 'gateway-park-policy.py reconcile' in script
+    assert 'gateway-park-policy.py pending' in script
+
+with tempfile.TemporaryDirectory() as td:
+    td = _Path(td)
+    hermes = td / "data/hermes"
+    roster = td / ".installer-managed-profiles"
+    hermes.mkdir(parents=True)
+    # Three active named profiles + one explicitly standalone profile, plus an
+    # unrelated user profile: no assumptions about exactly two profiles.
+    names = ("assistant", "coder", "reviewer", "observer")
+    roster.write_text("\n".join(names) + "\n", encoding="utf-8")
+    for name in (*names, "outside"):
+        home = hermes / "profiles" / name
+        home.mkdir(parents=True)
+        standalone = "'true'" if name == "observer" else "false"
+        (home / "config.yaml").write_text("gateway:\n  standalone: " + standalone + "\n", encoding="utf-8")
+    def policy(*args, ok=True):
+        proc = subprocess.run(
+            [sys.executable, str(PARK_POLICY), args[0], str(hermes), str(roster), *args[1:]],
+            text=True, capture_output=True, cwd=td, timeout=10,
+        )
+        assert (proc.returncode == 0) == ok, proc.stdout + proc.stderr
+        return proc.stdout if ok else proc.stderr
+    # Ownership is recorded before the CLI stop writes gateway.parked.
+    for name in ("assistant", "reviewer"):
+        policy("prepare-stop", "--name", name)
+        (hermes / "profiles" / name / "gateway.parked").write_text("", encoding="utf-8")
+    # A 14.6.5/14.6.6 stop without ownership proof and two user stops.
+    for name in ("coder", "observer", "outside"):
+        (hermes / "profiles" / name / "gateway.parked").write_text("", encoding="utf-8")
+    receipt = td / ".installer-owned-gateway-parks.json"
+    assert sorted(json.loads(receipt.read_text())["names"]) == ["assistant", "reviewer"]
+    before = json.loads(policy("pending"))
+    assert before == {"owned": ["assistant", "reviewer"], "legacy": ["coder"]}, before
+    assert "explicit approval" in policy("reconcile", ok=False)
+    assert all((hermes / "profiles" / name / "gateway.parked").exists() for name in names)
+    out = policy("reconcile", "--approve-legacy")
+    assert all("Unparked managed profile: " + name in out for name in ("assistant", "coder", "reviewer")), out
+    assert json.loads(policy("pending")) == {"owned": [], "legacy": []}
+    assert not any((hermes / "profiles" / name / "gateway.parked").exists() for name in ("assistant", "coder", "reviewer"))
+    assert all((hermes / "profiles" / name / "gateway.parked").exists() for name in ("observer", "outside"))
+    assert json.loads(receipt.read_text())["names"] == []
+    # A newly stopped managed profile can unpark without legacy approval.
+    policy("prepare-stop", "--name", "assistant")
+    (hermes / "profiles/assistant/gateway.parked").touch()
+    assert "Unparked managed profile: assistant" in policy("reconcile")
+    # Existing user marker is NEVER claimed by prepare-stop.
+    (hermes / "profiles/assistant/gateway.parked").touch()
+    policy("prepare-stop", "--name", "assistant")
+    assert json.loads(policy("pending"))["legacy"] == ["assistant"]
+    assert "explicit approval" in policy("reconcile", ok=False)
+    # Invalid name and symlink cannot escape the controlled managed profile home.
+    assert "not installer-managed" in policy("prepare-stop", "--name", "outside", ok=False)
+    (hermes / "profiles/assistant/gateway.parked").unlink()
+    (hermes / "profiles/assistant/gateway.parked").symlink_to(td / "elsewhere")
+    assert "unsafe parked marker" in policy("pending", ok=False)
+
 # The verifier is release content and is staged into every managed stack.
 assert BOOTSTRAP.count("gateway-multiplex-verify.py") >= 5
 assert '"$bundle_root/stack/gateway-multiplex-verify.py" "$stack_dir/gateway-multiplex-verify.py"' in BOOTSTRAP
@@ -86,15 +157,15 @@ assert 'if ! "$verifier" >/dev/null' not in post_verify
 
 # Same-version Resume/repair must prove an already-converged live gateway before migration.
 reconcile = CONFIGURE[CONFIGURE.index("stage_reconcile() {"):CONFIGURE.index("stage_kanban_gateway() {")]
-first_live_check = reconcile.index("wait_live_multiplex_gateway_configure 12")
+first_live_check = reconcile.index("wait_live_multiplex_gateway_configure \"$convergence_wait\"")
 migration_call = reconcile.index("hermes gateway migrate --multiplex -y")
 assert first_live_check < migration_call
 assert "already live and serves every managed non-standalone profile" in reconcile[:migration_call]
-assert "if ! wait_live_multiplex_gateway_configure 15; then" in reconcile[migration_call:]
+assert "if ! wait_live_multiplex_gateway_configure 45; then" in reconcile[migration_call:]
 assert "90-second safety timeout" in reconcile
 assert "timed out after the gateway had converged" in reconcile
 assert ": > .installer-gateway-multiplex-owned" in reconcile
-assert reconcile.index(": > .installer-gateway-multiplex-owned") > reconcile.index("wait_live_multiplex_gateway_configure 15", migration_call)
+assert reconcile.index(": > .installer-gateway-multiplex-owned") > reconcile.index("wait_live_multiplex_gateway_configure 45", migration_call)
 assert "Default Hermes Matrix adapter is already connected; preserving the healthy gateway without an unnecessary restart." in reconcile
 assert reconcile.index("wait_matrix_adapter_runtime_configure default data/hermes/gateway_state.json matrix 3") < reconcile.index("start_or_restart_default_gateway_exact")
 
@@ -107,10 +178,10 @@ assert "verify_matrix_adapter_runtime_configure default data/hermes/gateway_stat
 
 # Ordinary start treats the marker as evidence, not health proof, and only migrates after a failed live proof.
 startup = MANAGE[MANAGE.index("start_selected_matrix_profile_gateways() {"):MANAGE.index("refresh_adaptive_resource_policy() {")]
-assert startup.index("wait_live_multiplex_gateway_manage 12") < startup.index("hermes gateway migrate --multiplex -y")
+assert startup.index("wait_live_multiplex_gateway_manage \"$convergence_wait\"") < startup.index("hermes gateway migrate --multiplex -y")
 assert "ownership marker is not backed by current live convergence" in startup
 assert "restoring the LatticeVale ownership marker without replaying migration" in startup
-assert "if ! wait_live_multiplex_gateway_manage 15; then" in startup
+assert "if ! wait_live_multiplex_gateway_manage 45; then" in startup
 assert startup.index(": > .installer-gateway-multiplex-owned") > startup.index("hermes gateway migrate --multiplex -y")
 assert "90-second safety timeout" in startup
 assert "timed out after the gateway had converged" in startup

@@ -27,8 +27,12 @@ assert "elseif ($appState.State -eq 'UNKNOWN')" in reconcile
 assert "existingVolume.Drive.TrimEnd" in ps
 for filename,kind in [('configure-stack.sh','configure'),('manage.sh','manage')]:
     source=(ROOT/'stack'/filename).read_text()
-    assert 'wait_live_multiplex_gateway_'+kind+' 12' in source
-    assert source.index('wait_live_multiplex_gateway_'+kind+' 12') < source.index('hermes gateway migrate --multiplex -y', source.index('wait_live_multiplex_gateway_'+kind+' 12'))
+    # 14.6.5 interrupted installs may need 30-second Hermes profile rescan after
+    # releasing an installer-owned parked marker. A bounded variable wait remains
+    # ahead of migration, rather than the former hard-coded 12 seconds.
+    wait = 'wait_live_multiplex_gateway_'+kind+' "$convergence_wait"'
+    assert wait in source
+    assert source.index(wait) < source.index('hermes gateway migrate --multiplex -y', source.index(wait))
 print('14.6.5 preservation hotfix fixtures passed')
 
 # Same-version Windows follow-up: execute the shipped inline Python against

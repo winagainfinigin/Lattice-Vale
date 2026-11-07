@@ -892,6 +892,7 @@ reconcile_profile_gateway_exact_manage() {
 
 stop_profile_gateway_exact_manage() {
   local name="$1" state
+  python3 gateway-park-policy.py prepare-stop data/hermes .installer-managed-profiles --name "$name" || return 1
   timeout --foreground --kill-after=5s 30s docker exec -u hermes hermes-agent hermes -p "$name" gateway stop >/dev/null 2>&1 || true
   sleep 1
   state="$(profile_gateway_s6_state_exact "$name" 2>/dev/null || true)"
@@ -1231,10 +1232,32 @@ for name,original in state.items():
 PY_RESTORE_TEMP_GATEWAYS
     fi
 
+    # Ownership-proven parks from an interrupted installer stop may be restored
+    # without user intervention. Unproven legacy 14.6.5/14.6.6 parks are left
+    # alone; interactive Resume / repair obtains one bounded approval.
+    park_state="$(python3 gateway-park-policy.py pending data/hermes .installer-managed-profiles)" || return 1
+    if jq -e '.legacy | length > 0' <<< "$park_state" >/dev/null; then
+      echo 'Managed profile(s) are parked without provable installer ownership; run interactive Resume / repair to approve unpark. No marker was changed.' >&2
+      return 1
+    fi
+    park_result="$(python3 gateway-park-policy.py reconcile data/hermes .installer-managed-profiles)" || return 1
+    if [[ -n "$park_result" ]]; then
+      printf '%s\n' "$park_result"
+      first_unparked="$(sed -n 's/^Unparked managed profile: //p' <<< "$park_result" | head -n1)"
+      if [[ -n "$first_unparked" ]]; then
+        timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent python -c 'import sys; from hermes_cli.gateway_multiplex_served import notify_multiplexer_profiles_changed; notify_multiplexer_profiles_changed(sys.argv[1], timeout=8.0)' "$first_unparked" >/dev/null 2>&1 || true
+      fi
+    fi
+
     # The ownership marker is evidence, never health proof. Give a just-started
     # gateway a short bounded chance to prove exact convergence before deciding a
     # migration is necessary. This also recovers a backup that lost only the marker.
-    if wait_live_multiplex_gateway_manage 12; then
+    if [[ -n "${park_result:-}" ]]; then
+      convergence_wait=45
+    else
+      convergence_wait=12
+    fi
+    if wait_live_multiplex_gateway_manage "$convergence_wait"; then
       shared_gateway_ready=true
       if [[ ! -e .installer-gateway-multiplex-owned ]]; then
         echo 'Shared Hermes gateway is already converged; restoring the LatticeVale ownership marker without replaying migration.'
@@ -1277,7 +1300,7 @@ PY_UNOWNED_GATEWAY_CANDIDATES
           echo "Hermes gateway migration exited with status $migration_rc; allowing a bounded settle window and checking exact live convergence before deciding startup failed." >&2
         fi
       fi
-      if ! wait_live_multiplex_gateway_manage 15; then
+      if ! wait_live_multiplex_gateway_manage 45; then
         echo 'WARNING: shared gateway failed exact live verification after the bounded settle window; preserving all profile state for Resume / repair.' >&2
         return 1
       fi
@@ -1416,7 +1439,7 @@ backup() {
     honcho_dumped=true
   fi
   local -a items=()
-  for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-gateway-multiplex-owned .installer-managed-profiles .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
+  for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-gateway-multiplex-owned .installer-managed-profiles .installer-owned-gateway-parks.json .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
     compose.yaml compatibility.conf latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/latticevale data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
     [[ -e "$p" ]] && items+=("$p")
   done

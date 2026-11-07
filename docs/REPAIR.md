@@ -1,5 +1,10 @@
 # LatticeVale 14.6.6 Resume / Repair
 
+### Previously parked managed profiles (14.6.5 / 14.6.6)
+
+Resume / repair reconciles LatticeVale-owned temporary gateway parks for any number of managed Hermes profiles. If older installers left `gateway.parked` on a profile and its ownership is unproven, the interactive installer explains the ambiguity and asks once before clearing the identified managed non-standalone profiles. Declining preserves the markers and stops convergence rather than declaring a silent success. User-authored standalone profiles and unrelated profiles are never unparked by this operation. Do not manually delete Hermes profile directories or recovery credentials. A successful finish requires the live shared gateway to enumerate every expected served profile.
+
+
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 > **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.

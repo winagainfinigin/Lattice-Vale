@@ -151,7 +151,7 @@ if [[ -d "$stack_dir" ]]; then
   backup_dir="$stack_dir/backups/pre-$installer_version-$stamp"
   install -d -m 0700 -o "$linux_uid" -g "$linux_gid" "$backup_dir"
   backup_items=()
-  for item in compose.yaml compose.latticevale.yaml compose.override.yaml compatibility.conf configure-stack.sh gateway-multiplex-verify.py manage.sh managed-upstreams.py state-audit.py latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json data/latticevale .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-gateway-multiplex-owned .installer-managed-profiles; do
+  for item in compose.yaml compose.latticevale.yaml compose.override.yaml compatibility.conf configure-stack.sh gateway-multiplex-verify.py gateway-park-policy.py manage.sh managed-upstreams.py state-audit.py latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json data/latticevale .installer-state.json .install-info .configured .repair-package-refresh .repair-package-refresh-pending .matrix-info .matrix-configured .tailscale-info .windows-native-info .env secrets data/hermes/config.yaml data/hermes/.env .installer-gateway-multiplex-owned .installer-managed-profiles .installer-owned-gateway-parks.json; do
     [[ -e "$stack_dir/$item" ]] && backup_items+=("$item")
   done
   # Logs are diagnostic, not application state. Preserve them in the configuration
@@ -957,7 +957,7 @@ unset rel path
 # Refuse replacement symlinks before root writes installer-controlled files; otherwise a broken
 # or hostile prior install could redirect a repair write outside the dedicated stack tree.
 installer_owned_files=(
-  compose.yaml Dockerfile.qmd compatibility.conf resource-burst-controller.py configure-stack.sh gateway-multiplex-verify.py manage.sh managed-upstreams.py state-audit.py
+  compose.yaml Dockerfile.qmd compatibility.conf resource-burst-controller.py configure-stack.sh gateway-multiplex-verify.py gateway-park-policy.py manage.sh managed-upstreams.py state-audit.py
   latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json
   qmd-index-cycle.sh native-ollama-relay.py native-ollama-relay.sh directml-gateway.py directml-gateway.sh directml-requirements.txt install-options.json
 )
@@ -990,7 +990,8 @@ install -m 0755 -o "$linux_uid" -g "$linux_gid" \
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/configure-stack.sh" "$stack_dir/configure-stack.sh"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
-  "$bundle_root/stack/gateway-multiplex-verify.py" "$stack_dir/gateway-multiplex-verify.py"
+  "$bundle_root/stack/gateway-multiplex-verify.py" "$stack_dir/gateway-multiplex-verify.py" \
+  "$bundle_root/stack/gateway-park-policy.py" "$stack_dir/gateway-park-policy.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/manage.sh" "$stack_dir/manage.sh"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
@@ -1036,13 +1037,13 @@ verify_write_dirs=(
 [[ "$obsidian_selected" == true ]] || verify_write_dirs+=("$stack_dir/vault")
 verify_write_files=(
   "$stack_dir/compose.yaml" "$stack_dir/Dockerfile.qmd" "$stack_dir/compatibility.conf"
-  "$stack_dir/configure-stack.sh" "$stack_dir/gateway-multiplex-verify.py" "$stack_dir/manage.sh" "$stack_dir/managed-upstreams.py" "$stack_dir/state-audit.py"
+  "$stack_dir/configure-stack.sh" "$stack_dir/gateway-multiplex-verify.py" "$stack_dir/gateway-park-policy.py" "$stack_dir/manage.sh" "$stack_dir/managed-upstreams.py" "$stack_dir/state-audit.py"
   "$stack_dir/latticevale_readonly.py" "$stack_dir/latticevale_arch.py" "$stack_dir/resource-burst-controller.py" "$stack_dir/hardware-capabilities.py" "$stack_dir/backend-capabilities.py" "$stack_dir/runtime-policy.py" "$stack_dir/diagnostics.py" "$stack_dir/repair-plan.py" "$stack_dir/audit-free.py" "$stack_dir/checkpoint-metadata.json"
   "$stack_dir/qmd-index-cycle.sh" "$stack_dir/native-ollama-relay.py" "$stack_dir/native-ollama-relay.sh" "$stack_dir/directml-gateway.py" "$stack_dir/directml-gateway.sh" "$stack_dir/directml-requirements.txt" "$stack_dir/install-options.json" "$stack_dir/.env"
   "$stack_dir/.repair-package-refresh" "$stack_dir/.repair-package-refresh-pending"
   "$stack_dir/.installer-state.json" "$stack_dir/.install-info" "$stack_dir/.configured"
   "$stack_dir/.matrix-info" "$stack_dir/.matrix-configured" "$stack_dir/.tailscale-info" "$stack_dir/.windows-native-info"
-  "$stack_dir/.installer-managed-profiles" "$stack_dir/data/latticevale/windows-hardware.json" "$stack_dir/data/latticevale/hardware-capabilities.json" "$stack_dir/data/latticevale/backend-capabilities.json" "$stack_dir/data/latticevale/runtime-policy.json" "$stack_dir/data/latticevale/backend-health.json" "$stack_dir/data/hermes/config.yaml"
+  "$stack_dir/.installer-managed-profiles" "$stack_dir/.installer-owned-gateway-parks.json" "$stack_dir/data/latticevale/windows-hardware.json" "$stack_dir/data/latticevale/hardware-capabilities.json" "$stack_dir/data/latticevale/backend-capabilities.json" "$stack_dir/data/latticevale/runtime-policy.json" "$stack_dir/data/latticevale/backend-health.json" "$stack_dir/data/hermes/config.yaml"
   "$stack_dir/data/hermes/.env"
 )
 verify_selected_user_writable() {
@@ -1084,15 +1085,7 @@ import json,sys
 try: print('true' if json.load(open(sys.argv[1])).get('containerResourceLimits') is True else 'false')
 except Exception: print('false')
 PY_BURST_ENABLED
-)" == true ]] && {
-       [[ ! -e "$stack_dir/compose.override.yaml" ]] ||
-       { command -v runuser >/dev/null 2>&1 &&
-         runuser -u "$linux_user" -- /usr/bin/python3 \
-           "$stack_dir/resource-burst-controller.py" \
-           --check-override --stack "$stack_dir" >/dev/null 2>&1; }
-     }; then
-    # A verified Hermes-image-only Compose override is eligible for borrowing.
-    # The controller repeats its full Compose-model check every timer run.
+)" == true && ! -e "$stack_dir/compose.override.yaml" ]]; then
     cat > /etc/systemd/system/latticevale-resource-burst.service <<EOF_BURST_SERVICE
 [Unit]
 Description=LatticeVale bounded resource-burst controller
@@ -1113,8 +1106,8 @@ EOF_BURST_SERVICE
 [Unit]
 Description=LatticeVale bounded resource-burst scheduling
 [Timer]
-OnBootSec=1min
-OnUnitInactiveSec=25s
+OnBootSec=3min
+OnUnitInactiveSec=45s
 AccuracySec=5s
 [Install]
 WantedBy=timers.target
