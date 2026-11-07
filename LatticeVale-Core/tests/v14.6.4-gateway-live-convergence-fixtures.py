@@ -87,7 +87,8 @@ profile_cross_signing = CONFIGURE[CONFIGURE.index("stage_matrix_profile_cross_si
 assert profile_cross_signing.index("prepare_managed_profiles_for_gateway_activation_configure") < profile_cross_signing.index("request_gateway_profile_rescan_configure") < profile_cross_signing.index("start_or_restart_profile_gateway_exact")
 prepare_gateways = CONFIGURE[CONFIGURE.index("prepare_managed_profiles_for_gateway_activation_configure() {"):CONFIGURE.index("verify_live_multiplex_gateway_configure() {")]
 assert prepare_gateways.index("atomic_write(ownership") < prepare_gateways.index("for path,cfg,mode in changes")
-reconcile_restore = CONFIGURE[CONFIGURE.index("# Restore only temporary standalone flags"):CONFIGURE.index("verify_live_resource_policy_limits")]
+restore_start = CONFIGURE.index("# Restore only temporary standalone flags")
+reconcile_restore = CONFIGURE[restore_start:CONFIGURE.index("verify_live_resource_policy_limits", restore_start)]
 assert reconcile_restore.index("record_fresh_profile_gateway_baselines_configure") < reconcile_restore.index("PY_RESTORE_TEMP_GATEWAYS")
 assert reconcile_restore.index("PY_RESTORE_TEMP_GATEWAYS") < reconcile_restore.index("request_gateway_profile_rescan_configure") < reconcile_restore.index("wait_live_multiplex_gateway_configure 12")
 assert reconcile_restore.index("hermes gateway migrate --multiplex -y") < reconcile_restore.rindex("request_gateway_profile_rescan_configure") < reconcile_restore.index("if ! wait_live_multiplex_gateway_configure 15;")

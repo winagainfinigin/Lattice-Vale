@@ -83,7 +83,10 @@ case "$args" in
     exit 0
     ;;
   *"exec hermes-agent sh -c"*gateway-*)
-    case "$args" in *assistant*) printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT";; *) printf '%s/gateway-default\n' "$FAKE_DOCKER_ROOT";; esac
+    case "$args" in
+      *assistant*) printf '%s/gateway-assistant\n' "$FAKE_DOCKER_ROOT" | tee -a "$FAKE_DOCKER_LOG" ;;
+      *) printf '%s/gateway-default\n' "$FAKE_DOCKER_ROOT" | tee -a "$FAKE_DOCKER_LOG" ;;
+    esac
     exit 0
     ;;
   *"gateway stop"*)
