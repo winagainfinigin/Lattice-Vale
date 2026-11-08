@@ -6522,7 +6522,8 @@ function Add-WindowsTailscaleServeJsonState(
     [ref]$IsFunnel,
     [System.Collections.Generic.List[object]]$HandlerRoutes,
     [ref]$UnsupportedHandlers,
-    [ref]$NonHttpsTcp
+    [ref]$NonHttpsTcp,
+    [ref]$ForegroundConflict
 ) {
     if ($null -eq $Config) { return }
 
@@ -6533,6 +6534,27 @@ function Add-WindowsTailscaleServeJsonState(
     $configs = @($Config)
     foreach ($cfg in $configs) {
         if ($null -eq $cfg) { continue }
+        # Foreground Serve is an independent node listener. Never claim an
+        # untracked foreground route as owned by this installer.
+        if ($cfg.PSObject.Properties.Name -contains 'Foreground' -and $cfg.Foreground) {
+            foreach ($foreground in @($cfg.Foreground)) {
+                if ($null -eq $foreground) { continue }
+                if ($foreground.TCP -and @($foreground.TCP.PSObject.Properties.Name) -contains [string]$Port) {
+                    $InUse.Value = $true
+                    $UnsupportedHandlers.Value = $true
+                    $ForegroundConflict.Value = $true
+                }
+                if ($foreground.Web) {
+                    foreach ($webName in @($foreground.Web.PSObject.Properties.Name)) {
+                        if ([string]$webName -match (':' + [regex]::Escape([string]$Port) + '$')) {
+                            $InUse.Value = $true
+                            $UnsupportedHandlers.Value = $true
+                            $ForegroundConflict.Value = $true
+                        }
+                    }
+                }
+            }
+        }
         if ($cfg.PSObject.Properties.Name -contains 'TCP' -and $cfg.TCP) {
             foreach ($tcp in $cfg.TCP.PSObject.Properties) {
                 if ([string]$tcp.Name -eq [string]$Port) {
@@ -6557,16 +6579,61 @@ function Add-WindowsTailscaleServeJsonState(
                     foreach ($handler in $handlers.PSObject.Properties) {
                         $isRoot = ([string]::IsNullOrEmpty([string]$handler.Name) -or [string]$handler.Name -eq '/')
                         if (-not $isRoot) { $HasNonRootHandlers.Value = $true }
-                        $handlerNames = @($handler.Value.PSObject.Properties.Name)
-                        $proxy = [string]$handler.Value.Proxy
+                        # tailscale/ipn/serve.go HTTPHandler allows Proxy, Path, Text,
+                        # Redirect, and AcceptAppCaps. AcceptAppCaps can coexist
+                        # with Proxy and is NOT a competing Serve handler.
+                        $entry = $handler.Value
+                        $handlerNames = if ($null -eq $entry) { @() } else { @($entry.PSObject.Properties.Name) }
+                        $proxy = if ($handlerNames -contains 'Proxy') { [string]$entry.Proxy } else { '' }
                         $path = if ([string]::IsNullOrEmpty([string]$handler.Name)) { '/' } else { [string]$handler.Name }
-                        # Only a simple HTTP reverse-proxy handler can be migrated.
-                        # Other handler types (text/file/redirect/unknown) belong to the
-                        # user and must never be rewritten by this installer.
-                        $safe = ($path.StartsWith('/') -and -not [string]::IsNullOrWhiteSpace($proxy) -and
-                            $handlerNames.Count -eq 1 -and $handlerNames[0] -eq 'Proxy')
+                        $handlerTypes = @('Proxy','Path','Text','Redirect')
+                        $activeTypes = @($handlerTypes | Where-Object {
+                            $handlerNames -contains $_ -and -not [string]::IsNullOrEmpty([string]$entry.$_)
+                        })
+                        $unknownKeys = @($handlerNames | Where-Object {
+                            $_ -cnotin @('Proxy','Path','Text','Redirect','AcceptAppCaps')
+                        })
+                        $caps = @()
+                        $capsValid = $true
+                        if ($handlerNames -contains 'AcceptAppCaps' -and $null -ne $entry.AcceptAppCaps) {
+                            if ($entry.AcceptAppCaps -isnot [array]) { $capsValid = $false }
+                            else {
+                                foreach ($cap in $entry.AcceptAppCaps) {
+                                    if ($cap -isnot [string] -or [string]::IsNullOrWhiteSpace($cap) -or
+                                        $cap -match '[,\s]') { $capsValid = $false; break }
+                                    $caps += [string]$cap
+                                }
+                            }
+                        }
+                        $kind = if ($activeTypes.Count -eq 1) { [string]$activeTypes[0] } else { 'Unknown' }
+                        # A proxy is editable only when every property is known
+                        # and can be reproduced by the documented serve CLI.
+                        $safe = ($path.StartsWith('/') -and $kind -eq 'Proxy' -and
+                            -not [string]::IsNullOrWhiteSpace($proxy) -and
+                            $unknownKeys.Count -eq 0 -and $capsValid)
                         if (-not $safe) { $UnsupportedHandlers.Value = $true }
-                        $HandlerRoutes.Add([pscustomobject]@{ Host=$hostPort; Path=$path; Proxy=$proxy; Safe=$safe })
+                        # Capture *all* non-Proxy properties as immutable metadata;
+                        # the migration must preserve them, including static text,
+                        # redirects, and app-capability forwarding.
+                        $metadata = [ordered]@{}
+                        if ($null -ne $entry) {
+                            foreach ($property in @($entry.PSObject.Properties | Sort-Object Name)) {
+                                if ($property.Name -ceq 'Proxy') { continue }
+                                # Empty optional HTTPHandler fields are equivalent
+                                # to absent fields in Go's omitempty serialization.
+                                if ($property.Name -cin @('Path','Text','Redirect') -and
+                                    [string]::IsNullOrEmpty([string]$property.Value)) { continue }
+                                if ($property.Name -ceq 'AcceptAppCaps' -and
+                                    @($property.Value | Where-Object { $null -ne $_ }).Count -eq 0) { continue }
+                                $metadata[$property.Name] = $property.Value
+                            }
+                        }
+                        $signature = ConvertTo-Json -InputObject $metadata -Depth 12 -Compress
+                        $HandlerRoutes.Add([pscustomobject]@{
+                            Host=$hostPort; Path=$path; Proxy=$proxy; Safe=$safe;
+                            Kind=$kind; Caps=@($caps); Keys=($handlerNames -join ',');
+                            Signature=$signature
+                        })
                         if ($proxy) {
                             $Targets.Add($proxy)
                             if ($isRoot) { $RootTargets.Add($proxy) }
@@ -6612,8 +6679,11 @@ function Get-WindowsTailscaleServePortState(
         RouteConflict = $false
         UnsupportedHandlers = $false
         NonHttpsTcp = $false
+        ForegroundConflict = $false
         MatchesExpectedAllRoutes = $false
+        MatchesExpectedRoot = $false
         AllRoutesMigratable = $false
+        UnsupportedDetails = @()
     }
     if (-not $TailscaleExe -or $Port -le 0) { return [pscustomobject]$result }
 
@@ -6625,33 +6695,37 @@ function Get-WindowsTailscaleServePortState(
     $handlerRoutes = [System.Collections.Generic.List[object]]::new()
     $unsupportedHandlers = $false
     $nonHttpsTcp = $false
+    $foregroundConflict = $false
 
-    # Inspect both read-only CLI views. Named Services returned by get-config --all
-    # are intentionally ignored for device HTTPS listener ownership.
-    foreach ($serveArgs in @(
-        @('serve','status','--json'),
-        @('serve','get-config','--all')
-    )) {
-        try {
-            $serveProbe = Invoke-NativeProcessCapture $TailscaleExe $serveArgs 15
-            $raw = ([string]$serveProbe.StdOut).Trim()
-            if (-not $serveProbe.Success -or [string]::IsNullOrWhiteSpace($raw)) { continue }
+    # Only serve status --json describes this device's node Serve routes.
+    # serve get-config --all primarily describes *named Services* with their
+    # own virtual IPs, and must not make an unknown node state look known.
+    try {
+        $serveProbe = Invoke-NativeProcessCapture $TailscaleExe @('serve','status','--json') 15
+        $raw = ([string]$serveProbe.StdOut).Trim()
+        if ($serveProbe.Success -and -not [string]::IsNullOrWhiteSpace($raw)) {
             $status = $raw | ConvertFrom-Json -ErrorAction Stop
+            # Valid JSON null represents no device Serve config and is safe
+            # to classify as known-empty; a failed/unparseable probe is not.
             $result.Known = $true
-            Add-WindowsTailscaleServeJsonState $status $Port $targets $rootTargets ([ref]$inUse) ([ref]$hasNonRootHandlers) ([ref]$isFunnel) $handlerRoutes ([ref]$unsupportedHandlers) ([ref]$nonHttpsTcp)
-        } catch {
-            # Continue to the other read-only representation. Unknown remains conservative
-            # if neither command can be parsed successfully.
+            if ($null -ne $status) {
+                Add-WindowsTailscaleServeJsonState $status $Port $targets $rootTargets ([ref]$inUse) ([ref]$hasNonRootHandlers) ([ref]$isFunnel) $handlerRoutes ([ref]$unsupportedHandlers) ([ref]$nonHttpsTcp) ([ref]$foregroundConflict)
+            }
         }
+    } catch {
+        # An unknown node Serve configuration is never safe to overwrite.
+        Write-RemoteAccessLog "Tailscale node Serve JSON inspection failed: $($_.Exception.Message)"
     }
+    # serve get-config --all is a different named-Service schema.
+    # Consult it separately in diagnostics if needed; never merge it here.
 
     $result.InUse = $inUse
     $result.HasNonRootHandlers = $hasNonRootHandlers
     $result.IsFunnel = $isFunnel
     $result.Targets = @($targets | Select-Object -Unique)
     $result.RootTargets = @($rootTargets | Select-Object -Unique)
-    # status --json and get-config --all may overlap: deduplicate identical
-    # node routes, but refuse inconsistent readings or multiple hostnames.
+    # Deduplicate identical device routes, but refuse inconsistent readings
+    # or multiple hostnames. Named Services are intentionally excluded.
     $routeMap = @{}
     $hostMap = @{}
     $routeConflict = $false
@@ -6660,17 +6734,24 @@ function Get-WindowsTailscaleServePortState(
         $hostMap[[string]$route.Host] = $true
         if ($routeMap.ContainsKey($key)) {
             $prior = $routeMap[$key]
-            if ([string]$prior.Proxy -cne [string]$route.Proxy -or [bool]$prior.Safe -ne [bool]$route.Safe) { $routeConflict = $true }
+            if ([string]$prior.Proxy -cne [string]$route.Proxy -or
+                [bool]$prior.Safe -ne [bool]$route.Safe -or
+                [string]$prior.Signature -cne [string]$route.Signature -or
+                [string]$prior.Kind -cne [string]$route.Kind) { $routeConflict = $true }
         } else { $routeMap[$key] = $route }
     }
     if ($hostMap.Count -gt 1) { $routeConflict = $true }
     $result.Routes = @($routeMap.Values | Sort-Object Host, Path)
     $result.RouteConflict = $routeConflict
     $result.UnsupportedHandlers = $unsupportedHandlers
+    $result.UnsupportedDetails = @($result.Routes | Where-Object { -not $_.Safe } | ForEach-Object {
+        '{0}{1} ({2}; keys={3})' -f $_.Host,$_.Path,$_.Kind,$_.Keys
+    })
     $result.NonHttpsTcp = $nonHttpsTcp
+    $result.ForegroundConflict = $foregroundConflict
     $result.AllRoutesMigratable = ($result.InUse -and $result.Routes.Count -gt 0 -and
         -not $result.IsFunnel -and -not $result.RouteConflict -and -not $result.UnsupportedHandlers -and
-        -not $result.NonHttpsTcp)
+        -not $result.NonHttpsTcp -and -not $result.ForegroundConflict)
     if ($ExpectedBackendPort -gt 0 -and $result.InUse) {
         # A matching root route is not proof of exclusive ownership when other
         # handlers on the same Serve listener point to unrelated backends.
@@ -6683,6 +6764,16 @@ function Get-WindowsTailscaleServePortState(
         foreach ($target in $result.Targets) {
             if (-not (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort)) { $allTargetsOwned = $false; break }
         }
+        # A matching root can serve Matrix even when the same HTTPS listener
+        # also carries unrelated user-managed nonroot handlers. It is safe to
+        # *reuse* that root, but NEVER safe to broadly disable the listener.
+        $safeRootRoutes = @($result.Routes | Where-Object {
+            $_.Path -eq '/' -and $_.Safe -and
+            (Test-WindowsTailscaleBackendTarget ([string]$_.Proxy) $ExpectedBackendPort)
+        })
+        $result.MatchesExpectedRoot = ($safeRootRoutes.Count -eq 1 -and
+            -not $result.IsFunnel -and -not $result.RouteConflict -and -not $result.NonHttpsTcp -and
+            -not $result.ForegroundConflict)
         $result.MatchesExpected = ($hasExpectedRoot -and $allTargetsOwned)
         if (-not $result.AllRoutesMigratable) { $result.MatchesExpected = $false }
         # An explicitly approved multi-path migration is verified separately.
@@ -6734,51 +6825,87 @@ function Resolve-UnownedTailscaleServeConflict(
 ) {
     if (-not $PortState -or -not $PortState.Known -or -not $PortState.InUse) { return 'none' }
     $targets = if ($PortState.Targets.Count -gt 0) { $PortState.Targets -join ', ' } else { 'an unknown target' }
-    if ($PortState.MatchesExpected -or $PortState.MatchesExpectedAllRoutes) {
-        Write-Info "The existing $Label Serve rule on HTTPS port $HttpsPort already targets the expected LatticeVale bridge; adopting it without changing or restarting Tailscale Serve."
+    if ($PortState.MatchesExpected -or $PortState.MatchesExpectedAllRoutes -or $PortState.MatchesExpectedRoot) {
+        if ($PortState.MatchesExpectedRoot -and -not $PortState.MatchesExpected) {
+            Write-Info "The $Label HTTPS $HttpsPort root already uses the verified LatticeVale bridge; other paths remain user-managed and are not modified or owned."
+        } else {
+            Write-Info "The existing $Label Serve rule on HTTPS port $HttpsPort already targets the expected LatticeVale bridge; adopting it without changing or restarting Tailscale Serve."
+        }
         return 'adopt'
     }
-    # Only an existing HTTP loopback bridge can be proposed for migration.
-    # A proxy to a LAN host, public site, file handler, or other service is
-    # never silently or interactively assumed to be a LatticeVale legacy relay.
-    $oldProxy = if ($PortState.Targets.Count -eq 1) { ([string]$PortState.Targets[0]).TrimEnd('/') } else { '' }
-    $oldProxyIsLocalBridge = ($oldProxy -match '^(?i:http://)?(?:127\.0\.0\.1|localhost):[0-9]{2,5}$')
-    # Historical v14.6.3 added root-path awareness and v14.6.5 blocked
-    # foreign targets. Preserve those protections while allowing an explicitly
-    # approved legacy multi-path listener where EVERY handler is a simple
-    # proxy to one old Windows Matrix bridge (e.g. 18008 -> 18009).
-    if (-not $PortState.AllRoutesMigratable -or @($PortState.Targets).Count -ne 1 -or -not $oldProxyIsLocalBridge) {
-        Write-Warning "HTTPS $HttpsPort has an unsupported or shared Tailscale configuration (Funnel=$($PortState.IsFunnel), additionalPaths=$($PortState.HasNonRootHandlers), conflictingRoutes=$($PortState.RouteConflict), unsupportedHandlers=$($PortState.UnsupportedHandlers), nonHttpsTcp=$($PortState.NonHttpsTcp), targets=$targets). Leaving it unchanged."
+    # Never touch a public Funnel, TCP forwarder, conflicting host, or a
+    # listener whose root path is not an ordinary local HTTP proxy. The root
+    # is the only safe evidence of an old LatticeVale Matrix/ Dashboard route.
+    $oldRoot = @($PortState.Routes | Where-Object {
+        $_.Path -eq '/' -and $_.Safe -and
+        ([string]$_.Proxy -match '^(?i:http://)?(?:127\.0\.0\.1|localhost):[0-9]{2,5}/?$')
+    })
+    $oldProxy = if ($oldRoot.Count -eq 1) { [string]$oldRoot[0].Proxy } else { '' }
+    $oldProxyIsLocalBridge = $oldRoot.Count -eq 1
+    $migrating = @($PortState.Routes | Where-Object { $_.Safe -and [string]$_.Proxy -ceq $oldProxy })
+    $unreproducibleOldProxy = @($PortState.Routes | Where-Object {
+        -not $_.Safe -and [string]$_.Proxy -ceq $oldProxy -and -not [string]::IsNullOrWhiteSpace($oldProxy)
+    })
+    if (-not $oldProxyIsLocalBridge -or $PortState.IsFunnel -or $PortState.RouteConflict -or
+        $PortState.NonHttpsTcp -or $PortState.ForegroundConflict -or $migrating.Count -lt 1 -or $unreproducibleOldProxy.Count -gt 0) {
+        $details = @($PortState.UnsupportedDetails) -join '; '
+        Write-Warning "HTTPS $HttpsPort cannot be safely migrated (Funnel=$($PortState.IsFunnel), additionalPaths=$($PortState.HasNonRootHandlers), conflictingRoutes=$($PortState.RouteConflict), unsupportedHandlers=$($PortState.UnsupportedHandlers), nonHttpsTcp=$($PortState.NonHttpsTcp), foregroundConflict=$($PortState.ForegroundConflict), targets=$targets, handlerDetails=$details). Leaving it unchanged."
         return 'leave'
     }
-    $pathNames = (@($PortState.Routes | ForEach-Object { [string]$_.Path }) -join ', ')
-    if (-not (Read-Choice "Migrate the existing untracked Tailscale rule on HTTPS port $HttpsPort for $Label?" "Every observed path ($pathNames) proxies to $targets. Yes updates each path in place to http://127.0.0.1:$BackendPort and preserves all path names; no Serve listener is deleted. This can migrate an older LatticeVale relay bridge without disturbing other Tailscale listeners." 'No leaves the existing rule untouched and skips this LatticeVale remote exposure.' $false)) {
+    $changedPaths = (@($migrating | ForEach-Object { [string]$_.Path }) -join ', ')
+    $untouched = $PortState.Routes.Count - $migrating.Count
+    if (-not (Read-Choice "Migrate the existing untracked Tailscale rule on HTTPS port $HttpsPort for $Label?" "Only $($migrating.Count) proxy path(s) ($changedPaths) currently target the old local bridge $oldProxy. Yes changes ONLY those paths to http://127.0.0.1:$BackendPort, while preserving $untouched other paths and their handler types/options. No HTTPS listener is deleted; other Tailscale services are not changed." 'No leaves the existing rule untouched and skips this LatticeVale remote exposure.' $false)) {
         return 'leave'
     }
-    # Confirm no concurrent reconfiguration between user consent and the write.
     $latest = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
-    if (-not $latest.Known -or -not $latest.AllRoutesMigratable -or
+    if (-not $latest.Known -or
         (Get-WindowsTailscaleRouteFingerprint $latest) -cne (Get-WindowsTailscaleRouteFingerprint $PortState)) {
         Write-Warning "Tailscale Serve HTTPS $HttpsPort changed or became unverifiable during confirmation. It was left untouched."
         return 'leave'
     }
-    # One root route takes the direct in-place update path. Multiple routes
-    # require each specific --set-path, never a port-wide 'off' or 'reset'.
-    if ($PortState.HasNonRootHandlers) { return 'replace-routes' }
-    return 'replace'
+    # Use an explicitly scoped --set-path update even for a lone root route:
+    # replacing/turning off the whole listener could delete other paths.
+    return 'replace-routes'
 }
 
 # Deterministic read-only identity of every handler before modifying a Serve port.
 function Get-WindowsTailscaleRouteFingerprint([object]$PortState) {
     if (-not $PortState -or -not $PortState.Known) { return '' }
     $items = @($PortState.Routes | ForEach-Object {
-        "{0}`t{1}`t{2}`t{3}" -f ([string]$_.Host),([string]$_.Path),([string]$_.Proxy),([bool]$_.Safe)
+        "{0}`t{1}`t{2}`t{3}`t{4}`t{5}" -f ([string]$_.Host),([string]$_.Path),([string]$_.Proxy),([bool]$_.Safe),([string]$_.Kind),([string]$_.Signature)
     } | Sort-Object)
     return $items -join "`n"
 }
 
-# Safely migrate an all-proxy Serve path group. Never turn off HTTPS 443, reset
-# Tailscale, flatten a multi-path configuration, or overwrite unrelated targets.
+# Check every original path. The requested proxy target may change, but its
+# handler metadata must not, and every other route must remain byte-equivalent
+# under stable JSON serialization. Unknown user routes are never rewritten.
+function Test-WindowsTailscaleRouteMigrationState(
+    [object]$Current,
+    [object]$Original,
+    [object[]]$ChangedRoutes,
+    [string]$OldProxy,
+    [string]$Desired
+) {
+    if (-not $Current.Known -or $Current.IsFunnel -or $Current.RouteConflict -or $Current.NonHttpsTcp -or
+        $Current.ForegroundConflict -or $Current.Routes.Count -ne $Original.Routes.Count) { return $false }
+    foreach ($prior in $Original.Routes) {
+        $routeMatches = @($Current.Routes | Where-Object { $_.Host -ceq $prior.Host -and $_.Path -ceq $prior.Path })
+        if ($routeMatches.Count -ne 1) { return $false }
+        $now = $routeMatches[0]
+        if ([string]$now.Signature -cne [string]$prior.Signature -or
+            [string]$now.Kind -cne [string]$prior.Kind -or [bool]$now.Safe -ne [bool]$prior.Safe) { return $false }
+        $changed = @($ChangedRoutes | Where-Object { $_.Host -ceq $prior.Host -and $_.Path -ceq $prior.Path }).Count -eq 1
+        $expectedProxy = if ($changed) { $Desired } else { [string]$prior.Proxy }
+        if ([string]$now.Proxy -cne $expectedProxy) { return $false }
+    }
+    return $true
+}
+
+# Change only old-bridge HTTP proxy paths; preserve text, file, redirect,
+# unknown, and unrelated proxy paths exactly as found. Never reset/disable a
+# whole listener. The root proxy proves the legacy bridge's identity, and
+# the user must explicitly approve the targeted replacement.
 function Move-WindowsTailscaleServeRoutes(
     [string]$TailscaleExe,
     [int]$HttpsPort,
@@ -6787,20 +6914,35 @@ function Move-WindowsTailscaleServeRoutes(
     [object]$OriginalState
 ) {
     $originalRoutes = @($OriginalState.Routes)
-    if (-not $OriginalState.AllRoutesMigratable -or $originalRoutes.Count -lt 1 -or
-        @($OriginalState.Targets).Count -ne 1) { return $false }
-    $oldProxy = [string]$OriginalState.Targets[0]
+    if (-not $OriginalState.Known -or $OriginalState.IsFunnel -or
+        $OriginalState.RouteConflict -or $OriginalState.NonHttpsTcp -or $OriginalState.ForegroundConflict -or
+        $originalRoutes.Count -lt 1) { return $false }
+    $root = @($originalRoutes | Where-Object {
+        $_.Path -eq '/' -and $_.Safe -and
+        ([string]$_.Proxy -match '^(?i:http://)?(?:127\.0\.0\.1|localhost):[0-9]{2,5}/?$')
+    })
+    if ($root.Count -ne 1) { return $false }
+    $oldProxy = [string]$root[0].Proxy
     $desired = "http://127.0.0.1:$BackendPort"
+    $selected = @($originalRoutes | Where-Object { $_.Safe -and [string]$_.Proxy -ceq $oldProxy })
+    if ($selected.Count -lt 1 -or @($originalRoutes | Where-Object {
+        -not $_.Safe -and [string]$_.Proxy -ceq $oldProxy
+    }).Count -gt 0) { return $false }
     $fingerprint = Get-WindowsTailscaleRouteFingerprint $OriginalState
     $current = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
-    if (-not $current.AllRoutesMigratable -or (Get-WindowsTailscaleRouteFingerprint $current) -cne $fingerprint) {
-        Write-Warning "The $Label Tailscale path group changed before migration. Leaving it unchanged."
+    if (-not $current.Known -or (Get-WindowsTailscaleRouteFingerprint $current) -cne $fingerprint) {
+        Write-Warning "The $Label Tailscale configuration changed before migration. Leaving it unchanged."
         return $false
     }
     $applied = [System.Collections.Generic.List[object]]::new()
     $ok = $true
-    foreach ($route in $originalRoutes) {
-        $serveArgs = @('serve','--bg','--yes',"--https=$HttpsPort", "--set-path=$([string]$route.Path)", $desired)
+    foreach ($route in $selected) {
+        $serveArgs = @('serve','--bg','--yes',"--https=$HttpsPort", "--set-path=$([string]$route.Path)")
+        if (@($route.Caps).Count -gt 0) {
+            # The CLI would otherwise discard an existing AcceptAppCaps value.
+            $serveArgs += '--accept-app-caps=' + (@($route.Caps) -join ',')
+        }
+        $serveArgs += $desired
         $response = Invoke-NativeProcessCapture $TailscaleExe $serveArgs 30
         if (-not $response.Success) {
             $detail = Get-SafeDiagnosticExcerpt $response.Text 450
@@ -6810,48 +6952,38 @@ function Move-WindowsTailscaleServeRoutes(
         }
         $applied.Add($route)
         $current = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
-        # Each intermediate state must contain exactly the same paths and only
-        # expected old/new proxies. A changed or foreign handler aborts migration.
-        if (-not $current.AllRoutesMigratable -or $current.Routes.Count -ne $originalRoutes.Count) { $ok = $false; break }
-        foreach ($item in $current.Routes) {
-            $prior = @($originalRoutes | Where-Object { $_.Host -ceq $item.Host -and $_.Path -ceq $item.Path })
-            if ($prior.Count -ne 1 -or
-                (-not ([string]$item.Proxy -ceq $oldProxy -or [string]$item.Proxy -ceq $desired))) {
-                $ok = $false; break
-            }
+        if (-not (Test-WindowsTailscaleRouteMigrationState $current $OriginalState ($applied.ToArray()) $oldProxy $desired)) {
+            Write-Warning "Tailscale $Label Serve HTTPS $HttpsPort changed an unexpected handler during path migration."
+            $ok = $false
+            break
         }
-        if (-not $ok) { break }
     }
     if ($ok) {
         for ($attempt = 0; $attempt -lt 5; $attempt++) {
             $verified = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
-            $samePaths = $verified.Routes.Count -eq $originalRoutes.Count
+            $samePaths = Test-WindowsTailscaleRouteMigrationState $verified $OriginalState $selected $oldProxy $desired
             if ($samePaths) {
-                foreach ($route in $originalRoutes) {
-                    if (@($verified.Routes | Where-Object { $_.Host -ceq $route.Host -and $_.Path -ceq $route.Path }).Count -ne 1) {
-                        $samePaths = $false; break
-                    }
-                }
-            }
-            if ($verified.Known -and $verified.MatchesExpectedAllRoutes -and $samePaths) {
-                Write-Info "Migrated $($originalRoutes.Count) $Label Tailscale Serve paths in place on HTTPS $HttpsPort; all routes now target the verified Windows relay."
+                Write-Info "Migrated $($selected.Count) $Label Tailscale Serve proxy path(s) in place on HTTPS $HttpsPort; preserved $($originalRoutes.Count - $selected.Count) other paths."
                 return $true
             }
             if ($attempt -lt 4) { Start-Sleep -Milliseconds 400 }
         }
-        Write-Warning "Tailscale $Label Serve path migration did not verify all routes on HTTPS $HttpsPort."
+        Write-Warning "Tailscale $Label Serve migration did not verify on HTTPS $HttpsPort."
     }
-    # Best-effort rollback of only paths this invocation changed, and only if
-    # their live target still equals the new backend. Other listener paths are
-    # never removed. A concurrent foreign change is left untouched.
+    # Best-effort rollback of only paths this invocation changed. Never
+    # revert unrelated user paths, or an endpoint changed by another process.
     for ($idx = $applied.Count - 1; $idx -ge 0; $idx--) {
         $route = $applied[$idx]
         $state = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
         $matching = @($state.Routes | Where-Object { $_.Host -ceq $route.Host -and $_.Path -ceq $route.Path })
         if (-not $state.Known -or $state.IsFunnel -or $matching.Count -ne 1 -or
-            [string]$matching[0].Proxy -cne $desired) { continue }
-        $undo = Invoke-NativeProcessCapture $TailscaleExe @('serve','--bg','--yes',"--https=$HttpsPort","--set-path=$([string]$route.Path)", $oldProxy) 30
-        if (-not $undo.Success) { Write-Warning "Could not automatically restore $Label HTTPS $HttpsPort path $($route.Path); inspect 'tailscale serve status --json'." }
+            [string]$matching[0].Proxy -cne $desired -or
+            [string]$matching[0].Signature -cne [string]$route.Signature) { continue }
+        $undoArgs = @('serve','--bg','--yes',"--https=$HttpsPort","--set-path=$([string]$route.Path)")
+        if (@($route.Caps).Count -gt 0) { $undoArgs += '--accept-app-caps=' + (@($route.Caps) -join ',') }
+        $undoArgs += $oldProxy
+        $undo = Invoke-NativeProcessCapture $TailscaleExe $undoArgs 30
+        if (-not $undo.Success) { Write-Warning "Could not restore $Label HTTPS $HttpsPort path $($route.Path); inspect 'tailscale serve status --json'." }
     }
     return $false
 }
@@ -7162,7 +7294,7 @@ function Show-WindowsRecoveryAudit([string]$Name, [string]$User, [object]$Option
         $bridgePort = $mapping.Bridge
         if ($tsInfo.ContainsKey($mapping.BridgeMeta)) { [void][int]::TryParse($tsInfo[$mapping.BridgeMeta], [ref]$bridgePort) }
         $portState = Get-WindowsTailscaleServePortState $tsExe $tracked $bridgePort
-        if ($portState.Known -and $portState.InUse -and ($portState.MatchesExpected -or $portState.MatchesExpectedAllRoutes)) {
+        if ($portState.Known -and $portState.InUse -and ($portState.MatchesExpected -or $portState.MatchesExpectedAllRoutes -or $portState.MatchesExpectedRoot)) {
             Write-Info "Tailscale $($mapping.Label): LOCAL PASS (HTTPS $tracked -> Windows bridge $bridgePort); second-device status is reported separately"
         } elseif ($portState.Known) {
             Write-Info "Tailscale $($mapping.Label): BROKEN/PARTIAL (HTTPS $tracked does not match the expected backend)"

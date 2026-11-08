@@ -287,7 +287,10 @@ check('listener.Start(backlog); // synchronous bind' in relay and 'int backlog =
 check('-RestartCount 5' in ps1 and '-RestartInterval (New-TimeSpan -Minutes 1)' in ps1,'native relay task restart-on-failure policy missing')
 check('interface portproxy add' not in relay.lower() and 'netsh.exe' not in relay.lower(),'v13.16.3 relay must not depend on netsh portproxy')
 check('Migration cleanup only: v13.12.x used netsh portproxy' in ps1,'legacy portproxy cleanup boundary missing')
-check("@('serve','status','--json')" in ps1 and "@('serve','get-config','--all')" in ps1,'Tailscale Serve status/full-config collision checks missing')
+check("@('serve','status','--json')" in ps1 and
+      'serve get-config --all is a different named-Service schema' in ps1 and
+      "Invoke-NativeProcessCapture $TailscaleExe @('serve','get-config','--all')" not in ps1,
+      'Tailscale node-Serve status must not be mixed with named-Service get-config JSON')
 check('Get-AuthenticodeSignature -LiteralPath $installer' in ps1 and "$signerSubject -notmatch '(?i)tailscale'" in ps1, 'direct Tailscale download must be Authenticode-verified before execution')
 check('SYNAPSE_IMAGE=matrixdotorg/synapse:latest' in configure and 'matrixdotorg/synapse:latest' in compose_text,'Synapse must track the latest stable container channel under managed-upstream policy')
 check('/_matrix/client/v3/capabilities' in configure and 'm.room_versions' in configure,'Matrix room-version capability negotiation missing')

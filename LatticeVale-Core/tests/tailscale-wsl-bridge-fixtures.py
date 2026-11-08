@@ -64,7 +64,7 @@ assert "@('serve',\"--https=$HttpsPort\",'off')" not in matching_rule
 assert 'return \'leave\'' in serve_conflict
 assert "@('serve',\"--https=$port\",'off')" in uninstaller
 # In-place replacement must preserve the old listener until an explicitly approved update succeeds.
-assert 'no Serve listener is deleted' in serve_conflict
+assert 'No HTTPS listener is deleted' in serve_conflict
 assert 'changed or became unverifiable during confirmation' in serve_conflict
 assert "@('serve',\"--https=$HttpsPort\",'off')" not in serve_conflict
 serve_enable = ps[ps.index('function Enable-WindowsTailscaleServe'):ps.index('function Test-WindowsTailscaleServeListener')]
@@ -73,7 +73,7 @@ assert 'Invoke-NativeProcessCapture $TailscaleExe $serveArgs 30' in serve_enable
 assert 'if ($verified.Known -and $verified.MatchesExpected)' in serve_enable
 assert "'Matrix' $true" in ps and "'Dashboard' $true" in ps
 port_state=ps[ps.index('function Add-WindowsTailscaleServeJsonState'):ps.index('function Disable-WindowsTailscaleServe')]
-assert 'Named Services returned by get-config --all' in port_state
+assert 'get-config --all primarily describes *named Services*' in port_state
 assert 'foreach ($service in $Config.Services.PSObject.Properties)' not in port_state
 assert 'HasNonRootHandlers' in port_state and 'IsFunnel' in port_state
 # Matrix remote access remains multi-client through fixed internal per-service gates.
@@ -94,7 +94,7 @@ assert "$service.PSObject.Properties.Name -contains 'maxConnections'" not in hel
 assert 'per-service concurrency limit' in helper
 assert "@('set','--accept-dns=true')" not in ps
 assert "@('serve','status','--json')" in ps
-assert "@('serve','get-config','--all')" in ps
+assert 'serve get-config --all is a different named-Service schema' in port_state
 assert 'Add-WindowsTailscaleServeJsonState' in ps
 assert "'-EnsureDistroRunning'" in ps
 assert "$relayWaitSeconds = if ($SelfTest) { '30' } else { '120' }" in ps
@@ -266,11 +266,81 @@ move=multipath[multipath.index('function Move-WindowsTailscaleServeRoutes('):mul
 assert 'Get-WindowsTailscaleRouteFingerprint' in move
 assert '"--set-path=$([string]$route.Path)"' in move
 assert 'if (-not $response.Success)' in move
-assert 'if (-not $current.AllRoutesMigratable' in move
-assert 'MatchesExpectedAllRoutes -and $samePaths' in move
+assert 'Test-WindowsTailscaleRouteMigrationState $current $OriginalState ($applied.ToArray()) $oldProxy $desired' in move
+assert '$samePaths = Test-WindowsTailscaleRouteMigrationState $verified $OriginalState $selected $oldProxy $desired' in move
 assert 'Best-effort rollback of only paths this invocation changed' in move
 assert "@('serve','--https=443','off')" not in move
 assert "'serve','reset'" not in move
 assert "@('serve','--bg','--yes'" in move
 # Paths coexisting under port 443 must not become eligible for broad removal.
 assert 'if (-not $state.MatchesExpected)' in multipath[multipath.index('function Disable-WindowsTailscaleServe('):multipath.index('function Resolve-UnownedTailscaleServeConflict(')]
+
+# v14.6.7 source-level regression: never reject a valid Tailscale HTTPHandler
+# merely because AcceptAppCaps is present alongside Proxy; preserve the caps
+# when updating a single route, and preserve independent nonproxy paths.
+classifier = ps[ps.index('function Add-WindowsTailscaleServeJsonState'):ps.index('function Test-WindowsTailscaleBackendTarget')]
+assert "@('Proxy','Path','Text','Redirect','AcceptAppCaps')" in classifier
+assert "-and $capsValid" in classifier
+assert '$handlerNames.Count -eq 1' not in classifier
+assert 'Signature=$signature' in classifier
+assert 'MatchesExpectedRoot' in multipath
+assert 'other paths remain user-managed and are not modified or owned' in multipath
+assert 'function Test-WindowsTailscaleRouteMigrationState(' in multipath
+assert '[string]$now.Signature -cne [string]$prior.Signature' in multipath
+assert '$_ .Proxy' not in move
+assert '@($route.Caps) -join' in move
+assert '$migrating.Count' in serve_conflict
+assert '$untouched = $PortState.Routes.Count - $migrating.Count' in serve_conflict
+assert "return 'replace-routes'" in serve_conflict
+assert 'get-config --all primarily describes *named Services*' in port_state
+assert 'if (-not $current.AllRoutesMigratable' not in move
+assert '--https=443','off' not in move
+
+# Table-driven policy fixtures reproduce the observed 18008 -> 18009 drift.
+# These are *model* cases; the production logic also has source assertions
+# above, and Windows Tailscale CLI execution remains a separate live test.
+def migrate_policy(handlers, *, funnel=False, foreground=False, tcp_forward=False):
+    if funnel or foreground or tcp_forward or not isinstance(handlers, dict):
+        return ('leave', ())
+    def simple_proxy(handler):
+        keys=set(handler)
+        active=[x for x in ('Proxy','Path','Text','Redirect') if handler.get(x)]
+        caps=handler.get('AcceptAppCaps', [])
+        return (len(active)==1 and active[0]=='Proxy' and
+                keys <= {'Proxy','Path','Text','Redirect','AcceptAppCaps'} and
+                isinstance(caps,list) and all(isinstance(c,str) and c and ',' not in c and ' ' not in c for c in caps))
+    root=handlers.get('/')
+    if not isinstance(root,dict) or not simple_proxy(root):
+        return ('leave', ())
+    old=root['Proxy'].removesuffix('/')
+    if old=='http://127.0.0.1:18009':
+        return ('adopt', ())
+    if old!='http://127.0.0.1:18008':
+        return ('leave', ())
+    if any(h.get('Proxy')==old and not simple_proxy(h) for h in handlers.values()):
+        return ('leave', ())
+    return ('migrate',tuple(k for k,h in handlers.items() if simple_proxy(h) and h.get('Proxy')==old))
+
+old={'Proxy':'http://127.0.0.1:18008'}
+new={'Proxy':'http://127.0.0.1:18009'}
+assert migrate_policy({'/':old})==('migrate',('/',))
+assert migrate_policy({'/':old,'/health':{'Text':'ok'}})==('migrate',('/',))
+assert migrate_policy({'/':old,'/_matrix/':old,'/health':{'Text':'ok'}})==('migrate',('/','/_matrix/'))
+assert migrate_policy({'/':{**old,'AcceptAppCaps':['example.com/cap/x']}})==('migrate',('/',))
+assert migrate_policy({'/':old,'/foreign':{'Proxy':'http://127.0.0.1:23456'}})==('migrate',('/',))
+assert migrate_policy({'/':new,'/health':{'Text':'ok'}})==('adopt',())
+assert migrate_policy({'/':old,'/legacy':{**old,'Unexpected':True}})==('leave',())
+assert migrate_policy({'/':{**old,'Unexpected':True}})==('leave',())
+assert migrate_policy({'/':{'Text':'not a proxy'}})==('leave',())
+for safety in ({'funnel':True},{'foreground':True},{'tcp_forward':True}):
+    assert migrate_policy({'/':old},**safety)==('leave',())
+assert 'function Test-WindowsTailscaleRouteMigrationState(' in multipath
+assert '$_ .Proxy' not in multipath
+assert 'ForegroundConflict' in multipath
+assert 'handlerDetails=$details' in multipath
+assert 'No HTTPS listener is deleted' in multipath
+print('TAILSCALE SELECTIVE MULTIPATH POLICY MATRIX: PASS (12 cases)')
+# Read-only recovery audit must recognize a verified root even when separate
+# user-managed paths share the listener; disabling still requires exclusivity.
+assert '($portState.MatchesExpected -or $portState.MatchesExpectedAllRoutes -or $portState.MatchesExpectedRoot)' in ps
+assert 'if (-not $state.MatchesExpected)' in multipath
