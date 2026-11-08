@@ -744,10 +744,174 @@ def run_once(root, restore=False):
         return 0
 
 
+
+# Resume/repair: Compose sometimes reports an already-running container as
+# unchanged even when its live HostConfig CPU/RAM limits no longer agree with
+# the effective model. Reconcile only limits, only on exact owned containers,
+# without recreating services or overriding an authenticated burst lease.
+def _compose_memory_bytes(value):
+    from decimal import Decimal, InvalidOperation
+    if isinstance(value, bool):
+        raise RuntimeError('boolean Compose mem_limit is invalid')
+    match = re.fullmatch(r'\s*([0-9]+(?:\.[0-9]+)?)\s*([kmgt]?i?b?)\s*', str(value or ''), re.I)
+    if not match:
+        raise RuntimeError(f'invalid effective Compose mem_limit: {value!r}')
+    multipliers = {'': 1, 'b': 1, 'k': 1024, 'kb': 1024, 'ki': 1024, 'kib': 1024,
+                   'm': 1024**2, 'mb': 1024**2, 'mi': 1024**2, 'mib': 1024**2,
+                   'g': 1024**3, 'gb': 1024**3, 'gi': 1024**3, 'gib': 1024**3,
+                   't': 1024**4, 'tb': 1024**4, 'ti': 1024**4, 'tib': 1024**4}
+    unit = match.group(2).lower()
+    if unit not in multipliers:
+        raise RuntimeError(f'unsupported Compose memory unit {unit!r}')
+    exact = Decimal(match.group(1)) * multipliers[unit]
+    if exact != exact.to_integral_value() or not (6 * MIB <= exact < 1024**5):
+        raise RuntimeError('invalid Docker memory limit or fractional byte count')
+    return int(exact)
+
+
+def _compose_cpu_nanos(value):
+    from decimal import Decimal, InvalidOperation
+    try:
+        d = Decimal(str(value))
+        n = d * 1_000_000_000
+        if not d.is_finite() or not (0 < n <= 256 * 1_000_000_000) or n != n.to_integral_value():
+            raise ValueError('not a positive exact NanoCPU value')
+        return int(n)
+    except (InvalidOperation, ValueError, TypeError) as exc:
+        raise RuntimeError(f'invalid effective Compose CPU limit: {value!r}') from exc
+
+
+def _static_compose_limits(root, managed):
+    config = json.loads(run(['docker', 'compose', 'config', '--format', 'json'], root, timeout=25))
+    services = config.get('services') if isinstance(config, dict) else None
+    if not isinstance(services, dict):
+        raise RuntimeError('effective Compose services are missing')
+    result = {}
+    for service, expected in managed.items():
+        item = services.get(service)
+        if not isinstance(item, dict):
+            raise RuntimeError(f'missing managed service in effective Compose config: {service}')
+        result[service] = {'name': expected['name'],
+                           'memory': _compose_memory_bytes(item.get('mem_limit')),
+                           'cpu': _compose_cpu_nanos(item.get('cpus'))}
+    return result
+
+
+def _static_live_limits(root, desired):
+    raw = json.loads(run(['docker', 'inspect'] + [v['name'] for v in desired.values()], root, timeout=18))
+    by_name = {str(obj.get('Name', '')).lstrip('/'): obj for obj in raw}
+    result = {}
+    for service, expected in desired.items():
+        obj = by_name.get(expected['name'])
+        if not isinstance(obj, dict) or not obj.get('State', {}).get('Running'):
+            raise RuntimeError(f'managed container not running: {expected["name"]}')
+        labels = obj.get('Config', {}).get('Labels') or {}
+        if labels.get('com.docker.compose.project') != 'hermesstack' or labels.get('com.docker.compose.service') != service:
+            raise RuntimeError(f'unverified Docker ownership: {expected["name"]}')
+        hc = obj.get('HostConfig') or {}
+        memory, cpu = int(hc.get('Memory') or 0), int(hc.get('NanoCpus') or 0)
+        if memory <= 0 or cpu <= 0:
+            raise RuntimeError(f'unbounded Docker resource settings: {expected["name"]}')
+        result[service] = {'id': obj['Id'], 'memory': memory, 'cpu': cpu,
+                           'swap': int(hc.get('MemorySwap') or 0),
+                           'pid': int(obj['State'].get('Pid') or 0)}
+    return result
+
+
+def _static_update_limit(root, name, metric, value):
+    from decimal import Decimal
+    option, argument = ('--memory', f'{value}b') if metric == 'memory' else (
+        '--cpus', format(Decimal(value) / Decimal(1_000_000_000), 'f'))
+    run(['docker', 'update', option, argument, name], root, timeout=20)
+
+
+def reconcile_static_limits(root):
+    # The systemd policy timer and installer must never independently mutate
+    # the same Docker resources. Do not try to break a busy ownership lock.
+    lockpath = root / 'data/latticevale/resource-burst.lock'
+    lockpath.parent.mkdir(parents=True, exist_ok=True)
+    with lockpath.open('a+') as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError('resource controller currently owns the live Docker limits; retry repair later') from exc
+        managed, state = load_expected(root, allow_override=True)
+        # A verified runtime snapshot represents a legitimate controller lease.
+        # Never overwrite its intentionally different allocation with static caps.
+        try:
+            verify_snapshot(root)
+        except (RuntimeError, OSError, ValueError):
+            pass
+        else:
+            print('Verified bounded resource-controller allocation; preserving live leases')
+            return 0
+        snapshot = read_json(root / 'data/latticevale/resource-burst-state.json', {})
+        if isinstance(snapshot, dict) and snapshot.get('policyFingerprint') == state['POLICY_FINGERPRINT'] and snapshot.get('pending'):
+            raise RuntimeError('incomplete burst-controller transaction; refusing to overwrite pending changes')
+        desired = _static_compose_limits(root, managed)
+        current = _static_live_limits(root, desired)
+        target_changes = [(k, metric, current[k][metric], desired[k][metric])
+                          for metric in ('memory', 'cpu') for k in desired
+                          if current[k][metric] != desired[k][metric]]
+        if not target_changes:
+            print('Effective Compose resource limits already match all selected managed containers')
+            return 0
+        # Decrease before increase to avoid transiently exceeding the total
+        # canonical envelope. A memory reduction requires cgroup charge data;
+        # uncertainty is not permission to risk an OOM in a live service.
+        for service, metric, old, new in target_changes:
+            if metric == 'memory':
+                if current[service]['swap'] > 0 and current[service]['swap'] < new:
+                    raise RuntimeError(f'{service}: existing Docker memory+swap limit is below the new memory ceiling')
+                if new < old:
+                    pid = current[service]['pid']
+                    charged = cgroup_event_counters(pid).get('memory_current_mib') if pid > 0 else None
+                    if charged is None or new <= (charged + 64) * MIB:
+                        raise RuntimeError(f'{service}: cannot safely lower live memory ceiling without adequate measured cgroup headroom')
+        # Stable deterministic ordering supports exact rollback if a later
+        # update or verification fails. Revalidate ownership and container IDs
+        # before every mutation, including rollback.
+        ordered = sorted(target_changes, key=lambda x: (0 if x[3] < x[2] else 1,
+                                                        0 if x[1] == 'memory' else 1, x[0]))
+        applied = []
+        try:
+            for service, metric, old, new in ordered:
+                before = _static_live_limits(root, desired)[service]
+                if before['id'] != current[service]['id'] or before[metric] != old:
+                    raise RuntimeError(f'{service}: concurrent container or resource change detected')
+                _static_update_limit(root, desired[service]['name'], metric, new)
+                applied.append((service, metric, old, new))
+                after = _static_live_limits(root, desired)[service]
+                if after['id'] != current[service]['id'] or after[metric] != new:
+                    raise RuntimeError(f'{service}: Docker did not apply expected {metric} limit')
+            final = _static_live_limits(root, desired)
+            if any(final[k][metric] != desired[k][metric] for k in desired for metric in ('memory', 'cpu')):
+                raise RuntimeError('one or more selected managed Docker resource limits still differ from effective Compose')
+        except Exception as exc:
+            failed_undos = []
+            for service, metric, old, new in reversed(applied):
+                try:
+                    before = _static_live_limits(root, desired)[service]
+                    if before['id'] != current[service]['id'] or before[metric] != new:
+                        failed_undos.append(f'{service}/{metric}: concurrent change')
+                        continue
+                    _static_update_limit(root, desired[service]['name'], metric, old)
+                    after = _static_live_limits(root, desired)[service]
+                    if after[metric] != old:
+                        failed_undos.append(f'{service}/{metric}: rollback not applied')
+                except Exception as rollback_exc:
+                    failed_undos.append(f'{service}/{metric}: {rollback_exc}')
+            detail = f'; rollback incomplete: {failed_undos}' if failed_undos else '; prior limits restored where changed'
+            raise RuntimeError(f'static Compose resource repair failed: {exc}{detail}') from exc
+        print(f'Reconciled {len(applied)} effective Compose hard-resource settings in place; managed containers were not restarted')
+        return 0
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--stack', type=Path, default=Path(__file__).resolve().parent)
     p.add_argument('--restore', action='store_true')
+    p.add_argument('--reconcile-static', action='store_true',
+                   help='Safely reconcile owned live CPU/RAM limits to effective Compose during repair')
     p.add_argument('--verify', action='store_true')
     p.add_argument('--check-override', action='store_true',
                    help='Read-only check of an image-only Compose override')
@@ -756,6 +920,8 @@ def main():
     if root != Path(__file__).resolve().parent:
         raise SystemExit('resource controller must run from its own installed stack')
     try:
+        if a.reconcile_static:
+            return reconcile_static_limits(root)
         if a.check_override:
             if not override_eligible(root):
                 raise RuntimeError('Compose override modifies managed policy beyond Hermes image selection')
@@ -765,6 +931,9 @@ def main():
             return 0
         return run_once(root, restore=a.restore)
     except Exception as exc:
+        if a.reconcile_static:
+            print(f'Static Docker resource reconciliation failed: {exc}', file=sys.stderr)
+            return 2
         print(f'Resource burst controller inactive (canonical or last verified bounded limits retained): {exc}', file=sys.stderr)
         return 2 if (a.restore or a.verify or a.check_override) else 0  # Keep optional timer fail-safe.
 

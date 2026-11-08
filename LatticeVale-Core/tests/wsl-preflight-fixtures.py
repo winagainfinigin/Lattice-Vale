@@ -29,3 +29,26 @@ for name,exe,lx,count,wsl_feature,vmp,expected in cases:
         raise SystemExit(f'FAIL: {name}: expected {expected}, got {got} ({reason})')
 print('WSL PREFLIGHT FIXTURES: PASS')
 for c in cases: print('-',c[0])
+
+# V14.6.7: WSL account probe failures cannot mean 'no accounts'.
+from pathlib import Path
+CORE = Path(__file__).resolve().parents[1]
+STACK = CORE / 'stack'
+main = (CORE / 'Install-LatticeVale.ps1').read_text(encoding='utf-8-sig')
+select = main.split('function Select-ExistingLinuxUser(', 1)[1].split('\nfunction ', 1)[0]
+lookup = main.split('function Get-ExistingLinuxUsers(', 1)[1].split('\nfunction ', 1)[0]
+configure = (STACK / 'configure-stack.sh').read_text(encoding='utf-8')
+assert '$usersProbe = Get-ExistingLinuxUsers $Name -ReturnProbe' in select
+assert 'if (-not $usersProbe.Success)' in select
+assert 'Get-ExistingLinuxUsers $Name)' not in select
+assert "throw \"Could not verify existing Ubuntu accounts" in select
+assert '$attempt -le 2' in lookup
+assert "Invoke-WslDirectCapture $Name 'root' 'getent' @('passwd')" in lookup
+assert 'if (-not $probe.Success -or $detail)' in lookup
+assert 'Start-Sleep -Milliseconds 350' in lookup
+assert 'Get-SafeDiagnosticExcerpt $probe.Text' in lookup
+assert 'Get-WindowsTailscaleServePortState' in main
+assert 'python3 resource-burst-controller.py --reconcile-static --stack "$PWD"' in configure
+assert configure.index('python3 resource-burst-controller.py --reconcile-static') < configure.index('verify_live_resource_policy_limits || {')
+
+print('V14.6.7 WSL ACCOUNT PROBE CONTRACT: PASS')

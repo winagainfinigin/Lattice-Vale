@@ -6170,6 +6170,16 @@ PY_UNOWNED_GATEWAY_CANDIDATES
     rm -f .installer-temporary-standalone-profiles.json
   fi
 fi
+# Compose can leave a previously-running container at its old HostConfig
+# limits even when the new effective Compose model is valid. Reconcile only
+# installer-owned Docker hard limits in place, without restarting healthy
+# Hermes/Matrix services or disregarding a verified burst-controller lease.
+if [[ "$(opt_bool containerResourceLimits)" == true ]]; then
+  python3 resource-burst-controller.py --reconcile-static --stack "$PWD" || {
+    echo 'Effective Compose CPU/RAM limits could not be safely reconciled; live state was preserved or rollback attempted.' >&2
+    return 1
+  }
+fi
 verify_live_resource_policy_limits || {
   echo 'Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v13.' >&2
   return 1

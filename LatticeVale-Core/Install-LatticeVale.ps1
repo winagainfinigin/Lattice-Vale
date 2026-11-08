@@ -4898,15 +4898,36 @@ function Select-ExistingUbuntuDistro([string]$RequestedName, [object[]]$Installe
 }
 
 function Get-ExistingLinuxUsers([string]$Name, [switch]$ReturnProbe) {
-    $probe = Invoke-WslDirectCapture $Name 'root' 'getent' @('passwd')
-    if (-not $probe.Success) {
-        $detailText = Get-SafeDiagnosticExcerpt $probe.Text
-        $detail = if ($probe.TimedOut) { 'user enumeration timed out' } elseif ($detailText) { "user enumeration failed (exit $($probe.ExitCode)): $detailText" } else { "user enumeration failed (exit $($probe.ExitCode))" }
+    # A failed or incomplete WSL probe is not proof that an existing Ubuntu
+    # account disappeared. Retry only this read-only NSS lookup, and retain
+    # the actual probe failure separately from a verified empty user roster.
+    $probe = $null
+    $detail = ''
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        $probe = Invoke-WslDirectCapture $Name 'root' 'getent' @('passwd')
+        $detail = ''
+        if ($probe.Success) {
+            $records = @([string]$probe.StdOut -split "`r?`n" | Where-Object { $_.Trim() })
+            $hasRoot = @($records | Where-Object { $_ -match '^root:[^:]*:0:0:' }).Count -gt 0
+            $malformed = $false
+            foreach ($record in $records) {
+                if (@($record -split ':').Count -lt 7) { $malformed = $true; break }
+            }
+            if ($hasRoot -and -not $malformed) { break }
+            $detail = 'getent passwd returned missing root or malformed/incomplete account records'
+        } else {
+            $excerpt = Get-SafeDiagnosticExcerpt $probe.Text
+            $prefix = if ($probe.TimedOut) { 'WSL account enumeration timed out' } else { "WSL account enumeration failed (exit $($probe.ExitCode))" }
+            $detail = if ($excerpt) { "$prefix`: $excerpt" } else { $prefix }
+        }
+        if ($attempt -lt 2) { Start-Sleep -Milliseconds 350 }
+    }
+    if (-not $probe.Success -or $detail) {
         if ($ReturnProbe) { return [pscustomobject]@{ Success = $false; Users = @(); Detail = $detail } }
-        return @()
+        throw "Cannot enumerate Ubuntu accounts in '$Name': $detail"
     }
     $users = @()
-    foreach ($line in ($probe.Text -split "`r?`n")) {
+    foreach ($line in ($probe.StdOut -split "`r?`n")) {
         if (-not $line) { continue }
         $parts = @($line -split ':')
         if ($parts.Count -lt 7) { continue }
@@ -4927,9 +4948,13 @@ function Select-ExistingLinuxUser([string]$Name) {
     Write-Info 'The installer reuses an existing Linux user. It does not create accounts or change the distro default user.'
     Write-Info 'Hermes Docker UID/GID remapping requires the selected account UID and primary GID to both be in the 1000-65534 range.'
 
-    $users = @(Get-ExistingLinuxUsers $Name)
+    $usersProbe = Get-ExistingLinuxUsers $Name -ReturnProbe
+    if (-not $usersProbe.Success) {
+        throw "Could not verify existing Ubuntu accounts in '$Name': $($usersProbe.Detail). Existing distro and managed-stack ownership were left unchanged."
+    }
+    $users = @($usersProbe.Users)
     if ($users.Count -eq 0) {
-        throw "No Hermes-compatible user account was found inside '$Name'. Use an Ubuntu account whose UID and primary GID are both 1000-65534, then rerun this installer."
+        throw "No Hermes-compatible user account was found inside '$Name' after successful WSL account enumeration. Use an Ubuntu account whose UID and primary GID are both 1000-65534, then rerun this installer."
     }
 
     # Recovery must follow the existing managed stack, not whichever account happens

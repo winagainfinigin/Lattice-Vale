@@ -395,3 +395,93 @@ assert 'resource-burst-controller.py" "$stack_dir/resource-burst-controller.py"'
 assert 'latticevale-resource-burst.timer' in uninst
 assert 'burst_valid = (burst_rc == 0)' in audit
 print('v14.6.6 bounded-burst resource controller / orchestration fixtures: PASS')
+
+
+# V14.6.7: effective Compose/live HostConfig drift after a running-container repair.
+assert module._compose_memory_bytes('1124073472') == 1124073472
+assert module._compose_memory_bytes('1072MiB') == 1124073472
+assert module._compose_cpu_nanos('0.15') == 150000000
+for invalid in ('-1', '0', 'invalid', '1.1b'):
+    try:
+        module._compose_memory_bytes(invalid)
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError(('invalid memory accepted', invalid))
+
+
+def fixture(running=True, owner='hermesstack', *, dynamic=False, pending=False, initial=1073741824,
+            expected=1124073472, second_old=1_200_000_000, second_expected=1_200_000_000,
+            break_after=None, low_headroom=False, old_cpu=150000000, target_cpu=150000000):
+    with tempfile.TemporaryDirectory(prefix='lv-resource-wsl-') as temp:
+        root = Path(temp)
+        desired = {'hermes': {'name': 'hermes-agent', 'memory': expected, 'cpu': target_cpu},
+                   'qmd': {'name': 'hermes-qmd', 'memory': second_expected, 'cpu': 250000000}}
+        live = {'hermes': {'id': 'container-id-hermes', 'memory': initial, 'cpu': old_cpu, 'swap': 2_500_000_000},
+                'qmd': {'id': 'container-id-qmd', 'memory': second_old, 'cpu': 250000000, 'swap': 3_000_000_000}}
+        updates = []
+        failures = [0]
+        def fake_run(args, cwd, timeout=12):
+            assert cwd == root
+            if args[:3] == ['docker', 'compose', 'config']:
+                return json.dumps({'services': {k: {'mem_limit': e['memory'], 'cpus': e['cpu'] / 1e9} for k,e in desired.items()}})
+            if args[:2] == ['docker', 'inspect']:
+                return json.dumps([{
+                    'Name': '/' + e['name'], 'Id': live[k]['id'],
+                    'State': {'Running': running, 'Pid': 400},
+                    'Config': {'Labels': {'com.docker.compose.project': owner,
+                                          'com.docker.compose.service': k}},
+                    'HostConfig': {'Memory': live[k]['memory'], 'NanoCpus': live[k]['cpu'],
+                                   'MemorySwap': live[k]['swap']}}
+                    for k,e in desired.items()])
+            if args[:2] == ['docker', 'update']:
+                name = args[-1]
+                key = next(k for k,e in desired.items() if e['name'] == name)
+                metric = 'memory' if args[2] == '--memory' else 'cpu'
+                if break_after is not None and len(updates) == break_after and failures[0] == 0:
+                    failures[0] += 1
+                    raise RuntimeError('injected docker update failure')
+                old = live[key][metric]
+                value = int(args[3][:-1]) if metric == 'memory' else int(round(float(args[3])*1e9))
+                live[key][metric] = value
+                updates.append((key, metric, old, value))
+                return name
+            raise AssertionError(args)
+        canonical = {k: {'name': e['name']} for k,e in desired.items()}
+        snapshot = {'policyFingerprint': 'demo', 'pending': {'hermes': {}} if pending else None}
+        (root / 'data/latticevale').mkdir(parents=True, exist_ok=True)
+        (root / 'data/latticevale/resource-burst-state.json').write_text(json.dumps(snapshot))
+        with (patch.object(module, 'load_expected', return_value=(canonical, {'POLICY_FINGERPRINT':'demo'})),
+              patch.object(module, 'run', side_effect=fake_run),
+              patch.object(module, 'verify_snapshot', side_effect=(None if dynamic else RuntimeError('no lease'))),
+              patch.object(module, 'cgroup_event_counters', return_value={'memory_current_mib': 1000 if not low_headroom else 2000})):
+            error = None
+            try:
+                module.reconcile_static_limits(root)
+            except RuntimeError as exc:
+                error = str(exc)
+        return error, live, updates, desired
+
+error, live, updates, desired = fixture()
+assert error is None, error
+assert updates == [('hermes', 'memory', 1073741824, 1124073472)]
+assert live['hermes']['memory'] == desired['hermes']['memory']
+assert fixture(initial=1124073472)[2] == []  # already converged, idempotent
+assert fixture(dynamic=True)[2] == []  # controller lease wins
+error,live,updates,_ = fixture(initial=1124073472, old_cpu=100000000, target_cpu=150000000)
+assert error is None and updates == [('hermes', 'cpu', 100000000, 150000000)]
+assert live['hermes']['cpu'] == 150000000
+error,_,updates,_ = fixture(owner='unrelated-project')
+assert 'unverified Docker ownership' in error and not updates
+error,_,updates,_ = fixture(running=False)
+assert 'not running' in error and not updates
+error,_,updates,_ = fixture(pending=True)
+assert 'incomplete burst-controller transaction' in error and not updates
+error,_,updates,_ = fixture(initial=1400000000, expected=1073741824, low_headroom=True)
+assert 'adequate measured cgroup headroom' in error and not updates
+error,live,updates,_ = fixture(initial=1073741824, second_old=1200000000, second_expected=1400000000,
+                               break_after=1)
+assert 'injected docker update failure' in error
+assert live['hermes']['memory'] == 1073741824  # rollback after second change failed
+assert updates[-1][3] == 1073741824
+print('V14.6.7 DOCKER STATIC RESOURCE RECOVERY FIXTURES: PASS')
