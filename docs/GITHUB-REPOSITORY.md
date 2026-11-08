@@ -6,7 +6,7 @@
 > **v14.6.6 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
-This document describes the LatticeVale **v14.6.6** repository/release contract for GitHub.
+This document describes the LatticeVale **v14.6.7** repository/release contract for GitHub.
 
 ## Repository structure
 
@@ -35,13 +35,13 @@ The publishable full release must:
 
 ## Repository patched-files ZIP
 
-The patched-files archive is for updating a **source checkout**, not a live `~/hermes-stack`. A same-version v14.6.6 portable-performance overwrite archive contains cumulative replacement files for an existing complete v14.6.6 source tree. It must use the single `Lattice-Vale/` root and contain only changed/new repository files relative to its declared base, plus any files needed to make the patch self-describing. Deletions, if ever required, must be represented by the repository's explicit delete-list mechanism rather than path tricks.
+The patched-files archive is for updating a **source checkout**, not a live `~/hermes-stack`. The v14.6.7 changed-files-only overlay contains cumulative replacement files relative to the exact v14.6.6 GitHub baseline `74050427`; later corrections should explicitly declare their own baseline. It must use the single `Lattice-Vale/` root and contain only changed/new repository files relative to its declared base, plus any files needed to make the patch self-describing. Deletions, if ever required, must be represented by the repository's explicit delete-list mechanism rather than path tricks.
 
 Installed LatticeVale systems must use the full release and **Resume / repair installation** so backups, ownership checks, schema migration, derived-state regeneration, and checkpoint reconciliation run normally.
 
 ## Pre-publication checks
 
-Before publishing v14.6.6:
+Before publishing v14.6.7:
 
 - version/schema/policy/fixture-count documentation must agree with source;
 - all 151 deterministic fixtures across the six current shards and both resume simulations must pass in their supported environments;
@@ -51,6 +51,6 @@ Before publishing v14.6.6:
 - both ZIPs must have the required `Lattice-Vale/` root, valid CRCs, portable paths, no duplicate/case-colliding members, and byte-for-byte source equivalence; and
 - no individual repository file may exceed 100 MiB.
 
-The current full release is built from the qualified `main` commit. The `14.6.6` tag must identify that exact commit before publication; do not publish a ZIP against an older tag target.
+The current full release is built from the qualified `main` commit. The `14.6.7` tag must identify that exact commit before publication; do not publish a ZIP against an older tag target.
 
 GitHub's community-health checklist is a recommendation rather than a special LatticeVale runtime requirement. LatticeVale keeps its existing README, MIT license, contribution, security, support, issue-template, pull-request, and CI metadata synchronized so repository users receive current guidance.

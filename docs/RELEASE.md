@@ -1,8 +1,10 @@
-> **v14.6.7 source patch (2026-11-07):** Current version is 14.6.7.
-> Apply the changed-files-only ZIP to the exact `74050427` repository source
-> before generating and verifying a full installer release. Existing installs
-> must use the installer's preservation-first Resume / repair, never direct
-> overwrite of `~/hermes-stack`. Live Windows/WSL/Docker qualification is pending.
+> **v14.6.7 source packaging (2026-11-07):** The GitHub main branch has
+> v14.6.7 source. The original changed-files ZIP applied to commit `74050427`
+> (14.6.6); a complete installer ZIP must instead be built from the fully
+> reconstructed source, with one `Lattice-Vale/` root and a verified manifest.
+> Existing installs must use preservation-first Resume / repair, never direct
+> overwrite of `~/hermes-stack`. Live Windows/WSL/Docker qualification remains
+> pending.
 
 > **v14.6.6 Hermes dynamic s6 compatibility (2026-11-07):** Verify gateway slots under `/run/hermes-service/gateway-*`, preserving upstream `/run/service` for root-supervised static services. Use unprivileged s6 lifecycle operations, non-starting registration, bounded race handling, and secret-safe error types. Confirm fresh-install and Resume / repair with a live current Hermes image before declaring end-to-end success.
 

@@ -78,7 +78,7 @@ Resume/repair and normal stack start first give a just-started shared gateway a 
 
 ## Purpose and source basis
 
-This file consolidates the **current, available LatticeVale v14.6.6 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
+This file consolidates the **current, available LatticeVale v14.6.7 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
 Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.7 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
@@ -726,7 +726,7 @@ Behavior:
 - performs the targeted periodic managed refresh when the 30-day gate is due or the refresh-policy revision changes
 - does not blindly rerun unrelated healthy stages just because the installer version changed
 
-Current periodic managed refresh window: **30 days**. `MANAGED_REPAIR_REFRESH_REVISION` is the explicit compatibility trigger for a release that requires immediate managed package/image/source convergence. A bundle-version change alone does not force a refresh.
+Current managed refresh policy: **check supported upstream updates on every Option 1 run, with no 30-day age gate**. `MANAGED_REPAIR_REFRESH_REVISION` remains the compatibility trigger for required refreshes, and Option 6 forces a refresh. A bundle-version change alone does not force a refresh.
 
 Resume/repair is preservation-first but is not guaranteed to be update-free: it performs bounded installer-owned component refresh when the age/revision/legacy-state trigger applies, while preserving explicit user-owned overrides. Option 6 forces a latest-supported stable upstream refresh immediately.
 
@@ -880,7 +880,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source policy documented by v14.6.5
+# 8. Current managed software/source policy in v14.6.7
 
 Installer-owned application defaults use stable upstream channels at refresh time:
 

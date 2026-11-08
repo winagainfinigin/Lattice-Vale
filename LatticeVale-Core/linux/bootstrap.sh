@@ -214,7 +214,7 @@ if [[ "$repair_run" == true ]]; then
     if [[ "$force_managed_update" == true ]]; then
       repair_refresh_pending=true
       repair_root_refresh_needed=true
-      echo 'A supported managed update was explicitly requested or confirmed by the v14.6.6 Option 1 availability check; performing compatibility-bounded refresh.'
+      echo "A supported managed update was explicitly requested or confirmed by the v${installer_version} Option 1 availability check; performing compatibility-bounded refresh."
     else
       echo 'No managed software refresh was requested or confirmed; preserving installed application images/sources without a time-gated pull or rebuild.'
     fi

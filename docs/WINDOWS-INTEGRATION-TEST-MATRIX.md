@@ -11,7 +11,7 @@
 > **Historical v14.6.1 remote-validation baseline:** this prior behavior required a second-device challenge. It is retained here as historical context; v14.6.3 removes that installer step. Continue to verify the Windows-native relay, IPv4/IPv6 listeners, `/versions`, client well-known, and `/login` through the final hostname locally.
 
 
-> **Current release: v14.6.6.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
+> **Current source release: v14.6.7.** This matrix separates deterministic evidence from live qualification and requires adaptive testing across qualified resource envelopes rather than one reference PC. Live cases should vary Windows/WSL builds, WSL CPU/RAM limits, enabled-service sets, model/context requirements, GPU vendor/count/topology, and backend availability.
 
 ## v14.6.5 installer and remote-access qualification
 

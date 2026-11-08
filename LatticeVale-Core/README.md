@@ -1,9 +1,10 @@
 # LatticeVale v14.6.7 — Technical README
 
-> **v14.6.7 source patch:** This changed-files-only archive applies to the exact
-> GitHub `74050427` 14.6.6 source tree. It is not a standalone installer or a
-> direct replacement for a live WSL stack. Generate and qualify the full release
-> before using the existing preservation-first Resume / repair workflow.
+> **v14.6.7 source release:** GitHub main now contains v14.6.7 source.
+> The original changed-files overlay applied to commit `74050427` (14.6.6),
+> but it is not itself a complete installer. Extract a verified full release
+> as one `Lattice-Vale/` folder and launch its `installer/Install-LatticeVale.ps1`.
+> Use the preservation-first Resume / repair workflow for existing WSL stacks.
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 

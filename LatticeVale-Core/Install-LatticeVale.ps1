@@ -20,7 +20,7 @@ function Start-LatticeValeRemoteAccessLog {
         New-Item -ItemType Directory -Path $base -Force | Out-Null
         $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
         $script:RemoteAccessLogPath = Join-Path $base "remote-access-$stamp.log"
-        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v14.6.5 remote-access diagnostics`r`nStarted: {0:o}`r`n" -f (Get-Date)), [Text.Encoding]::UTF8)
+        [IO.File]::WriteAllText($script:RemoteAccessLogPath, ("LatticeVale v{0} remote-access diagnostics`r`nStarted: {1:o}`r`n" -f $script:bundleVersion,(Get-Date)), [Text.Encoding]::UTF8)
         return $script:RemoteAccessLogPath
     } catch {
         $script:RemoteAccessLogPath = ''
@@ -8683,7 +8683,7 @@ if ($repairMaintenance) {
 if ($repairMaintenance -and $installMode -eq 'resume' -and -not $forceManagedUpdate) {
     $updateCheckFile = Join-Path $PSScriptRoot 'linux\check-managed-updates.py'
     if (-not (Test-Path -LiteralPath $updateCheckFile -PathType Leaf)) {
-        throw "Required v14.6.6 managed-update checker is missing: $updateCheckFile"
+        throw "Required v$bundleVersion managed-update checker is missing: $updateCheckFile"
     }
     Write-Step 'Checking latest-supported managed software for Option 1'
     $updateCheck = Invoke-NativeProcessCapture 'wsl.exe' @('-d', $DistroName, '-u', 'root', '--', 'python3', '-', $stackLinuxPath) 600 $updateCheckFile

@@ -1,4 +1,4 @@
-# LatticeVale 14.6.6 Test Confidence Levels
+# LatticeVale 14.6.7 Test Confidence Levels
 
 ## Portable CPU-priority and timer-activation follow-up verification
 
@@ -50,7 +50,7 @@ Docker stats snapshots alone cannot establish causality. Preserve explicit
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 
-## v14.6.6 current contract (inheriting v14.6.0 policy-13 architecture)
+## v14.6.7 current contract (inheriting v14.6.0 policy-13 architecture)
 
 The canonical architecture fixture includes a **3,328-case** CPU/backend/service-topology property sweep (13 CPU counts × 4 acceleration modes × 64 service/DirectML topologies), irregular RAM/resource sweeps, explicit boundary probes around host-reserve floor/ratio/cap transitions, GPU opt-out, DirectML fail-closed fallback, schema-21→23 and schema-22→23 migration, and aggregate CPU conservation. DirectML fixtures prohibit `torch.inference_mode()` and require `torch.no_grad()`, require the fail-closed fallback helper to exist, require bounded gateway diagnostics on a failed HTTP self-test, and require the version-gated Qwen2 `torch.where` compatibility path. The regression runner isolates each fixture in its own process group so descendants cannot retain CI pipes.
 

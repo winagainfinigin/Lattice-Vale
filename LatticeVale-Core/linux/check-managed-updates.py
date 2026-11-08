@@ -141,7 +141,7 @@ def optional_sources(stack: Path, env: dict[str, str], options: dict) -> tuple[l
                 if not match:
                     errors.append("Cannot determine installed QMD version")
                 else:
-                    request = Request("https://registry.npmjs.org/@tobilu%2Fqmd/latest", headers={"User-Agent": "LatticeVale-update-check/14.6.6"})
+                    request = Request("https://registry.npmjs.org/@tobilu%2Fqmd/latest", headers={"User-Agent": "LatticeVale-update-check/14.6.7"})
                     with urlopen(request, timeout=15) as response:
                         release = json.load(response).get("version", "")
                     proposed = VERSION.search(release)

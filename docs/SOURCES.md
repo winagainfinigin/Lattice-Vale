@@ -160,7 +160,7 @@ Compose references are pulled online from their upstream registries when a clean
 | `redis:8-alpine` | `https://hub.docker.com/_/redis` |
 | QMD build base `node:24-bookworm-slim` | `https://hub.docker.com/_/node` |
 
-v14.6.2 deliberately uses stable rolling channels for installer-owned application components. Resume / repair preserves explicit image/source overrides and resolves those channels only when the 30-day gate is due, the managed-refresh policy revision changes, valid legacy state is missing, or explicit Update / repair forces it. A bundle-version change alone stays local-first. Option 6 and `./manage.sh update` use the same latest-supported resolver. Stateful storage majors and the DirectML ABI remain compatibility-bounded rather than blindly floated. Exact pulled image IDs/digests and source commits/tags are recorded after reconciliation.
+v14.6.2 introduced stable rolling channels for installer-owned application components. The historical 30-day age gate was retired in v14.6.6: current Option 1 checks supported upstream updates on every run and refreshes only on established updates, missing managed components, or required compatibility migrations, while Option 6 forces the refresh. Explicit image/source overrides remain preserved. A bundle-version change alone stays local-first. Option 6 and `./manage.sh update` use the same latest-supported resolver. Stateful storage majors and the DirectML ABI remain compatibility-bounded rather than blindly floated. Exact pulled image IDs/digests and source commits/tags are recorded after reconciliation.
 
 ## Optional NVIDIA GPU runtime
 

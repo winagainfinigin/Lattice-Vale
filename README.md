@@ -1,9 +1,10 @@
 # LatticeVale v14.6.7
 
-> **v14.6.7 source patch:** This changed-files-only archive applies to the exact
-> GitHub `74050427` 14.6.6 source tree. It is not a standalone installer or a
-> direct replacement for a live WSL stack. Generate and qualify the full release
-> before using the existing preservation-first Resume / repair workflow.
+> **v14.6.7 source release:** GitHub main now contains v14.6.7 source.
+> The original changed-files overlay applied to commit `74050427` (14.6.6),
+> but it is not itself a complete installer. Extract a verified full release
+> as one `Lattice-Vale/` folder and launch its `installer/Install-LatticeVale.ps1`.
+> Use the preservation-first Resume / repair workflow for existing WSL stacks.
 
 > **Downstream portable-performance resource hotfix (same 14.6.6 version):**
 > Canonical CPU quotas now prioritize Hermes and CPU/Vulkan Ollama within the
@@ -11,10 +12,10 @@
 > acceleration mode, profiles, and worker concurrency. The optional bounded
 > resource controller can be enabled alongside a *verified image-only*
 > Hermes Compose override; CPU-quota-induced stall pressure no longer blocks
-> in-envelope borrowing. Apply the changed-files ZIP over an **extracted
-> complete 14.6.6 source tree**, then use normal Windows installer Option 1
-> Resume / repair. A changed-files ZIP is not a standalone release. This
-> downstream change requires live Windows/WSL/Docker performance qualification.
+> in-envelope borrowing. This 14.6.6 hotfix is already incorporated in the
+> current 14.6.7 source; do not reapply its historical ZIP. For a live managed
+> stack, launch the complete current installer and choose Option 1 —
+> Resume / repair. Live Windows/WSL/Docker performance qualification remains required.
 > See [Resource Policy](docs/RESOURCE-POLICY.md) and
 > [Release Verification](docs/RELEASE.md).
 
@@ -35,7 +36,7 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> For **any recognized older installer-managed LatticeVale installation**, apply the v14.6.7 source overlay to a complete 14.6.6 checkout before creating a **full v14.6.7 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
+> For **any recognized older installer-managed LatticeVale installation**, use a complete, verified v14.6.7 installer source release and choose **Resume / repair installation**. The source-only patch ZIP does not update an installed runtime on its own. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
 
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
