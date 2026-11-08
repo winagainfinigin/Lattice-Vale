@@ -6800,8 +6800,8 @@ function Move-WindowsTailscaleServeRoutes(
     $applied = [System.Collections.Generic.List[object]]::new()
     $ok = $true
     foreach ($route in $originalRoutes) {
-        $args = @('serve','--bg','--yes',"--https=$HttpsPort", "--set-path=$([string]$route.Path)", $desired)
-        $response = Invoke-NativeProcessCapture $TailscaleExe $args 30
+        $serveArgs = @('serve','--bg','--yes',"--https=$HttpsPort", "--set-path=$([string]$route.Path)", $desired)
+        $response = Invoke-NativeProcessCapture $TailscaleExe $serveArgs 30
         if (-not $response.Success) {
             $detail = Get-SafeDiagnosticExcerpt $response.Text 450
             Write-Warning "Tailscale $Label HTTPS $HttpsPort path $($route.Path) could not be migrated: $detail"
