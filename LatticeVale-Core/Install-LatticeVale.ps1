@@ -6517,15 +6517,17 @@ function Add-WindowsTailscaleServeJsonState(
     [int]$Port,
     [System.Collections.Generic.List[string]]$Targets,
     [System.Collections.Generic.List[string]]$RootTargets,
-    [ref]$InUse
+    [ref]$InUse,
+    [ref]$HasNonRootHandlers,
+    [ref]$IsFunnel
 ) {
     if ($null -eq $Config) { return }
 
-    # Legacy/device Serve JSON shape used by `tailscale serve status --json`.
+    # Only the device's top-level Web/TCP config owns node HTTPS listeners.
+    # Services (svc:name) use separate virtual IPs and must NEVER be mixed into
+    # a node-port ownership decision; --https=443 off without --service does not
+    # address a named Service. Preserve those unrelated resources entirely.
     $configs = @($Config)
-    if ($Config.PSObject.Properties.Name -contains 'Services' -and $Config.Services) {
-        foreach ($service in $Config.Services.PSObject.Properties) { $configs += $service.Value }
-    }
     foreach ($cfg in $configs) {
         if ($null -eq $cfg) { continue }
         if ($cfg.PSObject.Properties.Name -contains 'TCP' -and $cfg.TCP) {
@@ -6541,37 +6543,24 @@ function Add-WindowsTailscaleServeJsonState(
                 $handlers = $web.Value.Handlers
                 if ($handlers) {
                     foreach ($handler in $handlers.PSObject.Properties) {
+                        $isRoot = ([string]::IsNullOrEmpty([string]$handler.Name) -or [string]$handler.Name -eq '/')
+                        if (-not $isRoot) { $HasNonRootHandlers.Value = $true }
                         $proxy = $handler.Value.Proxy
                         if ($proxy) {
                             $Targets.Add([string]$proxy)
-                            if ([string]::IsNullOrEmpty([string]$handler.Name) -or [string]$handler.Name -eq '/') { $RootTargets.Add([string]$proxy) }
+                            if ($isRoot) { $RootTargets.Add([string]$proxy) }
                         }
                     }
                 }
             }
         }
-    }
-
-    # Current Tailscale Services/get-config shape:
-    # { "services": { "svc:name": { "endpoints": { "tcp:443": "http://127.0.0.1:..." }}}}
-    foreach ($servicesPropertyName in @('services','Services')) {
-        if (-not ($Config.PSObject.Properties.Name -contains $servicesPropertyName)) { continue }
-        $servicesNode = $Config.PSObject.Properties[$servicesPropertyName].Value
-        if (-not $servicesNode) { continue }
-        foreach ($service in $servicesNode.PSObject.Properties) {
-            $serviceValue = $service.Value
-            if (-not $serviceValue) { continue }
-            foreach ($endpointPropertyName in @('endpoints','Endpoints')) {
-                if (-not ($serviceValue.PSObject.Properties.Name -contains $endpointPropertyName)) { continue }
-                $endpoints = $serviceValue.PSObject.Properties[$endpointPropertyName].Value
-                if (-not $endpoints) { continue }
-                foreach ($endpoint in $endpoints.PSObject.Properties) {
-                    $endpointName = [string]$endpoint.Name
-                    if ($endpointName -notmatch ('(^|:)' + [regex]::Escape([string]$Port) + '$')) { continue }
+        # Funnel on the same node HTTPS port is public-facing; LatticeVale must not
+        # silently turn it into a private Serve route even with a matching proxy.
+        if ($cfg.PSObject.Properties.Name -contains 'AllowFunnel' -and $cfg.AllowFunnel) {
+            foreach ($entry in $cfg.AllowFunnel.PSObject.Properties) {
+                if (([string]$entry.Name -match (':' + [regex]::Escape([string]$Port) + '$')) -and [bool]$entry.Value) {
+                    $IsFunnel.Value = $true
                     $InUse.Value = $true
-                    if ($endpoint.Value -is [string] -and -not [string]::IsNullOrWhiteSpace([string]$endpoint.Value)) {
-                        $Targets.Add([string]$endpoint.Value)
-                    }
                 }
             }
         }
@@ -6596,16 +6585,19 @@ function Get-WindowsTailscaleServePortState(
         MatchesExpected = $false
         Targets = @()
         RootTargets = @()
+        HasNonRootHandlers = $false
+        IsFunnel = $false
     }
     if (-not $TailscaleExe -or $Port -le 0) { return [pscustomobject]$result }
 
     $targets = [System.Collections.Generic.List[string]]::new()
     $rootTargets = [System.Collections.Generic.List[string]]::new()
     $inUse = $false
+    $hasNonRootHandlers = $false
+    $isFunnel = $false
 
-    # Tailscale documents that `serve status --json` and the full Serve configuration
-    # can differ. Inspect both when available; older clients that do not implement
-    # get-config simply fall back to status JSON. This remains read-only/fail-closed.
+    # Inspect both read-only CLI views. Named Services returned by get-config --all
+    # are intentionally ignored for device HTTPS listener ownership.
     foreach ($serveArgs in @(
         @('serve','status','--json'),
         @('serve','get-config','--all')
@@ -6616,7 +6608,7 @@ function Get-WindowsTailscaleServePortState(
             if (-not $serveProbe.Success -or [string]::IsNullOrWhiteSpace($raw)) { continue }
             $status = $raw | ConvertFrom-Json -ErrorAction Stop
             $result.Known = $true
-            Add-WindowsTailscaleServeJsonState $status $Port $targets $rootTargets ([ref]$inUse)
+            Add-WindowsTailscaleServeJsonState $status $Port $targets $rootTargets ([ref]$inUse) ([ref]$hasNonRootHandlers) ([ref]$isFunnel)
         } catch {
             # Continue to the other read-only representation. Unknown remains conservative
             # if neither command can be parsed successfully.
@@ -6624,6 +6616,8 @@ function Get-WindowsTailscaleServePortState(
     }
 
     $result.InUse = $inUse
+    $result.HasNonRootHandlers = $hasNonRootHandlers
+    $result.IsFunnel = $isFunnel
     $result.Targets = @($targets | Select-Object -Unique)
     $result.RootTargets = @($rootTargets | Select-Object -Unique)
     if ($ExpectedBackendPort -gt 0 -and $result.InUse) {
@@ -6631,7 +6625,7 @@ function Get-WindowsTailscaleServePortState(
         # handlers on the same Serve listener point to unrelated backends.
         # Never adopt/disable such a mixed user-managed Serve configuration.
         $hasExpectedRoot = $false
-        $allTargetsOwned = ($result.Targets.Count -gt 0)
+        $allTargetsOwned = ($result.Targets.Count -gt 0 -and -not $result.HasNonRootHandlers -and -not $result.IsFunnel)
         foreach ($target in $result.RootTargets) {
             if (Test-WindowsTailscaleBackendTarget ([string]$target) $ExpectedBackendPort) { $hasExpectedRoot = $true }
         }
@@ -6677,20 +6671,34 @@ function Resolve-UnownedTailscaleServeConflict(
     [string]$Label,
     [object]$PortState
 ) {
-        if (-not $PortState -or -not $PortState.Known -or -not $PortState.InUse) { return 'none' }
-        $targets = if ($PortState.Targets.Count -gt 0) { $PortState.Targets -join ', ' } else { 'an unknown target' }
-        if ($PortState.MatchesExpected) {
+    if (-not $PortState -or -not $PortState.Known -or -not $PortState.InUse) { return 'none' }
+    $targets = if ($PortState.Targets.Count -gt 0) { $PortState.Targets -join ', ' } else { 'an unknown target' }
+    if ($PortState.MatchesExpected) {
         Write-Info "The existing $Label Serve rule on HTTPS port $HttpsPort already targets the expected LatticeVale bridge; adopting it without changing or restarting Tailscale Serve."
         return 'adopt'
     }
-    if (-not (Read-Choice "Replace the existing untracked Tailscale rule on HTTPS port $HttpsPort for $Label?" "Current target(s): $targets. Yes removes ONLY this HTTPS Serve listener and replaces it with LatticeVale's http://127.0.0.1:$BackendPort bridge. Use this when migrating a manual/legacy rule." 'No leaves the existing rule untouched and skips this LatticeVale remote exposure.' $false)) {
+    # A node-level HTTPS root proxy is the only type this updater can safely
+    # replace. Refuse Funnel, TCP, named Services and mixed path configurations.
+    if ($PortState.IsFunnel -or $PortState.HasNonRootHandlers -or
+        @($PortState.Targets).Count -ne 1 -or @($PortState.RootTargets).Count -ne 1) {
+        Write-Warning "HTTPS $HttpsPort has an unsupported or shared Tailscale configuration (Funnel=$($PortState.IsFunnel), additionalPaths=$($PortState.HasNonRootHandlers), targets=$targets). Leaving it unchanged."
         return 'leave'
     }
-    $serveOff = Invoke-NativeProcessPassthrough $TailscaleExe @('serve',"--https=$HttpsPort",'off') 30
-    if (-not $serveOff.Success) {
-        Write-Warning "Could not remove the user-approved existing Tailscale rule on HTTPS port $HttpsPort."
+    if (-not (Read-Choice "Replace the existing untracked Tailscale rule on HTTPS port $HttpsPort for $Label?" "Current target(s): $targets. Yes updates ONLY the root HTTPS Serve proxy in place to LatticeVale's http://127.0.0.1:$BackendPort bridge; no Serve listener is deleted. Use this for a manual/legacy bridge migration." 'No leaves the existing rule untouched and skips this LatticeVale remote exposure.' $false)) {
         return 'leave'
     }
+    # Re-read after user consent. A different process could have changed Serve
+    # while the installer was prompting; never overwrite a changed rule blindly.
+    $latest = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
+    if (-not $latest.Known -or -not $latest.InUse -or $latest.IsFunnel -or
+        $latest.HasNonRootHandlers -or @($latest.Targets).Count -ne 1 -or
+        @($latest.RootTargets).Count -ne 1 -or
+        [string]$latest.RootTargets[0] -ne [string]$PortState.RootTargets[0]) {
+        Write-Warning "Tailscale Serve HTTPS $HttpsPort changed or became unverifiable during confirmation. It was left untouched."
+        return 'leave'
+    }
+    # The current Tailscale CLI supports setting a new target on the same
+    # HTTPS/port/root route; no brittle --https=PORT off step is necessary.
     return 'replace'
 }
 
@@ -6698,18 +6706,37 @@ function Enable-WindowsTailscaleServe(
     [string]$TailscaleExe,
     [int]$HttpsPort,
     [int]$BackendPort,
-    [string]$Label
+    [string]$Label,
+    [bool]$ReplacingExisting = $false
 ) {
     if (-not (Test-LocalTcpPort $BackendPort)) {
         Write-Warning "$Label is not reachable from Windows at 127.0.0.1:$BackendPort. Its Tailscale exposure was skipped; the local stack remains installed."
         return $false
     }
-    $serveOn = Invoke-NativeProcessPassthrough $TailscaleExe @('serve','--bg',"--https=$HttpsPort","http://127.0.0.1:$BackendPort") 30
+    # After explicit migration consent, --yes suppresses a CLI overwrite
+    # confirmation. New, unoccupied routes retain the original invocation.
+    $serveArgs = if ($ReplacingExisting) {
+        @('serve','--bg','--yes',"--https=$HttpsPort","http://127.0.0.1:$BackendPort")
+    } else {
+        @('serve','--bg',"--https=$HttpsPort","http://127.0.0.1:$BackendPort")
+    }
+    $serveOn = Invoke-NativeProcessCapture $TailscaleExe $serveArgs 30
     if (-not $serveOn.Success) {
-        Write-Warning "Tailscale Serve could not expose $Label on HTTPS port $HttpsPort. The local service still works."
+        $reason = Get-SafeDiagnosticExcerpt $serveOn.Text 450
+        if (-not $reason) { $reason = "exit=$($serveOn.ExitCode), timedOut=$($serveOn.TimedOut)" }
+        Write-Warning "Tailscale Serve could not expose $Label on HTTPS port $HttpsPort`: $reason. The local service still works."
+        Write-RemoteAccessLog "Tailscale Serve update failed for $Label HTTPS port $HttpsPort`: $reason"
         return $false
     }
-    return $true
+    # An exit code of zero is not proof that the intended node route now owns
+    # the root path. Check the current device Serve config, not named Services.
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        $verified = Get-WindowsTailscaleServePortState $TailscaleExe $HttpsPort $BackendPort
+        if ($verified.Known -and $verified.MatchesExpected) { return $true }
+        if ($attempt -lt 4) { Start-Sleep -Milliseconds 400 }
+    }
+    Write-Warning "Tailscale Serve returned success for $Label HTTPS port $HttpsPort, but its exclusive root target could not be verified."
+    return $false
 }
 
 
@@ -9184,7 +9211,7 @@ if ($tailscale) {
                     if ($resolution -eq 'adopt') {
                         $trackedDashboardPort = $tailscaleDashboardPort
                         Write-Info "Adopted the existing matching Dashboard Serve mapping on HTTPS port $tailscaleDashboardPort without restarting it."
-                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard')) {
+                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleDashboardPort $dashboardBridgePort 'Dashboard' $true)) {
                         $trackedDashboardPort = $tailscaleDashboardPort
                     } else {
                         Write-Warning "Dashboard Tailscale exposure was left unchanged/skipped on HTTPS port $tailscaleDashboardPort."
@@ -9206,7 +9233,7 @@ if ($tailscale) {
                     if ($resolution -eq 'adopt') {
                         $trackedMatrixPort = $tailscaleMatrixPort
                         Write-Info "Adopted the existing matching Matrix Serve mapping on HTTPS port $tailscaleMatrixPort without restarting it."
-                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix')) {
+                    } elseif ($resolution -eq 'replace' -and (Enable-WindowsTailscaleServe $tailscaleExe $tailscaleMatrixPort $matrixBridgePort 'Matrix' $true)) {
                         $trackedMatrixPort = $tailscaleMatrixPort
                     } else {
                         Write-Warning "Matrix Tailscale exposure was left unchanged/skipped on HTTPS port $tailscaleMatrixPort."

@@ -63,6 +63,19 @@ matching_rule = serve_conflict.split('if (-not (Read-Choice "Replace the existin
 assert "@('serve',\"--https=$HttpsPort\",'off')" not in matching_rule
 assert 'return \'leave\'' in serve_conflict
 assert "@('serve',\"--https=$port\",'off')" in uninstaller
+# In-place replacement must preserve the old listener until an explicitly approved update succeeds.
+assert 'no Serve listener is deleted' in serve_conflict
+assert 'changed or became unverifiable during confirmation' in serve_conflict
+assert "@('serve',\"--https=$HttpsPort\",'off')" not in serve_conflict
+serve_enable = ps[ps.index('function Enable-WindowsTailscaleServe'):ps.index('function Test-WindowsTailscaleServeListener')]
+assert "@('serve','--bg','--yes',\"--https=$HttpsPort\"" in serve_enable
+assert 'Invoke-NativeProcessCapture $TailscaleExe $serveArgs 30' in serve_enable
+assert 'if ($verified.Known -and $verified.MatchesExpected)' in serve_enable
+assert "'Matrix' $true" in ps and "'Dashboard' $true" in ps
+port_state=ps[ps.index('function Add-WindowsTailscaleServeJsonState'):ps.index('function Disable-WindowsTailscaleServe')]
+assert 'Named Services returned by get-config --all' in port_state
+assert 'foreach ($service in $Config.Services.PSObject.Properties)' not in port_state
+assert 'HasNonRootHandlers' in port_state and 'IsFunnel' in port_state
 # Matrix remote access remains multi-client through fixed internal per-service gates.
 # The corrected v14.6.3 removes the accidental user-facing relay-session setting.
 assert "maxConnections=64" in ps
