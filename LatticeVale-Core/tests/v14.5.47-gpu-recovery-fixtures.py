@@ -29,11 +29,13 @@ sh=(ROOT/'stack/directml-gateway.sh').read_text(encoding='utf-8')
 for token in ('MESA_D3D12_DEFAULT_ADAPTER_NAME','directml_runtime_fingerprint','reconcile_force_fallback',
               'LATTICEVALE_DIRECTML_VRAM_MIB','diagnose)'):
     assert token in sh, token
-gateway_version = '14.6.5' if version in {'14.6.6','14.6.7'} else version
-assert f'VERSION={gateway_version}' in sh
+# Marker format remains at 14.6.5 for compatibility with existing runtime state.
+marker_format_version = '14.6.5' if version in {'14.6.6','14.6.7'} else version
+assert f'VERSION={marker_format_version}' in sh
 
+# The user-visible HTTP gateway must report the current installer release instead.
 py=(ROOT/'stack/directml-gateway.py').read_text(encoding='utf-8')
-for token in (f'VERSION = "{gateway_version}"','DECLARED_VRAM_MIB','DECLARED_VRAM_SOURCE','DECLARED_VRAM_CONFIDENCE','vram_source','canonical:'):
+for token in (f'VERSION = "{version}"','DECLARED_VRAM_MIB','DECLARED_VRAM_SOURCE','DECLARED_VRAM_CONFIDENCE','vram_source','canonical:'):
     assert token in py, token
 
 cfg=(ROOT/'stack/configure-stack.sh').read_text(encoding='utf-8')

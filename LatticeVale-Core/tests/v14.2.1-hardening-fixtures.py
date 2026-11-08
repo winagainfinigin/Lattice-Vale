@@ -111,6 +111,7 @@ with tempfile.TemporaryDirectory() as td:
     shutil.copy2(ROOT/'stack/runtime-policy.py', td/'runtime-policy.py')
     shutil.copy2(ROOT/'stack/latticevale_arch.py', td/'latticevale_arch.py')
     shutil.copy2(ROOT/'compatibility.conf', td/'compatibility.conf')
+    shutil.copy2(ROOT/'VERSION.txt', td/'VERSION.txt')
     harness=r'''set -Eeuo pipefail
 set_env() {
   local file="$1" key="$2" value="$3"
@@ -130,7 +131,12 @@ PY_ENV
 }
 opt_bool() { jq -r ".${1} // false" install-options.json; }
 opt_text() { jq -r ".${1} // empty" install-options.json; }
+# The synthetic harness extracts only resource functions, not configure-stack.sh's
+# top-level installerVersion assignment.  Supply that exact release context.
+INSTALLER_VERSION="$(cat VERSION.txt)"
 local_ai_enabled() { [[ "$(opt_bool honcho)" == true || "$(opt_bool hermesLocalAI)" == true ]]; }
+ollama_text_role_enabled() { local_ai_enabled; }
+ollama_embedding_role_enabled() { [[ "$(opt_bool honcho)" == true ]]; }
 ollama_backend() { local value; value="$(opt_text ollamaBackend)"; [[ "$value" == managed || "$value" == windows-native ]] || value=managed; printf '%s' "$value"; }
 managed_ollama_enabled() { local_ai_enabled && [[ "$(ollama_backend)" == managed ]]; }
 directml_text_enabled() { return 1; }
