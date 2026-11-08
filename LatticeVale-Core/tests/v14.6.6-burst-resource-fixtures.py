@@ -485,3 +485,223 @@ assert 'injected docker update failure' in error
 assert live['hermes']['memory'] == 1073741824  # rollback after second change failed
 assert updates[-1][3] == 1073741824
 print('V14.6.7 DOCKER STATIC RESOURCE RECOVERY FIXTURES: PASS')
+
+
+# V14.6.7: reproduce the 2026-11-08 12-container live audit.  Eleven
+# identities and allocations agree with the saved lease, while the recreated
+# SearXNG container is at the exact canonical Compose ceiling.  Two loaded
+# services cannot safely tolerate a wholesale static memory reduction.
+from copy import deepcopy
+import time
+
+# value tuple: canonical MiB, live MiB, canonical CPU m, live CPU m
+observed = {
+    'hermes': (1072, 1024, 850, 850),
+    'honcho-api': (400, 416, 150, 150),
+    'honcho-db': (208, 192, 150, 150),
+    'honcho-deriver': (272, 272, 150, 150),
+    'honcho-redis': (80, 80, 100, 100),
+    'ollama': (5728, 5808, 1350, 1350),
+    'qmd': (1040, 1024, 150, 150),
+    'qmd-indexer': (1040, 1024, 150, 100),
+    'searxng': (208, 208, 150, 150),
+    'searxng-valkey': (80, 80, 100, 100),
+    'synapse': (208, 208, 150, 150),
+    'synapse-db': (176, 176, 150, 150),
+}
+assert sum(v[1] for v in observed.values()) == 10512
+assert sum(v[3] for v in observed.values()) == 3550
+
+
+def snapshot_case(*, edits=None, active_override=False, pending=None, bad_fingerprint=False,
+                  changing_identity=False, timer=False):
+    with tempfile.TemporaryDirectory(prefix='lv-snapshot-rebind-') as tmp:
+        root = Path(tmp)
+        store = root / 'data/latticevale/resource-burst-state.json'
+        store.parent.mkdir(parents=True)
+        expected = {k: {'name': module.PAIRS[k], 'mem': x[0], 'cpu': x[2],
+                        'floor': min(x[0], x[1])} for k, x in observed.items()}
+        state = {'POLICY_FINGERPRINT': 'audited-fingerprint', 'BUDGET_MIB':'10512',
+                 'CPU_DOCKER_ENVELOPE_MILLI':'3600', 'DIRECTML_SELECTED':'false',
+                 'CPU_DIRECTML_RESERVE_MILLI':'0', 'CPUS':'4'}
+        live = {k: {'id': f'current-{k}', 'mem': x[1], 'cpu': x[3],
+                    'memory_current_mib': 5696 if k=='ollama' else 358 if k=='honcho-api' else 50}
+                for k,x in observed.items()}
+        saved = deepcopy(live)
+        saved['searxng']['id'] = 'previous-searxng'
+        saved['searxng']['up'] = 2
+        saved['searxng']['idle'] = 1
+        saved['ollama']['up'] = 3
+        saved['ollama']['idle'] = 0
+        snapshot = {'policyFingerprint': 'WRONG' if bad_fingerprint else 'audited-fingerprint',
+                    'services': saved, 'pending': pending,
+                    'lastUpdate':time.time(), 'lastSample':time.time(),
+                    'directmlCpuTelemetry':{'busy':True,'idle':0}}
+        if edits:
+            edits(live, saved, expected, snapshot, state)
+        store.write_text(json.dumps(snapshot))
+        before = store.read_bytes()
+        updates = []
+        inspects = [0]
+        def fake_run(args, cwd, timeout=12):
+            assert cwd == root
+            if args[:3] == ['docker','compose','config']:
+                return json.dumps({'services': {k: {
+                    'mem_limit':str(e['mem'] * module.MIB), 'cpus':e['cpu']/1000}
+                    for k,e in expected.items()}})
+            if args[:2] == ['docker','inspect']:
+                inspects[0] += 1
+                if changing_identity and inspects[0] >= 4:
+                    live['searxng']['id'] = 'changed-midflight'
+                return json.dumps([{
+                    'Name':'/'+expected[k]['name'], 'Id':v['id'],
+                    'State':{'Running':True,'Pid':901},
+                    'Config':{'Labels':{'com.docker.compose.project':
+                                         'badproject' if active_override and k=='searxng' else 'hermesstack',
+                                         'com.docker.compose.service': k}},
+                    'HostConfig':{'Memory':v['mem']*module.MIB,
+                                  'NanoCpus':v['cpu']*10**6,
+                                  'MemorySwap':max(1, 2*v['mem']*module.MIB)}
+                } for k,v in live.items()])
+            if args[:2] == ['docker','update']:
+                updates.append(args)
+                raise AssertionError('Resource limits MUST NOT change during this test')
+            raise AssertionError(args)
+        err = None
+        simulated_usage = {k:{'mem':100, 'cpu_pct':1.0, 'charged_mem':50} for k in expected}
+        with (patch.object(module,'load_expected',return_value=(expected,state)),
+              patch.object(module,'run',side_effect=fake_run),
+              patch.object(module,'cgroup_event_counters',return_value={'memory_current_mib':5696}),
+              patch.object(module,'read_usage',return_value=simulated_usage),
+              patch.object(module,'pressure',return_value=0.01),
+              patch.object(module,'host_available_mib',return_value=4096),
+              patch.object(module,'host_cpu_load1',return_value=0.1)):
+            try:
+                assert not module.verify_snapshot(root), 'prior snapshot must not validate'
+            except RuntimeError:
+                pass
+            try:
+                result=(module.run_once(root,restore=False) if timer else
+                        module.reconcile_static_limits(root))
+                assert result==0
+            except Exception as exc:
+                err=str(exc)
+            new = json.loads(store.read_text())
+            success = err is None
+            if success:
+                assert module.verify_snapshot(root)
+                assert module.reconcile_static_limits(root)==0
+            changed = store.read_bytes()!=before
+        return success,err,updates,before,new,changed,live,snapshot,inspects[0]
+
+ok,err,updates,before,after,changed,live,prior,count=snapshot_case()
+assert ok,err
+assert changed and not updates
+assert after['services']['searxng']['id']=='current-searxng'
+assert after['services']['searxng']['up']==after['services']['searxng']['idle']==0
+assert after['services']['ollama']==prior['services']['ollama']
+assert after['pending'] is None and after['lastUpdate']==prior['lastUpdate']
+assert len(after['services']) == 12
+assert count >= 3
+# The recurring controller also automatically rebinds under its own lock.
+ok,err,updates,before,after,changed,live,prior,count=snapshot_case(timer=True)
+assert ok and changed and not updates, err
+assert after['services']['searxng']['id']=='current-searxng'
+assert after['pending'] is None
+
+# Unchanged container drift cannot be relabeled as an innocent replacement.
+# Replacement must be at canonical limit, within budget, and have true ownership.
+negative_cases = [
+    ('unchanged drift', lambda l,s,e,r,t: l['ollama'].__setitem__('mem',5728),
+     'unexplained resource drift'),
+    ('noncanonical replacement',lambda l,s,e,r,t:l['searxng'].__setitem__('mem',224),
+     'not at verified canonical limits'),
+    ('excess aggregate RAM',lambda l,s,e,r,t:
+     (l['hermes'].__setitem__('mem',1096),s['hermes'].__setitem__('mem',1096)),
+     'memory envelope'),
+    ('excess CPU envelope',lambda l,s,e,r,t:
+     (l['hermes'].__setitem__('cpu',1000),s['hermes'].__setitem__('cpu',1000)),
+     'CPU envelope'),
+    ('saved fingerprint stale',lambda l,s,e,r,t:r.__setitem__('policyFingerprint','stale'),
+     'adequate measured cgroup headroom'),
+    ('malformed snapshot record',lambda l,s,e,r,t:s['ollama'].__setitem__('mem','invalid'),
+     'malformed live or saved'),
+]
+for label,edit,expected_err in negative_cases:
+    ok,err,updates,before,after,changed,*_=snapshot_case(edits=edit)
+    assert not ok and expected_err in (err or ''), (label,err)
+    assert not changed and not updates, (label,changed,updates)
+
+ok,err,updates,before,after,changed,*_=snapshot_case(active_override=True)
+assert not ok and 'ownership' in err and not changed and not updates
+ok,err,updates,before,after,changed,*_=snapshot_case(pending={'ollama':{'mem':5728}})
+assert not ok and 'pending' in err and not changed and not updates
+ok,err,updates,before,after,changed,*_=snapshot_case(changing_identity=True)
+assert not ok and 'concurrent Docker identity/resource change' in err and not changed and not updates, (ok,err,changed,updates)
+
+# Explicit restores are also protected against shrinking a loaded Ollama model.
+try:
+    module.assert_safe_memory_reductions(
+        {'ollama':{'mem':5808,'memory_current_mib':5696}},
+        {'ollama':{'mem':5728}})
+except RuntimeError as exc:
+    assert 'cgroup headroom' in str(exc)
+else:
+    raise AssertionError('unsafe Ollama reduction was accepted')
+module.assert_safe_memory_reductions(
+    {'qmd':{'mem':1024,'memory_current_mib':150}},
+    {'qmd':{'mem':992}})
+try:
+    module.assert_safe_memory_reductions(
+        {'ollama':{'mem':5808}}, {'ollama':{'mem':5728}})
+except RuntimeError:
+    pass
+else:
+    raise AssertionError('missing cgroup charge incorrectly allowed reduction')
+
+assert '--prepare-repair --stack "$stack_dir"' in (ROOT/'linux/bootstrap.sh').read_text()
+print('V14.6.7 VERIFIED REPLACEMENT / 12-SERVICE SNAPSHOT REBIND FIXTURES: PASS')
+
+# A zero-length pending journal is not equivalent to a completed transaction.
+ok,err,updates,before,after,changed,*_=snapshot_case(pending={})
+assert not ok and 'pending' in err and not changed and not updates
+
+# A failed atomic persistence cannot mutate the original snapshot or Docker.
+with tempfile.TemporaryDirectory() as tmp:
+    root = Path(tmp)
+    original = {'policyFingerprint':'x', 'services':{'hermes':{'id':'old','mem':1000,'cpu':100}},
+                'pending':None, 'lastSample':time.time()}
+    target = root/'data/latticevale/resource-burst-state.json'
+    target.parent.mkdir(parents=True)
+    target.write_text(json.dumps(original))
+    expected = {'hermes':{'name':'hermes-agent','mem':1000,'cpu':100,'floor':800}}
+    live = {'hermes':{'id':'new','mem':1000,'cpu':100}}
+    state = {'POLICY_FINGERPRINT':'x','BUDGET_MIB':'1500',
+             'CPU_DOCKER_ENVELOPE_MILLI':'150','DIRECTML_SELECTED':'false'}
+    before = target.read_bytes()
+    with (patch.object(module,'_static_compose_limits',return_value={'hermes':
+               {'name':'hermes-agent','memory':1000*module.MIB,'cpu':100000000}}),
+          patch.object(module,'inspect_containers',return_value=live),
+          patch.object(module,'write_json',side_effect=PermissionError('injected disk write failure'))):
+        try:module.reconcile_verified_replacements(root, expected, state, live)
+        except PermissionError as exc:assert 'injected' in str(exc)
+        else:raise AssertionError('atomic persistence failure ignored')
+    assert target.read_bytes()==before
+
+# Verification-only repair preparations must preserve a healthy lease.
+with (patch.object(module,'verify_snapshot',return_value=True) as verify,
+      patch.object(module,'run_once',side_effect=AssertionError('restore called on healthy lease'))):
+    with patch.object(sys,'argv',['resource-burst-controller.py','--prepare-repair']):
+        assert module.main()==0
+    assert verify.called
+
+print('V14.6.7 SNAPSHOT SAFETY / ATOMIC WRITE / REPAIR IDEMPOTENCE: PASS')
+
+# Upgrade staging must not pass --prepare-repair to the *old* installed
+# controller, which does not support that flag. It must use read-only --verify
+# before the source copy and defer uncertain state to the new implementation.
+_boot = (ROOT / 'linux/bootstrap.sh').read_text()
+assert "--help 2>/dev/null | grep -q -- '--prepare-repair'" in _boot
+assert 'resource-burst-controller.py" --verify --stack "$stack_dir"' in _boot
+assert _boot.index('--prepare-repair --stack "$stack_dir"') < _boot.index('"$bundle_root/stack/resource-burst-controller.py" "$stack_dir/resource-burst-controller.py"')
+print('V14.6.7 PRE-STAGING OLD-CONTROLLER COMPATIBILITY: PASS')

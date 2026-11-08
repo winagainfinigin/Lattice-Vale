@@ -375,7 +375,7 @@ def safe_state(root, expected, state, actual):
                 saved.get('mem') != actual[name]['mem'] or saved.get('cpu') != actual[name]['cpu']):
                 matching = False
                 break
-    if record.get('pending') and record.get('policyFingerprint') == state['POLICY_FINGERPRINT']:
+    if record.get('pending') is not None and record.get('policyFingerprint') == state['POLICY_FINGERPRINT']:
         planned = record['pending']
         previous = record.get('services', {})
         if set(planned) != set(expected) or set(previous) != set(expected):
@@ -657,13 +657,114 @@ def perform(root, expected, before, target):
     return bool(changes)
 
 
+
+def reconcile_verified_replacements(root, expected, state, actual):
+    """Rebind only independently verified canonical replacements, under the caller's lock.
+
+    A container recreated by Compose gets a new ID, which invalidated the
+    entire previously verified burst lease.  Never use this path to legitimize
+    resource drift of an unchanged container, a pending transaction, or a
+    replacement whose effective Compose limits are not canonical.
+    """
+    path = root / 'data/latticevale/resource-burst-state.json'
+    record = read_json(path, {})
+    if not isinstance(record, dict) or record.get('policyFingerprint') != state['POLICY_FINGERPRINT']:
+        return []
+    saved_services = record.get('services')
+    if not isinstance(saved_services, dict) or set(saved_services) != set(expected):
+        return []
+    if record.get('pending') is not None:
+        # Even an empty/malformed pending journal must not be reinterpreted.
+        raise RuntimeError('pending controller transaction forbids replacement rebind')
+    if set(actual) != set(expected):
+        raise RuntimeError('managed container topology changed during replacement verification')
+
+    replacements = []
+    for name, baseline in expected.items():
+        old = saved_services.get(name)
+        live = actual[name]
+        if not isinstance(old, dict) or not isinstance(old.get('id'), str) or not old['id']:
+            return []
+        if not isinstance(live.get('id'), str) or not live['id']:
+            raise RuntimeError(f'{name}: live Docker container identity unavailable')
+        for metric in ('mem', 'cpu'):
+            if (type(old.get(metric)) is not int or old[metric] <= 0 or
+                    type(live.get(metric)) is not int or live[metric] <= 0):
+                raise RuntimeError(f'{name}: malformed live or saved {metric} limit')
+        if live['id'] == old['id']:
+            if any(live[metric] != old[metric] for metric in ('mem', 'cpu')):
+                raise RuntimeError(f'{name}: unchanged container has unexplained resource drift')
+        else:
+            if live['mem'] != baseline['mem'] or live['cpu'] != baseline['cpu']:
+                raise RuntimeError(f'{name}: replaced container is not at verified canonical limits')
+            replacements.append(name)
+        if live['mem'] < baseline['floor'] or live['cpu'] < 50:
+            raise RuntimeError(f'{name}: live allocation violates service minimum')
+
+    if not replacements:
+        return []
+    # Effective Compose must agree with the canonical baseline. In particular,
+    # never bypass the user-override gate to accept a noncanonical replacement.
+    desired = _static_compose_limits(root, expected)
+    for name, baseline in expected.items():
+        if (desired[name]['memory'] != baseline['mem'] * MIB or
+                desired[name]['cpu'] != baseline['cpu'] * 1_000_000):
+            raise RuntimeError(f'{name}: effective Compose limits differ from canonical policy; replacement rebind refused')
+    if len({actual[k]['id'] for k in expected}) != len(expected):
+        raise RuntimeError('duplicate Docker identities in managed topology')
+    if sum(actual[k]['mem'] for k in expected) > int(state['BUDGET_MIB']):
+        raise RuntimeError('replacement allocation exceeds canonical memory envelope')
+    cpu_total = sum(actual[k]['cpu'] for k in expected)
+    cpu_limit = int(state['CPU_DOCKER_ENVELOPE_MILLI'])
+    if state.get('DIRECTML_SELECTED') == 'true' and cpu_total > cpu_limit:
+        # An inactive DirectML reserve can be lent only temporarily. Accept an
+        # existing loan if the snapshot contains recent, verified idle telemetry.
+        idle = record.get('directmlCpuTelemetry') or {}
+        last_sample = record.get('lastSample')
+        if (not isinstance(idle, dict) or idle.get('busy') is not False or
+                type(last_sample) not in (int, float) or
+                not 0 <= time.time() - last_sample <= 90):
+            raise RuntimeError('DirectML loan lacks recent verified idle telemetry')
+        cpu_limit += min(int(state['CPU_DIRECTML_RESERVE_MILLI']) // 3,
+                         int(state['CPUS']) * 100)
+        cpu_limit = min(cpu_limit, int(state['CPUS']) * 900)
+    if cpu_total > cpu_limit:
+        raise RuntimeError('replacement allocation exceeds permitted CPU envelope')
+
+    # Docker ownership/Running/IDs have already been checked by
+    # inspect_containers. Reinspect under the same exclusive controller lock
+    # immediately before persisting, so a Compose replacement cannot race us.
+    confirmed = inspect_containers(root, expected)
+    if any(confirmed[k]['id'] != actual[k]['id'] or
+           confirmed[k]['mem'] != actual[k]['mem'] or
+           confirmed[k]['cpu'] != actual[k]['cpu'] for k in expected):
+        raise RuntimeError('concurrent Docker identity/resource change during replacement rebind')
+    # Retain the existing lease and its counters on untouched containers.
+    # Fresh containers reset OOM/throttling history and idle/busy counters.
+    for name in replacements:
+        record['services'][name] = {**actual[name], 'up': 0, 'idle': 0}
+    write_json(path, record)
+    return replacements
+
+
 def verify_snapshot(root):
     expected, state = load_expected(root)
     actual = inspect_containers(root, expected)
     snapshot = safe_state(root, expected, state, actual)
-    if snapshot.get('pending') or snapshot.get('_requires_restore'):
+    if snapshot.get('pending') is not None or snapshot.get('_requires_restore'):
         raise RuntimeError('controller transaction has not converged')
     return True
+
+
+
+def assert_safe_memory_reductions(actual, target):
+    """Reject a hard-limit reduction that cannot retain measured cgroup headroom."""
+    for name, goal in target.items():
+        if goal['mem'] >= actual[name]['mem']:
+            continue
+        charge = actual[name].get('memory_current_mib')
+        if type(charge) is not int or goal['mem'] <= charge + 64:
+            raise RuntimeError(f'{name}: cannot safely restore lower memory ceiling without cgroup headroom')
 
 
 def run_once(root, restore=False):
@@ -678,9 +779,16 @@ def run_once(root, restore=False):
             return 0
         expected, state = load_expected(root, allow_override=restore)
         actual = inspect_containers(root, expected)
+        if not restore:
+            # A verified replacement must not invalidate other active leases.
+            # --restore intentionally has different, canonical-reset semantics.
+            replacements = reconcile_verified_replacements(root, expected, state, actual)
+            if replacements:
+                print('Rebound canonical replacement(s) without changing live resources: ' + ', '.join(replacements))
         snapshot = safe_state(root, expected, state, actual)
         if snapshot.pop('_requires_restore', False):
             safe_baseline = {k: {'mem': expected[k]['mem'], 'cpu': expected[k]['cpu']} for k in expected}
+            assert_safe_memory_reductions(actual, safe_baseline)
             write_json(root / 'data/latticevale/resource-burst-state.json', snapshot)
             perform(root, expected, actual, safe_baseline)
             actual = inspect_containers(root, expected)
@@ -690,6 +798,7 @@ def run_once(root, restore=False):
             write_json(root / 'data/latticevale/resource-burst-state.json', snapshot)
         if restore:
             target = {k: {'mem': e['mem'], 'cpu': e['cpu']} for k, e in expected.items()}
+            assert_safe_memory_reductions(actual, target)
             snapshot['pending'] = target
             write_json(root / 'data/latticevale/resource-burst-state.json', snapshot)
             if perform(root, expected, actual, target):
@@ -845,8 +954,27 @@ def reconcile_static_limits(root):
         else:
             print('Verified bounded resource-controller allocation; preserving live leases')
             return 0
+        # Resolve only authenticated canonical Compose replacements before
+        # considering a potentially unsafe global reduction to static limits.
+        # load_expected without allow_override enforces the user-override gate.
+        # Do not mask a rejected/unsafe replacement as a successful repair.
+        saved = read_json(root / 'data/latticevale/resource-burst-state.json', {})
+        rebind_candidate = (isinstance(saved, dict) and
+                            saved.get('policyFingerprint') == state['POLICY_FINGERPRINT'] and
+                            isinstance(saved.get('services'), dict) and
+                            set(saved['services']) == set(managed) and
+                            saved.get('pending') is None)
+        if rebind_candidate and (not (root / 'compose.override.yaml').exists() or
+                                 image_only_compose_override(root)):
+            validated, validated_state = load_expected(root)
+            live = inspect_containers(root, validated)
+            replacements = reconcile_verified_replacements(root, validated, validated_state, live)
+            if replacements:
+                verify_snapshot(root)
+                print('Preserved verified dynamic leases; rebound canonical replacement(s): ' + ', '.join(replacements))
+                return 0
         snapshot = read_json(root / 'data/latticevale/resource-burst-state.json', {})
-        if isinstance(snapshot, dict) and snapshot.get('policyFingerprint') == state['POLICY_FINGERPRINT'] and snapshot.get('pending'):
+        if isinstance(snapshot, dict) and snapshot.get('policyFingerprint') == state['POLICY_FINGERPRINT'] and snapshot.get('pending') is not None:
             raise RuntimeError('incomplete burst-controller transaction; refusing to overwrite pending changes')
         desired = _static_compose_limits(root, managed)
         current = _static_live_limits(root, desired)
@@ -910,6 +1038,8 @@ def main():
     p = argparse.ArgumentParser()
     p.add_argument('--stack', type=Path, default=Path(__file__).resolve().parent)
     p.add_argument('--restore', action='store_true')
+    p.add_argument('--prepare-repair', action='store_true',
+                   help='Preserve verified burst leases during repair; safely restore only invalid state')
     p.add_argument('--reconcile-static', action='store_true',
                    help='Safely reconcile owned live CPU/RAM limits to effective Compose during repair')
     p.add_argument('--verify', action='store_true')
@@ -920,6 +1050,13 @@ def main():
     if root != Path(__file__).resolve().parent:
         raise SystemExit('resource controller must run from its own installed stack')
     try:
+        if a.prepare_repair:
+            try:
+                verify_snapshot(root)
+            except (RuntimeError, ValueError, OSError):
+                return run_once(root, restore=True)
+            print('Existing verified bounded resource leases preserved during repair')
+            return 0
         if a.reconcile_static:
             return reconcile_static_limits(root)
         if a.check_override:
@@ -935,7 +1072,7 @@ def main():
             print(f'Static Docker resource reconciliation failed: {exc}', file=sys.stderr)
             return 2
         print(f'Resource burst controller inactive (canonical or last verified bounded limits retained): {exc}', file=sys.stderr)
-        return 2 if (a.restore or a.verify or a.check_override) else 0  # Keep optional timer fail-safe.
+        return 2 if (a.restore or a.prepare_repair or a.verify or a.check_override) else 0  # Keep optional timer fail-safe.
 
 
 if __name__ == '__main__':

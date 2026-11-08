@@ -565,14 +565,23 @@ if [[ "$local_ai_requested" == true && "$ollama_backend" == managed && "$ollama_
   fi
 fi
 
-# Restore canonical Compose limits before repair or policy regeneration. The
-# previous controller is paused above, and Docker has been started by this point.
-# If an old dynamic snapshot cannot be reconciled, later verification reports
-# that exact inconsistency instead of silently accepting unexplained drift.
+# The installed controller is inspected BEFORE the new release files are staged.
+# A 14.6.7 pre-hotfix controller knows --verify/--restore but not --prepare-repair.
+# Preserve valid dynamic leases without forcing memory reductions on either path.
+# In an invalid/uncertain old snapshot, defer to the staged controller's final
+# bounded reconciliation rather than calling the old unsafe restoration path.
 if [[ "$repair_run" == true && -f "$stack_dir/resource-burst-controller.py" && -f "$stack_dir/data/latticevale/resource-burst-state.json" ]]; then
-  runuser -u "$linux_user" -- env HOME="$user_home" USER="$linux_user" DOCKER_HOST=unix:///var/run/docker.sock \
-    python3 "$stack_dir/resource-burst-controller.py" --restore --stack "$stack_dir" || \
-    echo 'WARNING: Pre-repair burst allocation could not be restored. Live CPU/RAM reconciliation requires review.' >&2
+  if runuser -u "$linux_user" -- env HOME="$user_home" USER="$linux_user" DOCKER_HOST=unix:///var/run/docker.sock \
+    python3 "$stack_dir/resource-burst-controller.py" --help 2>/dev/null | grep -q -- '--prepare-repair'; then
+    runuser -u "$linux_user" -- env HOME="$user_home" USER="$linux_user" DOCKER_HOST=unix:///var/run/docker.sock \
+      python3 "$stack_dir/resource-burst-controller.py" --prepare-repair --stack "$stack_dir" || \
+      echo 'WARNING: Pre-repair resource snapshot could not be validated/restored; final reconciliation must verify live CPU/RAM.' >&2
+  elif runuser -u "$linux_user" -- env HOME="$user_home" USER="$linux_user" DOCKER_HOST=unix:///var/run/docker.sock \
+    python3 "$stack_dir/resource-burst-controller.py" --verify --stack "$stack_dir" >/dev/null 2>&1; then
+    echo 'Existing pre-hotfix bounded resource leases verified; preserving allocations during upgrade.'
+  else
+    echo 'WARNING: Pre-hotfix resource snapshot is not verifiable; deferring changes until the upgraded controller checks owned live allocations.' >&2
+  fi
 fi
 
 # A single root helper gives Windows auto-start and older non-systemd WSL2 builds the
