@@ -246,3 +246,31 @@ for listener_v4,listener_v6,verified_https,expected_pass in [
 print('v14.6.5 Tailscale IPv4/IPv6 HTTPS readiness regression contract: PASS')
 
 print('TAILSCALE WINDOWS-NATIVE RELAY FIXTURES: PASS')
+
+# 14.6.7 historical multi-path repair: 14.6.3 added root-only matching,
+# 14.6.5 refused foreign backends, and the first 14.6.7 patch incorrectly
+# refused ANY non-root handler even if every path still used the SAME old
+# Matrix bridge. Migrate exactly those paths, never the full HTTPS listener.
+multipath=ps[ps.index('function Add-WindowsTailscaleServeJsonState'):ps.index('function Test-WindowsTailscaleServeListener')]
+assert 'HandlerRoutes' in multipath and 'AllRoutesMigratable' in multipath
+assert 'RouteConflict' in multipath and 'UnsupportedHandlers' in multipath and 'NonHttpsTcp' in multipath
+assert '$hostMap.Count -gt 1' in multipath  # distinct hosts are not combined
+assert 'if (-not $safe) { $UnsupportedHandlers.Value = $true }' in multipath
+assert 'if ($hostMap.Count -gt 1) { $routeConflict = $true }' in multipath
+assert "'Proxy'" in multipath
+assert 'MatchesExpectedAllRoutes' in multipath
+assert '$oldProxyIsLocalBridge' in multipath
+assert "return 'replace-routes'" in multipath
+assert 'function Move-WindowsTailscaleServeRoutes(' in multipath
+move=multipath[multipath.index('function Move-WindowsTailscaleServeRoutes('):multipath.index('function Enable-WindowsTailscaleServe(')]
+assert 'Get-WindowsTailscaleRouteFingerprint' in move
+assert '"--set-path=$([string]$route.Path)"' in move
+assert 'if (-not $response.Success)' in move
+assert 'if (-not $current.AllRoutesMigratable' in move
+assert 'MatchesExpectedAllRoutes -and $samePaths' in move
+assert 'Best-effort rollback of only paths this invocation changed' in move
+assert "@('serve','--https=443','off')" not in move
+assert "'serve','reset'" not in move
+assert "@('serve','--bg','--yes'" in move
+# Paths coexisting under port 443 must not become eligible for broad removal.
+assert 'if (-not $state.MatchesExpected)' in multipath[multipath.index('function Disable-WindowsTailscaleServe('):multipath.index('function Resolve-UnownedTailscaleServeConflict(')]
