@@ -121,7 +121,7 @@ e78e7d1ab10d4fd81bb8b7916fae8817aebdfa9fbf836f6217b073108d861481  LatticeVale-Co
 9d7e2d181e58d37dc811463355a6df619a09016331cc4553fefde1201b820aab  LatticeVale-Core/tests/v13.16.7-repair-semantics-fixtures.py
 2ade742bbc41f3d8445eb1e18629d4643dbfe209dcdaf5e961396749a3634467  LatticeVale-Core/tests/v13.16.8-backup-recovery-fixtures.py
 3075c8058e9105cb260efaa2b63534bd6a42736227c71b7eb9e87297b5bc1f50  LatticeVale-Core/tests/v13.16.9-wsl-stderr-isolation-fixtures.py
-1d43dad455af08c9f3270e617e64539608dec4cb979738ddcca1e149dce04fd5  LatticeVale-Core/tests/v14.1.3-portability-rebrand-fixtures.py
+eb6cf9cdec6fc61a24c59219c58fbaf703c730dedad01d4fd60396520282ccc7  LatticeVale-Core/tests/v14.1.3-portability-rebrand-fixtures.py
 56ac0ae5562e97c270375c693f50d569bad236042db6a7dbcad728589c2f90b4  LatticeVale-Core/tests/v14.1.3-profile-matrix-obsidian-fixtures.py
 ec1e05647e784c3e554197f043eb0b3e455f7cb404d16a44cd046e8aa092098f  LatticeVale-Core/tests/v14.1.3-public-release-fixtures.py
 878f2f6753d6370ac9d6442a9bec3ff8b15d196b8522997827f492f6dbaf17bc  LatticeVale-Core/tests/v14.1.3-windows-shortcuts-fixtures.py

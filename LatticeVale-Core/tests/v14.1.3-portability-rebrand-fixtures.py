@@ -78,9 +78,15 @@ assert "'instance_name':'LatticeVale Search'" in configure
 assert "general.get('instance_name') == 'Hermes Search'" in configure
 assert "general['instance_name']='LatticeVale Search'" in configure
 
-# Tailscale inspection checks the effective service configuration as well as status fallback.
-assert "@('serve', 'status', '--json')" in installer or "@('serve','status','--json')" in installer
-assert "@('serve', 'get-config', '--all')" in installer or "@('serve','get-config','--all')" in installer
+# Device Serve listeners must be read from `serve status --json`; `serve get-config
+# --all` describes named Services and cannot serve as a fallback for device routes.
+# Keep this contract scoped to the inspection function, rather than requiring a
+# stale command substring anywhere in the source.
+node_serve_inspector = installer.split('function Get-WindowsTailscaleServePortState(', 1)[1].split('\nfunction ', 1)[0]
+assert "@('serve','status','--json')" in node_serve_inspector or "@('serve', 'status', '--json')" in node_serve_inspector
+assert 'Add-WindowsTailscaleServeJsonState $status' in node_serve_inspector
+assert not re.search(r"@\(\s*['\"]serve['\"]\s*,\s*['\"]get-config['\"]", node_serve_inspector), \
+    'named Tailscale Services must not be treated as device Serve listener state'
 assert '$serveArgs' in installer
 assert 'foreach ($args' not in installer
 
