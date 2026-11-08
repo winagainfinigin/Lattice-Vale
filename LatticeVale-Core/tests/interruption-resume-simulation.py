@@ -53,6 +53,8 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
         #!/usr/bin/env bash
         printf '%s\\n' "$*" >> {str(log)!r}
         if [[ "${{HERMES_TEST_SLOW:-0}}" == 1 && "$1 $2 $3" == "compose pull --ignore-buildable" ]]; then sleep 4; fi
+        # No global-name Docker containers exist in the simulated empty engine.
+        if [[ "$1" == "container" && "$2" == "inspect" ]]; then exit 1; fi
         if [[ "$1" == "inspect" ]]; then exit 1; fi
         if [[ "$1" == "network" && "$2" == "inspect" ]]; then exit 1; fi
         if [[ "$1" == "ps" ]]; then exit 0; fi

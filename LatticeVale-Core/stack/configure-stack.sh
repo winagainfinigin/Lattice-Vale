@@ -1841,7 +1841,7 @@ for name in sorted({x.strip() for x in managed_file.read_text(encoding='utf-8').
     if not isinstance(cfg,dict): raise SystemExit(f"managed profile '{name}' config.yaml is not a mapping")
     gateway=cfg.get('gateway') or {}
     if not isinstance(gateway,dict): raise SystemExit(f"managed profile '{name}' gateway settings are malformed")
-    if gateway.get('standalone') is not True: expected.add(name)
+    if not (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))): expected.add(name)
 for name in sorted(expected): print(name)
 PY_MANAGED_MULTIPLEX_CONFIGURE
 }
@@ -1851,8 +1851,8 @@ verify_live_multiplex_gateway_configure() {
   local -a profiles=()
   profiles_text="$(managed_multiplex_profiles_configure)" || return 1
   [[ -n "$profiles_text" ]] && mapfile -t profiles <<< "$profiles_text"
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || return 1
-  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || { printf 'Cannot inspect default Hermes s6 gateway: %s\n' "$s6_status" >&2; return 1; }
+  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || { printf 'Default Hermes gateway is not up: %s\n' "$s6_status" >&2; return 1; }
   s6_pid="${BASH_REMATCH[1]}"
   timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "$s6_pid" "${profiles[@]}" < gateway-multiplex-verify.py || return 1
   s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || return 1
@@ -1862,14 +1862,16 @@ verify_live_multiplex_gateway_configure() {
 }
 
 wait_live_multiplex_gateway_configure() {
-  local attempts="${1:-15}" i
+  local attempts="${1:-15}" i last_error=''
   for i in $(seq 1 "$attempts"); do
-    verify_live_multiplex_gateway_configure >/dev/null 2>&1 && return 0
-    sleep 2
+    if last_error="$(verify_live_multiplex_gateway_configure 2>&1)"; then
+      return 0
+    fi
+    (( i < attempts )) && sleep 2
   done
+  printf 'Hermes shared gateway did not converge after %s attempts: %s\n' "$attempts" "${last_error:-verification returned no diagnostic}" >&2
   return 1
 }
-
 profile_gateway_is_explicit_standalone_configure() {
   local name="$1"
   python3 - "data/hermes/profiles/$name/config.yaml" <<'PY_PROFILE_STANDALONE_CONFIGURE'
@@ -1879,42 +1881,22 @@ p=Path(sys.argv[1])
 if not p.is_file(): raise SystemExit(1)
 cfg=yaml.safe_load(p.read_text(encoding='utf-8')) or {}
 gateway=cfg.get('gateway') if isinstance(cfg,dict) else None
-raise SystemExit(0 if isinstance(gateway,dict) and gateway.get('standalone') is True else 1)
+raise SystemExit(0 if isinstance(gateway,dict) and (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))) else 1)
 PY_PROFILE_STANDALONE_CONFIGURE
 }
 
 verify_matrix_adapter_runtime_configure() {
-  local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || return 1
-  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after container_state
+  [[ "$state_path" == data/hermes/* ]] || { echo 'Invalid Hermes state path for platform verification.' >&2; return 1; }
+  container_state="/opt/data/${state_path#data/hermes/}"
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || { printf 'Cannot inspect Hermes gateway %s: %s\n' "$service_name" "$s6_status" >&2; return 1; }
+  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || { printf 'Hermes gateway %s is not up: %s\n' "$service_name" "$s6_status" >&2; return 1; }
   s6_pid="${BASH_REMATCH[1]}"
-  python3 - "$state_path" "$s6_pid" "$platform_key" <<'PY_MATRIX_ADAPTER_RUNTIME_CONFIGURE' || return 1
-from datetime import datetime,timezone
-from pathlib import Path
-import json,sys
-path=Path(sys.argv[1]); expected_pid=int(sys.argv[2]); key=sys.argv[3]
-try: record=json.loads(path.read_text(encoding='utf-8'))
-except Exception: raise SystemExit(1)
-if not isinstance(record,dict) or record.get('gateway_state')!='running': raise SystemExit(1)
-try: pid=int(record.get('pid'))
-except (TypeError,ValueError): raise SystemExit(1)
-if pid != expected_pid: raise SystemExit(1)
-stamp=record.get('updated_at')
-if not isinstance(stamp,str) or not stamp.strip(): raise SystemExit(1)
-try:
-    heartbeat=datetime.fromisoformat(stamp.replace('Z','+00:00'))
-except ValueError: raise SystemExit(1)
-if heartbeat.tzinfo is None: raise SystemExit(1)
-age=(datetime.now(timezone.utc)-heartbeat.astimezone(timezone.utc)).total_seconds()
-if age > 120 or age < -30: raise SystemExit(1)
-platforms=record.get('platforms')
-row=platforms.get(key) if isinstance(platforms,dict) else None
-if not isinstance(row,dict) or str(row.get('state') or '').strip().lower()!='connected': raise SystemExit(1)
-PY_MATRIX_ADAPTER_RUNTIME_CONFIGURE
+  timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - --platform "$platform_key" "$container_state" "$s6_pid" < gateway-multiplex-verify.py || return 1
   s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
-  [[ "$s6_pid_after" == "$s6_pid" ]]
+  [[ "$s6_pid_after" == "$s6_pid" ]] || { echo "Hermes gateway $service_name PID changed during Matrix verification." >&2; return 1; }
 }
 
 wait_matrix_adapter_runtime_configure() {
@@ -3667,14 +3649,51 @@ if windows_native_ollama_enabled && [[ ",$compose_profiles," == *,local-ai,* ]];
   echo 'Internal Ollama backend error: native Windows Ollama was selected but the managed local-ai Compose profile is active. Refusing to download/start the managed Ollama image.' >&2
   return 1
 fi
-# If a previously selected optional service is now disabled, stop/remove only its containers. Persistent data is retained.
-# v3 migration: old releases used Tailscale containers inside WSL; remove those containers unconditionally but leave their data folders untouched.
-timeout --foreground --kill-after=5s 60s docker rm -f hermes-tailscale hermes-tailscale-matrix >/dev/null 2>&1 || true
-[[ "$(opt_bool matrix)" == true ]] || { docker rm -f hermes-synapse hermes-synapse-db >/dev/null 2>&1 || true; }
-[[ "$(opt_bool searxng)" == true ]] || { docker rm -f hermes-searxng hermes-searxng-valkey >/dev/null 2>&1 || true; }
-[[ "$(opt_bool qmd)" == true ]] || { docker rm -f hermes-qmd hermes-qmd-indexer >/dev/null 2>&1 || true; }
-[[ "$(opt_bool honcho)" == true ]] || { timeout --foreground --kill-after=5s 60s docker rm -f hermes-honcho-api hermes-honcho-deriver hermes-honcho-db hermes-honcho-redis >/dev/null 2>&1 || true; }
-managed_ollama_enabled || { docker rm -f hermes-ollama >/dev/null 2>&1 || true; }
+# Removing a globally named container is destructive even if its name matches
+# an old LatticeVale service. Prove both Compose project and working-directory
+# ownership for every existing target BEFORE removing any in the batch.
+remove_installer_owned_containers_configure() {
+  local expected_dir label_project label_directory name container_id i
+  local -a confirmed_ids=() confirmed_names=()
+  expected_dir="$(pwd -P)"
+  for name in "$@"; do
+    if ! timeout --foreground --kill-after=5s 15s docker container inspect "$name" >/dev/null 2>&1; then
+      continue
+    fi
+    # Bind the proof to Docker's immutable ID, not a replaceable global name.
+    container_id="$(timeout --foreground --kill-after=5s 15s docker inspect -f '{{.Id}}' "$name" 2>/dev/null)" || {
+      echo "Cannot establish Docker identity for container '$name'; preserving it." >&2; return 1;
+    }
+    [[ "$container_id" =~ ^[[:xdigit:]]{64}$ ]] || {
+      echo "Invalid Docker identity for container '$name'; preserving it." >&2; return 1;
+    }
+    label_project="$(timeout --foreground --kill-after=5s 15s docker inspect -f '{{ index .Config.Labels "com.docker.compose.project" }}' "$container_id" 2>/dev/null)" || {
+      echo "Cannot prove Compose ownership for container '$name'; preserving it." >&2; return 1;
+    }
+    label_directory="$(timeout --foreground --kill-after=5s 15s docker inspect -f '{{ index .Config.Labels "com.docker.compose.project.working_dir" }}' "$container_id" 2>/dev/null)" || {
+      echo "Cannot prove Compose working directory for container '$name'; preserving it." >&2; return 1;
+    }
+    if [[ "$label_project" != hermesstack || -z "$label_directory" || "$label_directory" == '<no value>' || "$(realpath -m -- "$label_directory")" != "$expected_dir" ]]; then
+      echo "Refusing to remove container '$name': it is not proven to belong to LatticeVale stack '$expected_dir'." >&2
+      return 1
+    fi
+    confirmed_names+=("$name")
+    confirmed_ids+=("$container_id")
+  done
+  for i in "${!confirmed_ids[@]}"; do
+    timeout --foreground --kill-after=5s 60s docker rm -f "${confirmed_ids[$i]}" >/dev/null || {
+      echo "Could not remove verified LatticeVale-owned container '${confirmed_names[$i]}'." >&2; return 1;
+    }
+  done
+}
+# Disabled optional services are removable only when owned by THIS Compose stack.
+# Old, unlabelled v3 Tailscale containers are preserved pending manual resolution.
+remove_installer_owned_containers_configure hermes-tailscale hermes-tailscale-matrix || exit 1
+[[ "$(opt_bool matrix)" == true ]] || { remove_installer_owned_containers_configure hermes-synapse hermes-synapse-db || exit 1; }
+[[ "$(opt_bool searxng)" == true ]] || { remove_installer_owned_containers_configure hermes-searxng hermes-searxng-valkey || exit 1; }
+[[ "$(opt_bool qmd)" == true ]] || { remove_installer_owned_containers_configure hermes-qmd hermes-qmd-indexer || exit 1; }
+[[ "$(opt_bool honcho)" == true ]] || { remove_installer_owned_containers_configure hermes-honcho-api hermes-honcho-deriver hermes-honcho-db hermes-honcho-redis || exit 1; }
+managed_ollama_enabled || { remove_installer_owned_containers_configure hermes-ollama || exit 1; }
 
 # Preserve database passwords across resumptions/upgrades.
 RESOURCE_CONTEXT_ACCEL=cpu
@@ -4005,7 +4024,7 @@ if [[ "$(opt_bool honcho)" == true ]]; then
     echo
     echo 'Existing Honcho data predates or cannot prove the v12 local embedding configuration.'
     echo 'v12 is preserving that database/cache unchanged and initializing a fresh fully-local Honcho store.'
-    timeout --foreground --kill-after=5s 60s docker rm -f hermes-honcho-api hermes-honcho-deriver hermes-honcho-db hermes-honcho-redis >/dev/null 2>&1 || true
+    remove_installer_owned_containers_configure hermes-honcho-api hermes-honcho-deriver hermes-honcho-db hermes-honcho-redis || exit 1
     mv data/honcho-db "backups/honcho-db-pre-local-$stamp"
     mkdir -p data/honcho-db
     if [[ -d data/honcho-redis && -n "$(find data/honcho-redis -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]]; then
@@ -4835,7 +4854,7 @@ gateway.pop('multiplex_profiles',None)
 try: state=json.loads(ownership.read_text(encoding='utf-8')) if ownership.exists() else {}
 except Exception: raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
 if not isinstance(state,dict): raise SystemExit('Installer temporary gateway ownership record is invalid; preserving profile configuration.')
-if gateway.get('standalone') is not True and name not in state:
+if not (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))) and name not in state:
     state[name]={'present': 'standalone' in gateway, 'value': gateway.get('standalone')}
 gateway['standalone']=True
 cfg['gateway']=gateway
@@ -5485,7 +5504,7 @@ for name,p in profiles:
     if name != 'default' or gateway.get('multiplex_profiles') is not True:
         gateway.pop('multiplex_profiles',None)
     if name != 'default':
-        if gateway.get('standalone') is not True and name not in temporary_state:
+        if not (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))) and name not in temporary_state:
             temporary_state[name]={'present': 'standalone' in gateway, 'value': gateway.get('standalone')}
         gateway['standalone']=True
     cfg['gateway']=gateway
@@ -6113,7 +6132,7 @@ for path in sorted(profiles.glob('*/config.yaml')):
     name=path.parent.name
     if name in managed: continue
     cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
-    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
+    if not isinstance(gateway,dict) or not (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))): print(name)
 PY_UNOWNED_GATEWAY_CANDIDATES
 )
       for unowned_profile in "${unowned_multiplex_candidates[@]}"; do

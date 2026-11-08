@@ -15,7 +15,7 @@ sys.dont_write_bytecode = True
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}, version
+assert version in {'14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'}, version
 sys.path.insert(0, str(ROOT / 'stack'))
 from latticevale_arch import (  # noqa:E402
     directml_context_recommendation,

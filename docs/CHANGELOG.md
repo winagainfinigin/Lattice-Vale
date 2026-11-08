@@ -1,5 +1,20 @@
 # Changelog
 
+## 14.6.7 — gateway readiness, preservation and repair hardening (2026-11-07)
+
+- Repairs the GNU `install` multi-source staging error before WSL configuration.
+- Verifies idle Hermes gateways using the live s6 PID and kernel process birth
+  rather than rejecting the unchanged state timestamp after 120 seconds;
+  Matrix adapter verification runs in the container's PID namespace.
+- Aligns explicitly quoted standalone profile settings with Hermes semantics,
+  preserves managed-profile roster behavior, and reports the final retry error.
+- Requires exact Compose project and stack-directory ownership before removing
+  optional or legacy containers; collisions are preserved and reported.
+- Retains installer-options schema 24 and runtime-policy schema 13; no reset,
+  profile identity migration, or credential regeneration is introduced.
+- Offline tests are not a substitute for live Windows/WSL/Docker qualification.
+
+
 ## 14.6.6 Hermes dynamic gateway supervisor compatibility — 2026-11-07
 
 - Track Hermes runtime-registered default and named gateway services in `/run/hermes-service/gateway-*`; the root-owned static s6 scandir `/run/service` is untouched.

@@ -46,6 +46,8 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
     docker.write_text(textwrap.dedent(f'''\
         #!/usr/bin/env bash
         printf '%s\\n' "$*" >> {str(log)!r}
+        # No global-name Docker containers exist in the simulated empty engine.
+        if [[ "$1" == "container" && "$2" == "inspect" ]]; then exit 1; fi
         if [[ "$1" == "inspect" ]]; then exit 1; fi
         if [[ "$1" == "network" && "$2" == "inspect" ]]; then exit 1; fi
         if [[ "$1" == "ps" ]]; then

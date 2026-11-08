@@ -50,7 +50,7 @@ checks = {
     "temporary standalone settings are ownership-tracked and restored": ".installer-temporary-standalone-profiles.json" in configure and "original.get('present')" in configure and "explicit user standalone choices remain untouched" in manage,
     "gateway convergence verifies the live Hermes served profile record": "gateway-multiplex-verify.py" in configure and "served_profiles" in (ROOT / "stack/gateway-multiplex-verify.py").read_text(encoding="utf-8") and "verify_live_multiplex_gateway_manage" in manage and "gateway-multiplex-verify.py" in manage,
     "global migration refuses to alter an active unowned gateway": "unowned_multiplex_candidates" in configure and "unowned_multiplex_candidates" in manage and "unowned profile" in configure and "unowned profile" in manage,
-    "default profile is excluded from temporary standalone mode": "if name != 'default':\n        if gateway.get('standalone') is not True" in configure,
+    "default profile is excluded from temporary standalone mode": "if name != 'default':\n        if not (gateway.get('standalone') is True" in configure,
     "managed topology supports default-only and named Matrix profiles": "mapfile -t managed_profiles" in configure and "profile_matrix_enabled=true" in configure and "selected_matrix_profile_names" in manage,
     "audit recognizes shared multiplexer topology": "Hermes shared host gateway is durably configured and live-verified" in audit and "verify_shared_gateway_runtime" in audit,
     "audit preserves explicit standalone choices": "Explicit gateway.standalone choices are user-owned topology" in audit and "yaml_multiplex_enabled(path)" in audit,

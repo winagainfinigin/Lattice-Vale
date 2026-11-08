@@ -239,11 +239,12 @@ def yaml_gateway_standalone(path: Path) -> bool:
         import yaml  # type: ignore
         cfg = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         gateway = cfg.get("gateway") if isinstance(cfg, dict) else None
-        return isinstance(gateway, dict) and gateway.get("standalone") is True
+        value = gateway.get("standalone") if isinstance(gateway, dict) else None
+        return value is True or (isinstance(value, str) and value.strip().lower() in {"true", "yes", "on", "1"})
     except Exception:
         text = path.read_text(encoding="utf-8", errors="replace")
         match = re.search(
-            r"(?ms)^gateway:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+standalone:\s*(true|yes|on|1)\s*(?:#.*)?$",
+            r"(?ms)^gateway:\s*\n(?:^[ \t]+.*\n)*?^[ \t]+standalone:\s*['\"]?(true|yes|on|1)['\"]?\s*(?:#.*)?$",
             text,
             re.I,
         )
@@ -263,6 +264,34 @@ def gateway_heartbeat_age_seconds(record: dict[str, Any]) -> float | None:
         return (datetime.datetime.now(datetime.timezone.utc) - dt.astimezone(datetime.timezone.utc)).total_seconds()
     except Exception:
         return None
+
+
+def gateway_process_birth_proven(pid: int, record: dict[str, Any]) -> bool:
+    """Read-only PID birth proof inside Hermes' PID namespace, never the host's."""
+    stamp = str(record.get('updated_at') or '')
+    try:
+        timestamp = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+        if timestamp.tzinfo is None:
+            return False
+        expected_epoch = timestamp.timestamp()
+    except (ValueError, OverflowError, OSError):
+        return False
+    # Docker's exec provides a separate process, but reads the gateway PID's
+    # kernel-backed birth data; no access to credentials or modifications.
+    script = (
+        "import os,pathlib,sys; "
+        "pid=int(sys.argv[1]);stamp=float(sys.argv[2]); "
+        "raw=pathlib.Path('/proc/%s/stat'%pid).read_text(); "
+        "end=raw.rfind(')'); "
+        "assert end>=0; "
+        "ticks=int(raw[end+1:].split()[19]); "
+        "boot=int(next(x.split()[1] for x in pathlib.Path('/proc/stat').read_text().splitlines() if x.startswith('btime '))); "
+        "birth=boot+ticks/os.sysconf('SC_CLK_TCK'); "
+        "sys.exit(0 if birth<=stamp+2 else 1)"
+    )
+    rc, _ = run(['docker', 'exec', '-u', 'hermes', 'hermes-agent', 'python', '-c',
+                 script, str(pid), str(expected_epoch)], timeout=15)
+    return rc == 0
 
 
 def exact_gateway_s6_pid(name: str) -> int | None:
@@ -290,8 +319,8 @@ def verify_shared_gateway_runtime(root: Path, expected_profiles: set[str]) -> tu
     age = gateway_heartbeat_age_seconds(record)
     if age is None:
         return False, "gateway heartbeat timestamp is missing or invalid", record
-    if age > 120:
-        return False, f"gateway heartbeat is stale ({int(age)}s old)", record
+    if age > 120 and not gateway_process_birth_proven(pid, record):
+        return False, f"gateway heartbeat is stale ({int(age)}s old; process-birth evidence unavailable or mismatched)", record
     if age < -30:
         return False, f"gateway heartbeat is {int(-age)}s in the future", record
     served = record.get("served_profiles")
@@ -323,8 +352,8 @@ def verify_standalone_gateway_runtime(root: Path, name: str) -> tuple[bool, str,
     age = gateway_heartbeat_age_seconds(record)
     if age is None:
         return False, f"standalone gateway heartbeat for {name} is missing or invalid", record
-    if age > 120:
-        return False, f"standalone gateway heartbeat for {name} is stale ({int(age)}s old)", record
+    if age > 120 and not gateway_process_birth_proven(pid, record):
+        return False, f"standalone gateway heartbeat for {name} is stale ({int(age)}s old; process-birth evidence unavailable or mismatched)", record
     if age < -30:
         return False, f"standalone gateway heartbeat for {name} is {int(-age)}s in the future", record
     pid_after = exact_gateway_s6_pid(name)

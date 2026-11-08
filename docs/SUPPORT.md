@@ -37,7 +37,7 @@ GPU recommendation is advisory. If runtime tensor/offload/model-admission checks
 
 ## v14.5.45 PowerShell 7.6 compatibility support
 
-If an older v14.5.44 checkout fails after DirectML preflight with `Argument types do not match`, upgrade the repository/full installer to the current v14.6.6 release. v14.5.45 introduced the underlying PowerShell compatibility fix. Do not require users to hand-edit PowerShell source or downgrade PowerShell. v14.5.45 removes the unsafe generic `New-Object` collection pattern repository-wide.
+If an older v14.5.44 checkout fails after DirectML preflight with `Argument types do not match`, upgrade the repository/full installer to the current v14.6.7 release. v14.5.45 introduced the underlying PowerShell compatibility fix. Do not require users to hand-edit PowerShell source or downgrade PowerShell. v14.5.45 removes the unsafe generic `New-Object` collection pattern repository-wide.
 
 ## v14.5.44 DirectML preflight support note
 

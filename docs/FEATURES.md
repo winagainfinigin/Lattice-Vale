@@ -1,4 +1,4 @@
-# LatticeVale v14.6.6 — Complete Features and Install Options Reference
+# LatticeVale v14.6.7 — Complete Features and Install Options Reference
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
@@ -27,7 +27,7 @@ Resume/repair and normal stack start first give a just-started shared gateway a 
 - DirectML host-gateway recovery is isolated from healthy Docker infrastructure; `/health` remains responsive during model-load locking, the supervisor confirms misses before replacement, and installer self-test uses bounded readiness convergence.
 - Missing ephemeral Hermes `gateway-default` / profile s6 slots can be re-registered from preserved profile state through Hermes' runtime service-manager API instead of forcing profile recreation.
 - For recognized older stacks, mutating Options **1, 2, 4, 5, and 6** perform cumulative preservation-first migration before their mode-specific action. Options **3** and **8** remain read-only; Option **7** remains isolated cleanup.
-- The current v14.6.6 release deterministic contract is **150 fixtures** across six shards, including live Hermes gateway-convergence and Matrix identity/route regressions for the 14.6.2 and 14.6.3 upgrade baselines.
+- The current v14.6.7 release deterministic contract is **151 fixtures** across six shards, including live Hermes gateway-convergence and Matrix identity/route regressions for the 14.6.2 and 14.6.3 upgrade baselines.
 
 ## v14.6.0 schema-23 / policy-13 additions
 
@@ -37,7 +37,7 @@ Resume/repair and normal stack start first give a just-started shared gateway a 
 - Conserved automatic CPU allocation: system/DirectML reservations are removed before enabled Docker services share one aggregate envelope.
 - DirectML generation uses `torch.no_grad()`; no-fallback mode cannot create or retain forced-Ollama fallback markers.
 
-> **Current managed software/source policy (v14.6.6):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
+> **Current managed software/source policy (v14.6.7):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
 
 > **v14.6.0 architecture:** canonical hardware/backend/resource state separates durable user intent from machine-derived capability. Current task docs: `QUICKSTART.md`, `INSTALLATION.md`, `REPAIR.md`, `GPU-BACKENDS.md`, `DIAGNOSTICS.md`, `RESOURCE-POLICY.md`, and `ARCHITECTURE.md`.
 
@@ -80,7 +80,7 @@ Resume/repair and normal stack start first give a just-started shared gateway a 
 
 This file consolidates the **current, available LatticeVale v14.6.6 capabilities and installer choices** scattered across the release documentation. The source basis was the complete audited v14.3.43 runtime release tree promoted to v14.4.0 without runtime behavior changes: 61 Markdown/text documentation files (28 current/release documents and 33 explicitly archival v13 documents), plus the current installer/configuration source used to resolve historical or ambiguous documentation.
 
-Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.6 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
+Historical v13 notes are treated as compatibility lineage only. A feature is described here as current only when it is retained by the v14.6.7 documentation/source. Superseded behavior is called out separately rather than presented as an available current option.
 
 ---
 
@@ -354,7 +354,7 @@ Pending activation alone is not grounds to rebuild a valid identity.
 
 ## 3.9 Windows Tailscale private remote access
 
-**Current v14.6.6 remote-health contract:** installation verifies Windows Tailscale client/authentication prerequisites, the Windows-native relay, deterministic Serve listeners, and the Matrix client/API path locally. It deliberately does **not** require or create a second-device page challenge, so installer `PASS` means the managed local Tailscale/Serve path is configured and responding; actual reachability from another tailnet device remains a separate integration qualification test.
+**Current v14.6.7 remote-health contract:** installation verifies Windows Tailscale client/authentication prerequisites, the Windows-native relay, deterministic Serve listeners, and the Matrix client/API path locally. It deliberately does **not** require or create a second-device page challenge, so installer `PASS` means the managed local Tailscale/Serve path is configured and responding; actual reachability from another tailnet device remains a separate integration qualification test.
 
 
 **Prompt:** Use Windows Tailscale for private remote access?

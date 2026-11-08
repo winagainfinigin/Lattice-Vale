@@ -1036,7 +1036,7 @@ for name in sorted({x.strip() for x in managed_file.read_text(encoding='utf-8').
     if not isinstance(cfg,dict): raise SystemExit(f"managed profile '{name}' config.yaml is not a mapping")
     gateway=cfg.get('gateway') or {}
     if not isinstance(gateway,dict): raise SystemExit(f"managed profile '{name}' gateway settings are malformed")
-    if gateway.get('standalone') is not True: expected.add(name)
+    if not (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))): expected.add(name)
 for name in sorted(expected): print(name)
 PY_MANAGED_MULTIPLEX_PROFILES
 }
@@ -1046,8 +1046,8 @@ verify_live_multiplex_gateway_manage() {
   local -a profiles=()
   profiles_text="$(managed_multiplex_profiles_manage)" || return 1
   [[ -n "$profiles_text" ]] && mapfile -t profiles <<< "$profiles_text"
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || return 1
-  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || { printf 'Cannot inspect default Hermes s6 gateway: %s\n' "$s6_status" >&2; return 1; }
+  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || { printf 'Default Hermes gateway is not up: %s\n' "$s6_status" >&2; return 1; }
   s6_pid="${BASH_REMATCH[1]}"
   timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - /opt/data/gateway_state.json "$s6_pid" "${profiles[@]}" < gateway-multiplex-verify.py || return 1
   s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1)" || return 1
@@ -1057,14 +1057,16 @@ verify_live_multiplex_gateway_manage() {
 }
 
 wait_live_multiplex_gateway_manage() {
-  local attempts="${1:-15}" i
+  local attempts="${1:-15}" i last_error=''
   for i in $(seq 1 "$attempts"); do
-    verify_live_multiplex_gateway_manage >/dev/null 2>&1 && return 0
-    sleep 2
+    if last_error="$(verify_live_multiplex_gateway_manage 2>&1)"; then
+      return 0
+    fi
+    (( i < attempts )) && sleep 2
   done
+  printf 'Hermes shared gateway did not converge after %s attempts: %s\n' "$attempts" "${last_error:-verification returned no diagnostic}" >&2
   return 1
 }
-
 profile_gateway_is_explicit_standalone_manage() {
   local name="$1"
   python3 - "data/hermes/profiles/$name/config.yaml" <<'PY_PROFILE_STANDALONE_MANAGE'
@@ -1074,42 +1076,22 @@ p=Path(sys.argv[1])
 if not p.is_file(): raise SystemExit(1)
 cfg=yaml.safe_load(p.read_text(encoding='utf-8')) or {}
 gateway=cfg.get('gateway') if isinstance(cfg,dict) else None
-raise SystemExit(0 if isinstance(gateway,dict) and gateway.get('standalone') is True else 1)
+raise SystemExit(0 if isinstance(gateway,dict) and (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))) else 1)
 PY_PROFILE_STANDALONE_MANAGE
 }
 
 verify_matrix_adapter_runtime_manage() {
-  local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after
-  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || return 1
-  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
+  local service_name="$1" state_path="$2" platform_key="$3" s6_status s6_pid s6_status_after s6_pid_after container_state
+  [[ "$state_path" == data/hermes/* ]] || { echo 'Invalid Hermes state path for platform verification.' >&2; return 1; }
+  container_state="/opt/data/${state_path#data/hermes/}"
+  s6_status="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || { printf 'Cannot inspect Hermes gateway %s: %s\n' "$service_name" "$s6_status" >&2; return 1; }
+  [[ "$s6_status" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || { printf 'Hermes gateway %s is not up: %s\n' "$service_name" "$s6_status" >&2; return 1; }
   s6_pid="${BASH_REMATCH[1]}"
-  python3 - "$state_path" "$s6_pid" "$platform_key" <<'PY_MATRIX_ADAPTER_RUNTIME_MANAGE' || return 1
-from datetime import datetime,timezone
-from pathlib import Path
-import json,sys
-path=Path(sys.argv[1]); expected_pid=int(sys.argv[2]); key=sys.argv[3]
-try: record=json.loads(path.read_text(encoding='utf-8'))
-except Exception: raise SystemExit(1)
-if not isinstance(record,dict) or record.get('gateway_state')!='running': raise SystemExit(1)
-try: pid=int(record.get('pid'))
-except (TypeError,ValueError): raise SystemExit(1)
-if pid != expected_pid: raise SystemExit(1)
-stamp=record.get('updated_at')
-if not isinstance(stamp,str) or not stamp.strip(): raise SystemExit(1)
-try:
-    heartbeat=datetime.fromisoformat(stamp.replace('Z','+00:00'))
-except ValueError: raise SystemExit(1)
-if heartbeat.tzinfo is None: raise SystemExit(1)
-age=(datetime.now(timezone.utc)-heartbeat.astimezone(timezone.utc)).total_seconds()
-if age > 120 or age < -30: raise SystemExit(1)
-platforms=record.get('platforms')
-row=platforms.get(key) if isinstance(platforms,dict) else None
-if not isinstance(row,dict) or str(row.get('state') or '').strip().lower()!='connected': raise SystemExit(1)
-PY_MATRIX_ADAPTER_RUNTIME_MANAGE
+  timeout --foreground --kill-after=5s 30s docker exec -i -u hermes hermes-agent python - --platform "$platform_key" "$container_state" "$s6_pid" < gateway-multiplex-verify.py || return 1
   s6_status_after="$(timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat "/run/hermes-service/gateway-$service_name" 2>&1)" || return 1
   [[ "$s6_status_after" =~ ^up\ \(pid\ ([0-9]+)\ pgid\ ([0-9]+)\) ]] || return 1
   s6_pid_after="${BASH_REMATCH[1]}"
-  [[ "$s6_pid_after" == "$s6_pid" ]]
+  [[ "$s6_pid_after" == "$s6_pid" ]] || { echo "Hermes gateway $service_name PID changed during Matrix verification." >&2; return 1; }
 }
 
 wait_matrix_adapter_runtime_manage() {
@@ -1278,7 +1260,7 @@ for path in sorted((root/'profiles').glob('*/config.yaml')):
     name=path.parent.name
     if name in managed: continue
     cfg=yaml.safe_load(path.read_text(encoding='utf-8')) or {}; gateway=cfg.get('gateway') or {}
-    if not isinstance(gateway,dict) or gateway.get('standalone') is not True: print(name)
+    if not isinstance(gateway,dict) or not (gateway.get('standalone') is True or (isinstance(gateway.get('standalone'),str) and gateway.get('standalone').strip().lower() in ('true','yes','on','1'))): print(name)
 PY_UNOWNED_GATEWAY_CANDIDATES
 )
       for unowned_profile in "${unowned_multiplex_candidates[@]}"; do

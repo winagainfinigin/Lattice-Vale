@@ -130,7 +130,7 @@ if hasattr(os, 'geteuid') and os.geteuid() == 0:
         (unverified / 'keep-me').write_text('preserve', encoding='utf-8')
 
         result = subprocess.run(
-            [str(ROOT / 'linux/cleanup-storage.sh'), str(stack), 'preupdate-backups'],
+            ['bash', str(ROOT / 'linux/cleanup-storage.sh'), str(stack), 'preupdate-backups'],
             text=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,

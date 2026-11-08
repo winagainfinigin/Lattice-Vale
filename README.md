@@ -1,4 +1,9 @@
-# LatticeVale v14.6.6
+# LatticeVale v14.6.7
+
+> **v14.6.7 source patch:** This changed-files-only archive applies to the exact
+> GitHub `74050427` 14.6.6 source tree. It is not a standalone installer or a
+> direct replacement for a live WSL stack. Generate and qualify the full release
+> before using the existing preservation-first Resume / repair workflow.
 
 > **Downstream portable-performance resource hotfix (same 14.6.6 version):**
 > Canonical CPU quotas now prioritize Hermes and CPU/Vulkan Ollama within the
@@ -30,7 +35,7 @@
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 
-> For **any recognized older installer-managed LatticeVale installation**, launch the **full v14.6.6 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
+> For **any recognized older installer-managed LatticeVale installation**, apply the v14.6.7 source overlay to a complete 14.6.6 checkout before creating a **full v14.6.7 release**. **Resume / repair installation** remains the recommended general recovery path. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
 
 The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
 
@@ -138,7 +143,7 @@ Native Windows Ollama remains externally owned. LatticeVale recommends one loade
 
 Resource policy v11 is finalized once into a canonical installer-owned policy object. Generated Compose CPU/RAM limits, `.latticevale-resource-state`, audit expectations, and the human-readable `resource-policy-report.txt` consume that same finalized object instead of independently recalculating ceilings. The state records separate hardware and policy SHA-256 fingerprints, so audit/repair can distinguish a hardware/topology change from policy/configuration drift. The report contains no credentials and records the RAM/CPU profile, acceleration/offload status, GPU topology, DirectML/Ollama coordination, context/model floor, and generated service ceilings.
 
-Current v14.6.6 release qualification requires exactly 151 deterministic fixtures across six shards, both resume simulations, PowerShell parsing under Windows PowerShell 5.1 and PowerShell 7, exact source-manifest verification, and a fresh release ZIP whose extracted files match the qualified source tree. Historical v14.5.42 qualification used a 135-fixture suite and its own patch-lineage reconstruction; those historical numbers do not describe the current release gate.
+Current v14.6.7 release qualification requires exactly 151 deterministic fixtures across six shards, both resume simulations, PowerShell parsing under Windows PowerShell 5.1 and PowerShell 7, exact source-manifest verification, and a fresh release ZIP whose extracted files match the qualified source tree. Historical v14.5.42 qualification used a 135-fixture suite and its own patch-lineage reconstruction; those historical numbers do not describe the current release gate.
 
 ### v14.5.4 — DirectML VRAM guard + 16 GB-class RAM efficiency
 
@@ -639,8 +644,9 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.6.2 Hotfix** | Prior install release | Latest-supported managed upstream resolution for Options 1/6, stable Honcho tag tracking, compatible stateful-major bounds, exact resolved-artifact recording, and inherited preservation-first repair |
 | **v14.6.3** | Prior install release | Matrix identity/route hotfix and managed Hermes profile migration to the shared gateway while preserving standalone choices |
 | **v14.6.4** | Prior install release | Local Tailscale/Matrix route validation without a second-device challenge, backup and Ubuntu refresh progress with run-level skips, streamed cleanup, and schema-24 compatibility |
-| **v14.6.6** | **Current install release** | Update-on-availability Option 1, retired refresh age gate, verified IPv4/IPv6 HTTPS without listener-only rollback; same schema 24 |
 | **v14.6.5** | Previous release | Shared-gateway idempotency, live s6/gateway-state/served-profile convergence proof, route-aware Matrix adapter verification, explicit standalone preservation, and no unnecessary healthy-gateway restart/remigration |
+| **v14.6.6** | Previous source | Update-on-availability Option 1, retired refresh age gate, verified IPv4/IPv6 HTTPS without listener-only rollback; same schema 24 |
+| **v14.6.7** | **Changed-files source candidate** | Correct installer staging, process-birth-safe gateway readiness, Matrix audit, standalone preferences, strict Docker ownership cleanup; same schema 24. Full host qualification remains pending. |
 
 ### v14.4.1
 

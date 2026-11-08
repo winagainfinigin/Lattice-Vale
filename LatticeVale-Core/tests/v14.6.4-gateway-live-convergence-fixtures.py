@@ -319,4 +319,129 @@ def get_service_manager(): return Manager()
                 if mode == "fail":
                     assert "RuntimeError" in result.stderr, result.stderr
 
+
+# Idle gateway records are allowed only when the supervised PID predates the
+# state timestamp. Reused PIDs and missing evidence fail closed.
+old_record={**BASE,'updated_at':(NOW-timedelta(hours=6)).isoformat()}
+assert verify.verify_state(old_record,5799,['default','assistant'],NOW,
+                           process_start_epoch=(NOW-timedelta(hours=7)).timestamp()) is None
+assert 'stale' in verify.verify_state(old_record,5799,['default'],NOW,
+                                     process_start_epoch=(NOW-timedelta(hours=1)).timestamp())
+assert 'stale' in verify.verify_state(old_record,5799,['default'],NOW,process_start_epoch=float('inf'))
+assert 'future' in verify.verify_state({**BASE,'updated_at':(NOW+timedelta(minutes=5)).isoformat()},5799,['default'],NOW)
+assert 'missing' in verify.verify_state({**BASE,'updated_at':''},5799,['default'],NOW)
+assert 'malformed' in verify.verify_state({**BASE,'served_profiles':'default'},5799,['default'],NOW)
+connected={**BASE, 'platforms': {'matrix':{'state':'connected'}, 'assistant:matrix':{'state':'connected'}}}
+assert verify.verify_state(connected,5799,['default','assistant'],NOW,platform_key='matrix') is None
+assert verify.verify_state(connected,5799,['default','assistant'],NOW,platform_key='assistant:matrix') is None
+# Standalone gateway JSON has the platform record but may not expose multiplex served_profiles.
+standalone_matrix={k:v for k,v in connected.items() if k!='served_profiles'}
+assert verify.verify_state(standalone_matrix,5799,[],NOW,platform_key='matrix') is None
+assert 'served_profiles' in verify.verify_state(standalone_matrix,5799,[],NOW)
+
+assert 'not connected' in verify.verify_state({**connected,'platforms':{'matrix':{'state':'disconnected'}}},5799,['default'],NOW,platform_key='matrix')
+assert 'not connected' in verify.verify_state({**connected,'platforms':{}},5799,['default'],NOW,platform_key='assistant:matrix')
+with tempfile.TemporaryDirectory() as td:
+    proc=Path(td)
+    (proc/'stat').write_text('cpu 1 2 3 4\nbtime 100000\n')
+    (proc/'123').mkdir()
+    # /proc/PID/stat field 22 is 19 slots after state (field 3).
+    (proc/'123/stat').write_text('123 (gateway with spaces) '+' '.join(['S']+['0']*18+['12345'])+'\n')
+    birth=verify.process_birth_epoch(123,proc)
+    import os as _os
+    assert birth==100000+12345/_os.sysconf('SC_CLK_TCK'),birth
+    assert verify.process_birth_epoch(124,proc) is None
+    (proc/'123/stat').write_text('broken')
+    assert verify.process_birth_epoch(123,proc) is None
+
+# Match Hermes' string truth semantics even for explicitly quoted YAML.
+with tempfile.TemporaryDirectory() as td:
+    config=Path(td)/'config.yaml'
+    for value in ('true','yes','on',"'true'",'"yes"',"'on'",'"1"'):
+        config.write_text('gateway:\n  standalone: '+value+'\n')
+        assert audit.yaml_gateway_standalone(config), value
+    for value in ('false','no','off','0',"'false'"):
+        config.write_text('gateway:\n  standalone: '+value+'\n')
+        assert not audit.yaml_gateway_standalone(config), value
+
+# Globally named Docker containers are not an ownership claim. Prove project
+# AND stack directory for ALL targets before removing any from the batch.
+assert 'remove_installer_owned_containers_configure()' in CONFIGURE
+assert 'com.docker.compose.project.working_dir' in CONFIGURE
+assert 'Refusing to remove container' in CONFIGURE
+begin=CONFIGURE.index('remove_installer_owned_containers_configure() {')
+end=CONFIGURE.index('\n}\n',begin)+3
+body=CONFIGURE[begin:end]
+with tempfile.TemporaryDirectory() as td:
+    base=Path(td); (base/'bin').mkdir()
+    docker=base/'bin/docker'
+    docker.write_text('''#!/usr/bin/env python3
+import hashlib,json,os,sys
+from pathlib import Path
+p=Path(os.environ['MOCK_DOCKER_REGISTRY']); names=json.loads(p.read_text()); args=sys.argv[1:]
+ids={name:hashlib.sha256(name.encode()).hexdigest() for name in names}
+def resolve(identity):
+    return identity if identity in names else next((n for n,h in ids.items() if h==identity),None)
+if args[:2]==['container','inspect']:
+    raise SystemExit(0 if args[2] in names else 1)
+if args[:2]==['inspect','-f']:
+    name=resolve(args[3]);fmt=args[2]
+    if name is None: raise SystemExit(1)
+    if fmt=='{{.Id}}': print(ids[name])
+    elif 'working_dir' in fmt: print(names[name][1])
+    else: print(names[name][0])
+    raise SystemExit(0)
+if args[:2]==['rm','-f']:
+    name=resolve(args[2]);
+    if name is None: raise SystemExit(1)
+    Path(os.environ['MOCK_DOCKER_REMOVED']).open('a').write(name+'\\n')
+    raise SystemExit(0)
+raise SystemExit(4)
+''')
+    docker.chmod(0o755)
+    registry=base/'registry.json';removed=base/'removed.log'
+    env={**os.environ,'PATH':str(base/'bin')+os.pathsep+os.environ['PATH'],
+         'MOCK_DOCKER_REGISTRY':str(registry),'MOCK_DOCKER_REMOVED':str(removed)}
+    def run_remove(names,targets):
+        registry.write_text(json.dumps(names)); removed.write_text('')
+        out=subprocess.run(['bash','-c',body+'\nremove_installer_owned_containers_configure '+ ' '.join(targets)],
+                           cwd=td,env=env,text=True,capture_output=True,timeout=20)
+        return out,removed.read_text().splitlines()
+    working=str(base.resolve());valid=['hermesstack',working]
+    out,deleted=run_remove({'hermes-qmd':valid,'hermes-synapse':valid},['hermes-qmd','hermes-synapse'])
+    assert out.returncode==0,(out.stdout,out.stderr)
+    assert deleted==['hermes-qmd','hermes-synapse'],deleted
+    out,deleted=run_remove({'hermes-qmd':valid,'hermes-synapse':['another-project',working]},['hermes-qmd','hermes-synapse'])
+    assert out.returncode!=0 and 'Refusing' in out.stderr and deleted==[],(out.stderr,deleted)
+    out,deleted=run_remove({'hermes-qmd':['hermesstack','/another/location']},['hermes-qmd'])
+    assert out.returncode!=0 and deleted==[],(out.stderr,deleted)
+    out,deleted=run_remove({},['hermes-qmd'])
+    assert out.returncode==0 and deleted==[],(out.stderr,deleted)
+
+# Execute BOTH embedded roster parsers over four arbitrary managed profiles.
+# A user-selected quoted-true standalone profile must NOT be multiplexed.
+for contents, tag in ((CONFIGURE,'PY_MANAGED_MULTIPLEX_CONFIGURE'),
+                       (MANAGE,'PY_MANAGED_MULTIPLEX_PROFILES')):
+    marker="<<'"+tag+"'"
+    start=contents.index(marker)+len(marker)
+    end=contents.index('\n'+tag,start)
+    program=contents[start:end].lstrip('\n')
+    with tempfile.TemporaryDirectory() as td:
+        base=Path(td);home=base/'data/hermes';roster=base/'.installer-managed-profiles'
+        names=['assistant','coder','reviewer','observer']
+        roster.write_text('\n'.join(names)+'\n')
+        for name in names:
+            path=home/'profiles'/name/'config.yaml';path.parent.mkdir(parents=True)
+            path.write_text("gateway:\n  standalone: "+("'yes'" if name=='observer' else 'false')+"\n")
+        result=subprocess.run([sys.executable,'-c',program,str(home),str(roster)],
+                              capture_output=True,text=True,timeout=10)
+        assert result.returncode==0,(tag,result.stderr)
+        assert result.stdout.splitlines()==['assistant','coder','default','reviewer'],(tag,result.stdout)
+
+# Matrix probes run in the gateway's own PID namespace, not the WSL host.
+assert 'gateway_process_birth_proven' in AUDIT
+assert "'/proc/stat'" in AUDIT
+assert '--platform "$platform_key"' in CONFIGURE and '--platform "$platform_key"' in MANAGE
+assert 'last_error' in CONFIGURE and 'last_error' in MANAGE
+
 print("PASS shared-gateway convergence, quiet speculative verification, bounded settle windows, same-version idempotency, timeout convergence, Matrix routing, explicit standalone preservation, audit live-state semantics, and existing-profile filesystem preservation")

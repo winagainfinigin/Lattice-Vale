@@ -78,10 +78,11 @@ with patch.object(mod,'command',side_effect=lambda args, timeout=30: process('  
     updates, errors=mod.latest_apt()
     assert len(updates)==len(mod.PACKAGES) and not errors
 
-# Version only 14.6.5 -> 14.6.6 remains same-schema patch, not forced
-# cumulative migration. Older, structurally changed installs still migrate.
+# Version-only 14.6.5/14.6.6 -> 14.6.7 remains a same-schema patch, not
+# a forced cumulative migration. Older, structurally changed installs still migrate.
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
-assert "($BundleVersion -eq '14.6.6' -and $optionVersion -eq '14.6.5'" in ps
+assert "($BundleVersion -eq '14.6.7' -and $optionVersion -in @('14.6.5','14.6.6')" in ps
+assert "($stateVersion -eq '' -or $stateVersion -eq $optionVersion)" in ps
 assert '$needsMigration = ($versionMismatch -and -not $maintenanceUpgrade)' in ps
 assert "$installMode -eq 'resume' -and -not $forceManagedUpdate" in ps
 assert "$options['forceManagedUpdate'] = $true" in ps
@@ -101,5 +102,5 @@ assert 'repair_refresh_pending=true' in boot
 assert '.repair-package-refresh-pending' in boot
 assert 'force_managed_update' in boot
 assert 'MANAGED_REPAIR_REFRESH_DAYS=30' in (ROOT/'compatibility.conf').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip()=='14.6.6'
+assert (ROOT/'VERSION.txt').read_text().strip()=='14.6.7'
 print('v14.6.6 conditional managed-update fixtures: PASS')

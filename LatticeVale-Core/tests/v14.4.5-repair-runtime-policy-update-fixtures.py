@@ -6,7 +6,7 @@ import tempfile
 
 root = Path(__file__).resolve().parents[1]
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
-assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}, version
+assert version in {'14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'}, version
 
 cfg = (root / 'stack/configure-stack.sh').read_text(encoding='utf-8')
 manage = (root / 'stack/manage.sh').read_text(encoding='utf-8')
@@ -114,16 +114,16 @@ for token in (
 # v14.4.5 originally used bundle-version mismatch as an immediate refresh trigger.
 # v14.4.6 supersedes that behavior: VERSION.txt remains provenance only, while the
 # explicit managed-refresh revision/age/legacy-state gate decides ordinary repair.
-if version != '14.6.6':
+if version not in {'14.6.6','14.6.7'}:
     assert 'last_refresh_installer_version=' in boot
-assert ('MANAGED_REPAIR_REFRESH_REVISION=5' in compat) if version in {'14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'} else (('MANAGED_REPAIR_REFRESH_REVISION=4' in compat) if version in {'14.6.0','14.6.1'} else (('MANAGED_REPAIR_REFRESH_REVISION=3' in compat) if version == '14.5.47' else ('MANAGED_REPAIR_REFRESH_REVISION=2' in compat)))
+assert ('MANAGED_REPAIR_REFRESH_REVISION=5' in compat) if version in {'14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'} else (('MANAGED_REPAIR_REFRESH_REVISION=4' in compat) if version in {'14.6.0','14.6.1'} else (('MANAGED_REPAIR_REFRESH_REVISION=3' in compat) if version == '14.5.47' else ('MANAGED_REPAIR_REFRESH_REVISION=2' in compat)))
 if version == '14.4.5':
     assert '[[ "$last_refresh_installer_version" != "$installer_version" ]]' in boot
     assert 'Managed repair package/image/source refresh is due because the LatticeVale bundle changed' in boot
 else:
     assert '[[ "$last_refresh_installer_version" != "$installer_version" ]]' not in boot
     assert 'Managed repair package/image/source refresh is due because the LatticeVale bundle changed' not in boot
-    if version != '14.6.6':
+    if version not in {'14.6.6','14.6.7'}:
         assert 'bundle changed since the last managed component refresh' in boot
         assert 'managed-refresh policy revision $repair_refresh_revision is unchanged and the age gate is not due' in boot
     else:

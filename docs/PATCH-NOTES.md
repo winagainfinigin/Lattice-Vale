@@ -1,3 +1,14 @@
+## 14.6.7 changed-files patch — 2026-11-07
+
+Based only on GitHub commit `74050427b3c7c00b147f1dfb138b0aa674bafd05`.
+Fixes staging copy, validates idle live gateways via process birth, checks Matrix
+in the correct container namespace, preserves explicit quoted standalone
+choices, surfaces final convergence errors and protects non-owned Docker
+containers from name-based removal. Existing install-options schema 24 and
+runtime-policy schema 13 remain unchanged. The patch is for a complete
+14.6.6 repository source checkout, not direct deployment to a running stack.
+Live Windows/WSL/Docker end-to-end qualification remains required.
+
 > **v14.6.6 Hermes gateway runtime compatibility (2026-11-07):** Current upstream Hermes registers default and named gateways under the hermes-owned `/run/hermes-service` s6 scandir, not the static `/run/service` tree. LatticeVale now uses that exact dynamic location for state checks, bounded lifecycle control, and audits; direct s6 controls run as `hermes`. Missing-slot registration is non-starting and preserves boot-reconciler races. Registration failure diagnostics report a safe error type, not raw exception content. No Matrix identities, profiles, model settings, or resource policies are reset. Target-host Resume / repair must still verify live Matrix gateway convergence.
 
 > **14.6.6 demand-matched resource scheduler follow-up hotfix:** Corrects the
@@ -53,7 +64,7 @@
 - Retained the 14.6.5 resource-policy/QMD memory correction, Matrix identities, Tailscale authentication, user overrides and all selected application service configurations.
 - Live Windows native relay, NTFS ACL, Tailscale devices and LAN reachability have **not** been tested in this non-Windows execution environment; complete manual validation before deployment.
 
-# Current v14.6.6 patch notes
+# Current v14.6.7 patch notes
 
 ## v14.6.6 Hermes shared-gateway parked-profile compatibility (also affects 14.6.5 upgrades)
 

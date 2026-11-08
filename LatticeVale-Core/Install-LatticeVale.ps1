@@ -3213,12 +3213,12 @@ function Get-LatticeValeRepairOriginInfo(
     } else { $versionMismatch = $true }
     $schemaMismatch = ($optionSchema -ne $CurrentSchema)
     $metadataMismatch = (-not [string]::IsNullOrWhiteSpace($optionVersion) -and -not [string]::IsNullOrWhiteSpace($stateVersion) -and $optionVersion -ne $stateVersion)
-    # A same-schema 14.6.5 -> 14.6.6 maintenance upgrade is not a
+    # Same-schema 14.6.5/14.6.6 -> 14.6.7 maintenance is not a
     # cumulative architecture migration. The regular repair still stages the
     # current bundle; only a confirmed upstream update should trigger the
     # expensive managed software refresh. Older releases keep universal repair.
-    $maintenanceUpgrade = ($BundleVersion -eq '14.6.6' -and $optionVersion -eq '14.6.5' -and
-        ($stateVersion -eq '' -or $stateVersion -eq '14.6.5') -and $optionSchema -eq $CurrentSchema)
+    $maintenanceUpgrade = ($BundleVersion -eq '14.6.7' -and $optionVersion -in @('14.6.5','14.6.6') -and
+        ($stateVersion -eq '' -or $stateVersion -eq $optionVersion) -and $optionSchema -eq $CurrentSchema)
     $needsMigration = ($versionMismatch -and -not $maintenanceUpgrade) -or $schemaMismatch -or $metadataMismatch
 
     $origin = if (-not [string]::IsNullOrWhiteSpace($optionVersion)) { $optionVersion } elseif (-not [string]::IsNullOrWhiteSpace($stateVersion)) { $stateVersion } else { 'legacy/unknown' }

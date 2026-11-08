@@ -990,7 +990,8 @@ install -m 0755 -o "$linux_uid" -g "$linux_gid" \
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/configure-stack.sh" "$stack_dir/configure-stack.sh"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
-  "$bundle_root/stack/gateway-multiplex-verify.py" "$stack_dir/gateway-multiplex-verify.py" \
+  "$bundle_root/stack/gateway-multiplex-verify.py" "$stack_dir/gateway-multiplex-verify.py"
+install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/gateway-park-policy.py" "$stack_dir/gateway-park-policy.py"
 install -m 0755 -o "$linux_uid" -g "$linux_gid" \
   "$bundle_root/stack/manage.sh" "$stack_dir/manage.sh"

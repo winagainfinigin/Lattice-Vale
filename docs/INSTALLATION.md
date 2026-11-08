@@ -13,7 +13,7 @@
 
 ## Historical v14.6.1 Tailscale remote-access behavior
 
-Earlier releases required a second-device proof even after local service checks passed. Current v14.6.6 test builds remove that page challenge. They verify the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
+Earlier releases required a second-device proof even after local service checks passed. Current v14.6.7 test builds remove that page challenge. They verify the Windows Tailscale client, inbound preference/system policy, tailnet IPv4, MagicDNS hostname, HTTPS capability, Windows-to-WSL relay, Serve listeners, and selected service through the final HTTPS hostname while connecting directly to the Tailscale 100.x address.
 
 No second-device challenge is requested during v14.6.5 installation. Local route checks establish installer status; permitted remote devices use the displayed service URL after installation.
 

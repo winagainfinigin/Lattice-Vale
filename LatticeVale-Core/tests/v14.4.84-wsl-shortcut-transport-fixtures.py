@@ -3,7 +3,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 REPO = ROOT.parent
 version = (ROOT / 'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}, version
+assert version in {'14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'}, version
 
 launcher = (ROOT / 'windows' / 'LatticeVale-Shortcut.ps1').read_text(encoding='ascii')
 installer = (ROOT / 'Install-LatticeVale.ps1').read_text(encoding='ascii')
@@ -59,9 +59,9 @@ assert 'wsl.exe --terminate' not in repair
 
 # Root public guidance must direct existing installs to the full current release
 # and keep the source-only overwrite patch separate from live-stack repair.
-assert (f'# LatticeVale v{version}' in root_readme) if version in {'14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'} else ('# LatticeVale v14.5.1' in root_readme)
-if version in {'14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6'}:
-    assert f'For **any recognized older installer-managed LatticeVale installation**, launch the **full v{version} release**' in root_readme
+assert (f'# LatticeVale v{version}' in root_readme) if version in {'14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'} else ('# LatticeVale v14.5.1' in root_readme)
+if version in {'14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'}:
+    assert f'apply the v{version} source overlay to a complete 14.6.6 checkout' in root_readme
     assert 'choose **Resume / repair installation**' in root_readme
     assert 'not a universal Git diff' in root_readme and 'patch ZIP remains for source checkouts only' in root_readme
 elif version in {'14.5.2','14.5.3','14.5.4','14.5.42'}:
