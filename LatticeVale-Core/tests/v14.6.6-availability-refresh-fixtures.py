@@ -81,7 +81,7 @@ with patch.object(mod,'command',side_effect=lambda args, timeout=30: process('  
 # Version-only 14.6.5/14.6.6 -> 14.6.7 remains a same-schema patch, not
 # a forced cumulative migration. Older, structurally changed installs still migrate.
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(encoding='utf-8')
-assert "($BundleVersion -eq '14.6.7' -and $optionVersion -in @('14.6.5','14.6.6')" in ps
+assert "($BundleVersion -eq '14.6.8' -and $optionVersion -in @('14.6.5','14.6.6','14.6.7')" in ps
 assert "($stateVersion -eq '' -or $stateVersion -eq $optionVersion)" in ps
 assert '$needsMigration = ($versionMismatch -and -not $maintenanceUpgrade)' in ps
 assert "$installMode -eq 'resume' -and -not $forceManagedUpdate" in ps
@@ -102,5 +102,29 @@ assert 'repair_refresh_pending=true' in boot
 assert '.repair-package-refresh-pending' in boot
 assert 'force_managed_update' in boot
 assert 'MANAGED_REPAIR_REFRESH_DAYS=30' in (ROOT/'compatibility.conf').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip()=='14.6.7'
+assert (ROOT/'VERSION.txt').read_text().strip()=='14.6.8'
+# The existing read-only state audit surfaces recorded (not fetched) latest-tag
+# digests and must never print user-owned image refs containing credentials.
+import importlib.util
+with tempfile.TemporaryDirectory(prefix='lv-image-audit-') as tmp:
+    from pathlib import Path
+    audit_path=ROOT/'stack/state-audit.py'
+    spec=importlib.util.spec_from_file_location('latticevale_state_audit_fixture', audit_path)
+    audit_mod=importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(audit_mod)
+    inventory=Path(tmp)/'data/latticevale/managed-upstreams.json'
+    inventory.parent.mkdir(parents=True)
+    inventory.write_text(json.dumps({'images': {
+        'HERMES_IMAGE': {'declaredRef': 'nousresearch/hermes-agent:latest',
+                         'repoDigests': ['nousresearch/hermes-agent@sha256:' + 'a'*64]},
+        'OLLAMA_IMAGE': {'declaredRef': 'ollama/ollama:latest', 'repoDigests': []},
+        'SYNAPSE_IMAGE': {'declaredRef': 'user:secret@registry.invalid/synapse:latest',
+                          'repoDigests': ['synapse@sha256:' + 'b'*64]},
+        'POSTGRES_IMAGE': {'declaredRef': 'postgres:16-alpine', 'repoDigests': []},
+    }}), encoding='utf-8')
+    rows=audit_mod.recorded_floating_image_digests(Path(tmp))
+    assert rows == ['HERMES_IMAGE=nousresearch/hermes-agent:latest digest=sha256:'+'a'*64,
+                    'OLLAMA_IMAGE=ollama/ollama:latest digest=unavailable'], rows
+    assert audit_mod.recorded_floating_image_digests(Path(tmp)/'not-present') == []
+
 print('v14.6.6 conditional managed-update fixtures: PASS')

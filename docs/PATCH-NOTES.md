@@ -1,3 +1,21 @@
+## v14.6.8 source candidate (2026-11-13)
+
+- Cumulative 14.6.7 budget-rebalance/verified-container-replacement and Element/Adlice diagnostic changes retained without modifications.
+- Host-independent RAM fixture tests both permitted and denied memory budgets; production guard unchanged.
+- Read-only state audit surfaces recorded local SHA-256 registry digests for default floating image tags, without contacting registries or altering running state.
+- Corrects current release/update-policy wording and adds a monolith function/danger-zone index. The retired 30-day metadata key stays readable/validated for historical compatibility, but does not control update scheduling.
+- No destructive uninstaller, backup, Tailscale, firewall, WSL, native Ollama, or user Compose logic changed. PowerShell/Docker/WSL live test coverage remains outstanding.
+
+## 14.6.7 same-version cumulative budget-recovery + Element/Adlice hotfix (2026-11-13)
+
+**Failure reproduced:** On one 12-service installation the saved bounded allocation totaled 10,512 MiB; recreated `synapse-db`, `searxng`, and `honcho-db` resumed canonical limits. Honcho DB's 192 → 208 MiB return raised live ceilings to 10,528 MiB, 16 MiB over budget. The earlier replacement rebind correctly rejected overcommit but lacked safe excess recovery. The allocation mismatch was not evidence of a broken Ubuntu account, and all 12 containers were observed running.
+
+**Change:** The controller verifies old and new identities, exact Compose ownership, policy fingerprint, snapshot records, canonical replacement limits, memory and CPU envelopes, and controller locks. Only a replacement-explained excess is recoverable; it selects eligible unchanged donors using actual cgroup charge (including cache), at least a 20% charge margin plus 64 MiB, configured floors, and 16-MiB increments. A pending recovery journal guards Docker updates, crash resume and rollback. Missing telemetry, unsafe floors, unexpected same-ID drift, user resource overrides, or unverifiable ownership stop the operation. No unnecessary model unload or container recreation is authorized.
+
+**Element/Adlice:** Adds `tools/Audit-LatticeVale-Element-Adlice.ps1` to inspect local Windows Element Desktop executables, signatures, file versions, and SHA-256. The script is read-only and cannot prove a detection false positive. LatticeVale does not control Adlice signatures; **no antivirus exception/disablement** is installed. Obtain the exact scanner detection first and report suspected false positives with evidence.
+
+**Packaging:** Apply the cumulative changed-files-only archive over the matching complete 14.6.7 repository, never into the running `~/hermes-stack` directly. The manifest grows from 237 to 238 managed files because the security audit helper is new. Keep `LatticeVale-Core/VERSION.txt` at 14.6.7; no schema or persistent-data migrations. Verify release integrity; commit and run new GitHub Actions; then use Option 1 with backup and prove live WSL/Compose convergence. Focused tests passed, but the full 151-fixture suite, native Windows parser, new CI, and live repair were not proven at preparation time.
+
 ## 14.6.7 changed-files patch — 2026-11-07
 
 Based only on GitHub commit `74050427b3c7c00b147f1dfb138b0aa674bafd05`.
@@ -64,7 +82,7 @@ Live Windows/WSL/Docker end-to-end qualification remains required.
 - Retained the 14.6.5 resource-policy/QMD memory correction, Matrix identities, Tailscale authentication, user overrides and all selected application service configurations.
 - Live Windows native relay, NTFS ACL, Tailscale devices and LAN reachability have **not** been tested in this non-Windows execution environment; complete manual validation before deployment.
 
-# Current v14.6.7 patch notes
+# Current v14.6.8 patch notes
 
 ## v14.6.6 Hermes shared-gateway parked-profile compatibility (also affects 14.6.5 upgrades)
 

@@ -1,4 +1,8 @@
-# LatticeVale v14.6.7
+# LatticeVale v14.6.8
+
+**14.6.8 source candidate:** Builds on the complete 14.6.7 budget-rebalance and Element/Adlice diagnostic hotfix. The RAM fixture now tests simulated low/high RAM without changing the production admission guard; the read-only state audit lists stored digest evidence for managed floating `:latest` image tags. [Function/danger-zone index](docs/FUNCTION-INDEX.md) documents high-risk monolith code without moving it. Windows PowerShell 5.1/7, actual Ubuntu-D/Docker, and antivirus behavior require live validation before calling this release fully qualified.
+
+> **14.6.7 same-version budget-recovery / Element security-triage overlay (2026-11-13):** A verified Docker Compose container replacement can restore its canonical memory ceiling while other containers retain safe, previously borrowed allocations. The controller now reconciles only the proven aggregate excess using an eligible unchanged donor and measured cgroup headroom, with exclusive locking, a recovery journal and fail-closed checks; it does not reset the entire stack. The optional read-only `tools/Audit-LatticeVale-Element-Adlice.ps1` inspects Element Desktop provenance for an Adlice alert without excluding files or disabling protection. **This ZIP is a source overlay, not a live-runtime success claim.** See [Resource Policy](docs/RESOURCE-POLICY.md), [Repair](docs/REPAIR.md), [Security](docs/SECURITY.md), and [Testing](docs/TESTING.md).
 
 > **v14.6.7 source release:** GitHub main now contains v14.6.7 source.
 > The original changed-files overlay applied to commit `74050427` (14.6.6),
@@ -53,7 +57,7 @@ Existing Synapse `server_name` remains authoritative, while the Matrix identity 
 
 ## v14.6.2 — latest-supported managed software updates
 
-Option 6 now forces an online latest-supported refresh of LatticeVale-owned software instead of reapplying versions frozen into the LatticeVale release. Option 1 uses the same resolver whenever its normal 30-day/revision/legacy refresh gate is due. Hermes, Synapse, SearXNG, Ollama, QMD, and other stateless application channels track their stable upstream channels; installer-owned Honcho advances to the newest stable semantic-version tag rather than repository HEAD. Docker/prerequisite packages and NVIDIA Container Toolkit refresh from their official stable repositories.
+Option 6 now forces an online latest-supported refresh of LatticeVale-owned software instead of reapplying versions frozen into the LatticeVale release. Option 1 checks availability on every run without an elapsed-day gate; it refreshes only when an update or missing managed component is verified. Hermes, Synapse, SearXNG, Ollama, QMD, and other stateless application channels track their stable upstream channels; installer-owned Honcho advances to the newest stable semantic-version tag rather than repository HEAD. Docker/prerequisite packages and NVIDIA Container Toolkit refresh from their official stable repositories.
 
 Compatibility-sensitive state is intentionally bounded: Synapse PostgreSQL remains on major 16, Honcho pgvector/PostgreSQL remains on pg15, Redis/Valkey remain on major 8, and PyTorch + `torch-directml` remain a qualified compatibility envelope until a newer compatible pair is validated. Explicit user image/source overrides are preserved. Each successful reconciliation records exact image IDs/digests, Honcho commit/tag, selected channels, and the DirectML requirements hash in `data/latticevale/managed-upstreams.json`.
 

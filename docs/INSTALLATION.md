@@ -1,5 +1,7 @@
 # LatticeVale Installation Guide
 
+> **14.6.7 same-version source overlay (2026-11-13):** On an existing installation, merge the cumulative changed-files-only ZIP into the **matching full LatticeVale repository**, not directly into the running WSL stack. Run the Windows `installer/verify-release.ps1` manifest verifier, commit/push and confirm a new GitHub Actions result before launching Option 1 Resume/repair. Accept its safety backup. This correction safely reconciles verified Docker replacement budget drift without wholesale resource resets. The separate read-only Element/Adlice helper inspects a suspect Windows binary; it does not disable antivirus or establish an alert as false. See [Release](RELEASE.md), [Repair](REPAIR.md), and [Security](SECURITY.md).
+
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
 > **v14.6.6 Tailscale correction (carried forward from the v14.6.5 corrective overlay):** Dashboard and Matrix remote HTTPS may validate over IPv4, IPv6, or both. Certificate validation and direct-IP/no-proxy testing remain enabled. Windows listener enumeration is advisory when an authenticated HTTPS path and the selected application checks succeed; successful Serve mappings are retained rather than removed after a listener-only false-negative.
@@ -76,3 +78,5 @@ recreates the canonical resource state, and enables the optional user-owned
 systemd timer when local Docker and systemd are available. Preserve the
 per-run safety backup. The ZIP is a *release-source overlay*, not a set of
 files to copy directly into a live stack. See [RESOURCE-POLICY.md](RESOURCE-POLICY.md).
+
+Current package: v14.6.8. For safety and release details see [CHANGELOG](CHANGELOG.md) and [FUNCTION-INDEX](FUNCTION-INDEX.md) where applicable.

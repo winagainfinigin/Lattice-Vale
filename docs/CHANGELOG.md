@@ -1,5 +1,23 @@
 # Changelog
 
+## 14.6.8 (test reliability, audit transparency, function index)
+
+- Preserves the cumulative 14.6.7 resource-budget recovery, Docker ownership safeguards, Element/Adlice read-only signature diagnostic, and its documentation.
+- Makes the RAM-policy fixture host-independent using a test-only temporary source override; verifies both valid capacity and low-RAM rejection without changing the production admission guard.
+- Displays floating `:latest` image tags with **recorded** local registry digests in the read-only state audit; no network lookups, update decisions, credential printing, or runtime modifications.
+- Documents the legacy inactive 30-day refresh metadata, and adds a generated function/danger-zone index for the installer monoliths without moving code.
+- Same-schema version upgrade from 14.6.7 follows maintenance-only repair; fixture total and shard boundaries remain 151 and unchanged.
+- Windows PowerShell parsing, actual WSL/Docker, Tailscale, Element/Adlice, and production backup/uninstall behavior require live qualification.
+
+## 14.6.7 same-version budget-aware replacement recovery and Element/Adlice triage — 2026-11-13
+
+- Fixes a verified replacement-controller edge case: a recreated Honcho DB regained 16 MiB (192 → 208 MiB) while other services retained previously verified dynamic ceilings; live total 10,528 MiB exceeded the canonical 10,512 MiB envelope. Synapse DB and SearXNG also had new IDs at canonical limits.
+- Adds a bounded recovery path in `resource-burst-controller.py`: verify ownership, IDs, effective Compose, fingerprints, saved snapshot, and aggregate budget; reclaim only the proven overage from unchanged donors above their service floors and `ceil(cgroup memory.current MiB * 1.20) + 64 MiB`, in 16-MiB quanta. Donors are selected by eligible headroom, not hard-coded; uncertain state fails closed.
+- Serializes reconciliation with the controller lock, journals pending changes before Docker updates, reinspects after each update, supports validated interrupted transactions, and attempts guarded rollback. Healthy services and unrelated allocations are preserved; loaded Ollama models are not forcibly shrunk.
+- Adds a **read-only** Windows Element Desktop / Adlice investigation helper at `tools/Audit-LatticeVale-Element-Adlice.ps1`. It reports discovered executable paths, versions, Authenticode status, and SHA-256. It does **not** declare detections false positives, suppress malware alerts, remove quarantines, or install Element/Adlice.
+- Updates user-facing resource, repair, diagnostic, security, release, and testing documentation for the cumulative changed-files-only overlay. Version stays **14.6.7**; schemas and persistent state are unchanged.
+- Verification boundary: pristine 237-entry parent and cumulative 238-entry modified manifest passed earlier source reconstruction; focused mocked budget/snapshot regressions passed; the complete 151-fixture run was not completed, native Windows PowerShell parsing and new GitHub Actions were not run, and live Ubuntu-D recovery and Adlice outcome remain unverified. Documentation changes require fresh integrity/test checks.
+
 ## 14.6.7 — gateway readiness, preservation and repair hardening (2026-11-07)
 
 - Repairs the GNU `install` multi-source staging error before WSL configuration.

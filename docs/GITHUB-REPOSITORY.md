@@ -6,7 +6,7 @@
 > **v14.6.6 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
-This document describes the LatticeVale **v14.6.7** repository/release contract for GitHub.
+This document describes the LatticeVale **v14.6.8** repository/release contract for GitHub.
 
 ## Repository structure
 
@@ -34,6 +34,17 @@ The publishable full release must:
 6. compare byte-for-byte with the qualified release tree for every included member.
 
 ## Repository patched-files ZIP
+
+**Latest 14.6.7 same-version cumulative repair overlay (2026-11-13):** The
+budget-aware replacement recovery and Element/Adlice diagnostic cumulative
+changed-files ZIP is based on the verified 14.6.7 GitHub source at
+`8a72f5989ef438d5d92e1679656e89240b963991`, *not* the original 14.6.6
+base. Apply its repository-relative files over a matching complete source
+tree, preserving unrelated files, then run the release verifier. One new
+PowerShell security audit increases managed manifest coverage from 237 to 238
+entries. All modified documentation must be rehashed before packaging.
+A passing manifest is not evidence of new GitHub Actions success or live WSL
+repair; those require separate tests.
 
 The patched-files archive is for updating a **source checkout**, not a live `~/hermes-stack`. The v14.6.7 changed-files-only overlay contains cumulative replacement files relative to the exact v14.6.6 GitHub baseline `74050427`; later corrections should explicitly declare their own baseline. It must use the single `Lattice-Vale/` root and contain only changed/new repository files relative to its declared base, plus any files needed to make the patch self-describing. Deletions, if ever required, must be represented by the repository's explicit delete-list mechanism rather than path tricks.
 

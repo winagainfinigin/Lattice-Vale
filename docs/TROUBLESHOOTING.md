@@ -67,6 +67,12 @@ Run `./manage.sh diagnose-policy`. Hardware/backend fingerprint changes intentio
 
 The repository patch ZIP contains only changed/new repository files relative to the declared parent release. It is not a live-stack overlay. Existing installations should always be updated/repaired through the full release installer.
 
+## 14.6.7 repaired-container memory-budget mismatch (2026-11-13)
+
+A Compose replacement can legitimately restore a canonical memory limit while other healthy containers still hold verified dynamic leases. In the recorded 12-container case `synapse-db`, `searxng`, and `honcho-db` changed IDs; Honcho DB alone returned from 192 to 208 MiB. Live limits totaled **10,528 MiB** against a **10,512-MiB** canonical budget. The prior `replacement allocation exceeds canonical memory envelope` error is an allocation accounting/snapshot recovery issue, **not evidence of WSL account loss**. The current budget-recovery code attempts the smallest safe 16-MiB adjustment from an unchanged service with sufficient cgroup charge headroom, preserving Ollama's loaded memory; it fails safely if no donor qualifies.
+
+Do **not** attempt direct `docker update --memory`, delete the controller snapshot, forcibly kill loaded Ollama models, or reset containers to bypass the error. Use the read-only `resource-burst-controller.py --verify --stack ~/hermes-stack` first, inspect `journalctl -u latticevale-resource-burst.service --no-pager -n 50`, then rerun the verified installer with Option 1 and backup after source/CI qualification. The new recovery is source-tested, not yet proven on the user's actual WSL machine. See [Resource Policy](RESOURCE-POLICY.md) and [Diagnostics](DIAGNOSTICS.md).
+
 ### Resource bursts are not occurring
 
 Check `systemctl status latticevale-resource-burst.timer` and
@@ -78,3 +84,32 @@ or traffic has not met the sustained demand/idleness thresholds. A stale
 Docker OOM marker alone does not establish a new OOM event. Run the read-only
 `python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack`
 check for the exact policy/ownership snapshot before using Resume / repair.
+
+## Adlice Protect flags Element Desktop
+
+Element Desktop is a separate Windows Matrix client; LatticeVale's managed
+Matrix service is Synapse in Docker. LatticeVale does not own Element's
+Windows executable or Adlice's malware signatures. A scanner alert by itself
+cannot establish whether it is a false positive or an actual malicious file.
+
+Run the optional **read-only** inspection from PowerShell at the LatticeVale
+repository root:
+
+```powershell
+powershell.exe -NoLogo -NoProfile -File .\tools\Audit-LatticeVale-Element-Adlice.ps1
+```
+
+The script enumerates common Element executable locations and running instances,
+prints file SHA-256 and Windows Authenticode signature results, and tells you
+how to export Adlice's exact detection details. It never modifies antivirus
+settings, adds exclusions, repairs Element, or downloads programs.
+
+In Adlice Protect/RogueKiller, examine **History > Reporting** or the relevant
+scan result report. Note the precise detected file path, detection class,
+SHA-256, and signature version. Compare that path with the signed Element binary.
+Update Adlice's scanner signatures and Element through official distribution,
+and report a suspected false positive to Adlice with the detection evidence.
+Do **not** automatically exclude the Element install folder, disable scanner
+protection, or restore quarantined files without independently verifying them.
+Until the detection is resolved, the browser-based Matrix client at
+`https://app.element.io/` avoids depending on a disputed local Windows binary.

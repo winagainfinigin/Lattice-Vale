@@ -1,5 +1,11 @@
 # LatticeVale 14.6.7 Resume / Repair
 
+## 14.6.7 verified bounded-lease recovery (2026-11-13)
+
+For an existing managed stack, use **Option 1 — Resume / repair** from a verified complete 14.6.7 source tree, accept the offered backup, and preserve managed identities, models and volumes. The same-version correction handles a verified Compose replacement that restores its original memory limit while unchanged containers still hold legitimate dynamic leases. It requires matching ownership, canonical limits, policy fingerprints and a non-pending trusted snapshot; an overage caused by the replacement may be reclaimed from measured safe donors under the controller lock with a pending recovery journal and guarded rollback. A real invalid snapshot, missing charge telemetry, insufficient donor headroom, noncanonical replacement, or unexplained drift remains a hard failure rather than a reason to force memory limits downward.
+
+**Observed regression example:** snapshot 10,512 MiB, live 10,528 MiB (16 MiB excess) after `synapse-db`, `searxng`, and `honcho-db` replacements; Honcho DB alone returned 192 → 208 MiB. An unchanged donor is chosen dynamically, never hard-coded; the test used an eligible Hermes donor. Run `python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack` as a **read-only** check, not `--restore` or manual `docker update`. After CI, confirm Option 1 completes, all selected services are healthy, and a second repair remains idempotent. Neither prior mocked tests nor an earlier passing CI run establishes live success.
+
 ### Previously parked managed profiles (14.6.5 / 14.6.6)
 
 Resume / repair reconciles LatticeVale-owned temporary gateway parks for any number of managed Hermes profiles. If older installers left `gateway.parked` on a profile and its ownership is unproven, the interactive installer explains the ambiguity and asks once before clearing the identified managed non-standalone profiles. Declining preserves the markers and stops convergence rather than declaring a silent success. User-authored standalone profiles and unrelated profiles are never unparked by this operation. Do not manually delete Hermes profile directories or recovery credentials. A successful finish requires the live shared gateway to enumerate every expected served profile.
@@ -80,3 +86,9 @@ inactive when a user Compose override changes anything beyond the verified
 Hermes image/pull-policy selection. The bootstrap and controller both check
 the effective Compose model; an image-only override remains eligible. See
 `RESOURCE-POLICY.md`.
+
+## 14.6.8 verification notes
+
+Option 1 checks latest-supported managed software on every run, without a 30-day waiting gate. `MANAGED_REPAIR_REFRESH_DAYS` remains in the 14.6.x compatibility contract for older installers and validation; current update decisions do not use elapsed days. The read-only Linux state audit reports floating `:latest` image tags with **recorded** SHA-256 registry digests from `data/latticevale/managed-upstreams.json`. An unavailable digest is reported as unknown, never freshly fetched, and does not indicate compromise. Live Windows/WSL/Docker security and recovery qualification is still required.
+
+Current package: v14.6.8. For safety and release details see [CHANGELOG](CHANGELOG.md) and [FUNCTION-INDEX](FUNCTION-INDEX.md) where applicable.

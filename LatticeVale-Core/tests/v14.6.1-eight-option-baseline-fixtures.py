@@ -39,7 +39,7 @@ menu_ps = ps[menu_start:menu_end]
 
 # Option 1 baseline: preservation-first normal repair, no blanket same-version update.
 assert "1 { $installMode = 'resume' }" in ps
-assert ('Between refresh windows it remains local-first and is not a blanket update.' in ps) if (core/'VERSION.txt').read_text().strip() not in {'14.6.6','14.6.7'} else ('Option 1 checks latest-supported managed software on every run' in ps)
+assert ('Between refresh windows it remains local-first and is not a blanket update.' in ps) if (core/'VERSION.txt').read_text().strip() not in {'14.6.6','14.6.7','14.6.8'} else ('Option 1 checks latest-supported managed software on every run' in ps)
 assert 'A bundle-version change alone remains local-first' in instructions
 
 # v14.6.1 extension: when the *stack itself* predates the current schema, migration is

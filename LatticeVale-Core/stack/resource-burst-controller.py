@@ -658,6 +658,168 @@ def perform(root, expected, before, target):
 
 
 
+
+def _replacement_budget_plan(expected, state, actual, saved, replacements):
+    """Plan only the capacity needed after verified canonical replacements.
+
+    Never shrink a loaded model merely because it is over the static quota.
+    Reclaim from unchanged, verified donors whose cgroup charge (including
+    cache), 20% safety margin, 64-MiB cushion and per-service floor all fit.
+    """
+    budget = int(state['BUDGET_MIB'])
+    current_total = sum(actual[k]['mem'] for k in expected)
+    if current_total <= budget:
+        return None
+    if sum(saved[k]['mem'] for k in expected) > budget:
+        raise RuntimeError('previous snapshot exceeds canonical memory envelope; refusing to legitimize it')
+    expansion = sum(actual[k]['mem'] - saved[k]['mem'] for k in replacements)
+    excess = current_total - budget
+    if expansion < excess:
+        raise RuntimeError('memory envelope excess is not explained by verified replacements')
+
+    # A donor must retain its independently verified ID and allocation. Use
+    # whole controller memory quanta to avoid fractional/hard-limit drift.
+    choices = []
+    for name, cfg in expected.items():
+        if name in replacements:
+            continue
+        charge = actual[name].get('memory_current_mib')
+        if type(charge) is not int or charge < 0:
+            continue
+        safe_floor = max(cfg['floor'], math.ceil(charge * 1.20) + 64)
+        available = max(0, (actual[name]['mem'] - safe_floor) // MEM_QUANTUM_MIB * MEM_QUANTUM_MIB)
+        if available:
+            choices.append((available, name))
+    choices.sort(key=lambda row: (-row[0], row[1]))
+    # Do not silently over-recover or under-recover. Runtime quotas are
+    # integral MiB, but the controller borrows in 16-MiB increments.
+    needed = math.ceil(excess / MEM_QUANTUM_MIB) * MEM_QUANTUM_MIB
+    target = {k: {'mem': actual[k]['mem'], 'cpu': actual[k]['cpu']} for k in expected}
+    for available, name in choices:
+        amount = min(available, needed)
+        target[name]['mem'] -= amount
+        needed -= amount
+        if needed == 0:
+            break
+    if needed:
+        raise RuntimeError(f'replacement allocation exceeds canonical memory envelope by {excess} MiB; '
+                           f'no verified donor has {needed} MiB of safe reclaimable cgroup headroom')
+    if sum(v['mem'] for v in target.values()) > budget:
+        raise RuntimeError('proposed recovery still exceeds canonical memory envelope')
+    return target
+
+
+def _finish_replacement_budget_recovery(root, expected, state, actual, record):
+    """Finish an atomic journaled rebind transaction under the caller's lock.
+
+    A crash between the first Docker update and the snapshot commit is resumed
+    only when every ID/limit still equals the journal's original or target.
+    No unverified Docker state is ever adopted.
+    """
+    info = record.get('rebindBudgetRecovery')
+    target = record.get('pending')
+    if not isinstance(info, dict) or not isinstance(target, dict):
+        raise RuntimeError('invalid replacement budget recovery journal')
+    old_ids = info.get('previousIds')
+    if (record.get('policyFingerprint') != state['POLICY_FINGERPRINT'] or
+        not isinstance(old_ids, dict) or set(target) != set(expected) or
+        set(record.get('services', {})) != set(expected) or
+        set(actual) != set(expected)):
+        raise RuntimeError('replacement budget recovery has invalid fingerprint or topology')
+    donors = []
+    for name, cfg in expected.items():
+        prev = record['services'][name]
+        goal = target[name]
+        live = actual[name]
+        if (live['id'] != prev.get('id') or
+            any(type(goal.get(m)) is not int or type(prev.get(m)) is not int for m in ('mem','cpu')) or
+            live['cpu'] != goal['cpu'] or live['cpu'] != prev['cpu'] or
+            live['mem'] not in (prev['mem'], goal['mem']) or
+            goal['mem'] < cfg['floor'] or goal['cpu'] < 50 or goal['mem'] > prev['mem']):
+            raise RuntimeError(f'{name}: live identity/resource drift during recovery')
+        if goal['mem'] < prev['mem']:
+            if name in old_ids:
+                raise RuntimeError('replaced container cannot be used as a recovery donor')
+            donors.append(name)
+    if not donors or sum(target[k]['mem'] for k in expected) > int(state['BUDGET_MIB']):
+        raise RuntimeError('recovery journal violates canonical memory envelope')
+    if sum(target[k]['cpu'] for k in expected) > int(state['CPU_DOCKER_ENVELOPE_MILLI']):
+        raise RuntimeError('recovery journal violates canonical CPU envelope')
+
+    # Revalidate cgroup charge immediately before EACH decreasing hard limit.
+    # Missing/inadequate telemetry is a hard safety stop, not an OOM gamble.
+    old_limits = {name: record['services'][name]['mem'] for name in donors}
+    changes = []
+    try:
+        for name in donors:
+            now = inspect_containers(root, expected)
+            if any(now[k]['id'] != actual[k]['id'] or now[k]['cpu'] != actual[k]['cpu'] or
+                   now[k]['mem'] not in (record['services'][k]['mem'],target[k]['mem']) for k in expected):
+                raise RuntimeError('concurrent Docker replacement/resource change during recovery')
+            if now[name]['mem'] == target[name]['mem']:
+                continue
+            charge = now[name].get('memory_current_mib')
+            safe_floor = max(expected[name]['floor'], math.ceil(charge * 1.20) + 64) if type(charge) is int and charge >= 0 else None
+            if safe_floor is None or target[name]['mem'] < safe_floor:
+                raise RuntimeError(f'{name}: insufficient measured cgroup headroom for safe recovery')
+            _static_update_limit(root, expected[name]['name'], 'memory', target[name]['mem'] * MIB)
+            changes.append(name)
+            verify = inspect_containers(root, expected)
+            if verify[name]['id'] != actual[name]['id'] or verify[name]['mem'] != target[name]['mem']:
+                raise RuntimeError(f'{name}: Docker failed to apply expected safe limit')
+        final = inspect_containers(root, expected)
+        if any(final[k]['id'] != actual[k]['id'] or final[k]['mem'] != target[k]['mem'] or
+               final[k]['cpu'] != target[k]['cpu'] for k in expected):
+            raise RuntimeError('recovery did not converge to journaled resource limits')
+        if sum(final[k]['mem'] for k in expected) > int(state['BUDGET_MIB']):
+            raise RuntimeError('recovery did not satisfy canonical memory envelope')
+        for name in expected:
+            # Preserve existing adaptive counters; newly recreated containers
+            # were reset when the journal was first prepared.
+            record['services'][name].update({k: final[name][k] for k in ('id','mem','cpu')})
+        record['pending'] = None
+        record.pop('rebindBudgetRecovery', None)
+        record['lastUpdate'] = time.time()
+        write_json(root / 'data/latticevale/resource-burst-state.json', record)
+        return donors
+    except Exception:
+        # Attempt an exact, non-destructive rollback of updated memory ceilings.
+        # If an update or snapshot write cannot be reversed, retain the pending
+        # journal for the next controlled recovery rather than silently accept drift.
+        rollback_ok = True
+        # Docker may apply an update before reporting a timeout/error, so
+        # inspect ALL donors, not only calls that returned successfully.
+        for name in reversed(donors):
+            try:
+                now = inspect_containers(root, expected)
+                if now[name]['id'] != actual[name]['id']:
+                    rollback_ok = False
+                    continue
+                if now[name]['mem'] == old_limits[name]:
+                    continue
+                if now[name]['mem'] != target[name]['mem']:
+                    rollback_ok = False
+                    continue
+                _static_update_limit(root, expected[name]['name'], 'memory', old_limits[name] * MIB)
+                check = inspect_containers(root, expected)
+                if check[name]['id'] != actual[name]['id'] or check[name]['mem'] != old_limits[name]:
+                    rollback_ok = False
+            except Exception:
+                rollback_ok = False
+        if rollback_ok:
+            # Restore the original pre-rebind snapshot identity records. Live
+            # allocations return to their observed state; replacement IDs remain
+            # stale, so the next repair must re-verify them independently.
+            for name, old in old_ids.items():
+                record['services'][name] = old
+            for name in donors:
+                record['services'][name]['mem'] = old_limits[name]
+            record['pending'] = None
+            record.pop('rebindBudgetRecovery', None)
+            write_json(root / 'data/latticevale/resource-burst-state.json', record)
+        raise
+
+
 def reconcile_verified_replacements(root, expected, state, actual):
     """Rebind only independently verified canonical replacements, under the caller's lock.
 
@@ -673,6 +835,10 @@ def reconcile_verified_replacements(root, expected, state, actual):
     saved_services = record.get('services')
     if not isinstance(saved_services, dict) or set(saved_services) != set(expected):
         return []
+    if record.get('rebindBudgetRecovery') is not None:
+        if record.get('pending') is None:
+            raise RuntimeError('replacement recovery marker without pending transaction')
+        return _finish_replacement_budget_recovery(root, expected, state, actual, record)
     if record.get('pending') is not None:
         # Even an empty/malformed pending journal must not be reinterpreted.
         raise RuntimeError('pending controller transaction forbids replacement rebind')
@@ -712,8 +878,7 @@ def reconcile_verified_replacements(root, expected, state, actual):
             raise RuntimeError(f'{name}: effective Compose limits differ from canonical policy; replacement rebind refused')
     if len({actual[k]['id'] for k in expected}) != len(expected):
         raise RuntimeError('duplicate Docker identities in managed topology')
-    if sum(actual[k]['mem'] for k in expected) > int(state['BUDGET_MIB']):
-        raise RuntimeError('replacement allocation exceeds canonical memory envelope')
+    recovery_target = _replacement_budget_plan(expected, state, actual, saved_services, replacements)
     cpu_total = sum(actual[k]['cpu'] for k in expected)
     cpu_limit = int(state['CPU_DOCKER_ENVELOPE_MILLI'])
     if state.get('DIRECTML_SELECTED') == 'true' and cpu_total > cpu_limit:
@@ -739,8 +904,19 @@ def reconcile_verified_replacements(root, expected, state, actual):
            confirmed[k]['mem'] != actual[k]['mem'] or
            confirmed[k]['cpu'] != actual[k]['cpu'] for k in expected):
         raise RuntimeError('concurrent Docker identity/resource change during replacement rebind')
-    # Retain the existing lease and its counters on untouched containers.
-    # Fresh containers reset OOM/throttling history and idle/busy counters.
+    # Retain existing leases/counters; fresh containers reset their history.
+    # When a replacement restored previously donated capacity, publish a
+    # pending journal BEFORE any Docker update so interruption is recoverable.
+    if recovery_target is not None:
+        previous_ids = {name: dict(record['services'][name]) for name in replacements}
+        for name in replacements:
+            record['services'][name] = {**actual[name], 'up': 0, 'idle': 0}
+        record['rebindBudgetRecovery'] = {'previousIds': previous_ids, 'startedAt': time.time()}
+        record['pending'] = recovery_target
+        write_json(path, record)
+        donors = _finish_replacement_budget_recovery(root, expected, state, actual, record)
+        print('Rebalanced over-budget replacement safely using donor(s): ' + ', '.join(donors))
+        return replacements
     for name in replacements:
         record['services'][name] = {**actual[name], 'up': 0, 'idle': 0}
     write_json(path, record)
@@ -779,7 +955,7 @@ def run_once(root, restore=False):
             return 0
         expected, state = load_expected(root, allow_override=restore)
         actual = inspect_containers(root, expected)
-        if not restore:
+        if not restore or read_json(root / 'data/latticevale/resource-burst-state.json', {}).get('rebindBudgetRecovery') is not None:
             # A verified replacement must not invalidate other active leases.
             # --restore intentionally has different, canonical-reset semantics.
             replacements = reconcile_verified_replacements(root, expected, state, actual)
@@ -964,6 +1140,15 @@ def reconcile_static_limits(root):
                             isinstance(saved.get('services'), dict) and
                             set(saved['services']) == set(managed) and
                             saved.get('pending') is None)
+        if (isinstance(saved, dict) and saved.get('rebindBudgetRecovery') is not None):
+            if not override_eligible(root):
+                raise RuntimeError('Compose override prevents replacement budget recovery')
+            validated, validated_state = load_expected(root)
+            live = inspect_containers(root, validated)
+            reconcile_verified_replacements(root, validated, validated_state, live)
+            verify_snapshot(root)
+            print('Completed interrupted replacement budget recovery safely')
+            return 0
         if rebind_candidate and (not (root / 'compose.override.yaml').exists() or
                                  image_only_compose_override(root)):
             validated, validated_state = load_expected(root)

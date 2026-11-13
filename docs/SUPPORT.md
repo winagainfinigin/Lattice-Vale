@@ -1,3 +1,23 @@
+## Same-version 14.6.7 resource repair and Element/Adlice support (2026-11-13)
+
+If Resume/repair reports `replacement allocation exceeds canonical memory envelope`,
+check the controller's read-only `--verify` result, snapshot identity, effective
+Compose limits and live aggregate memory budget as described in [Diagnostics](DIAGNOSTICS.md).
+On the observed 12-container installation, Honcho DB returned from 192 to
+208 MiB after replacement, exceeding a 10,512-MiB budget by 16 MiB. The
+current source correction tries a verified donor reduction within measured
+cgroup safety margins; failure to find a donor is not permission to delete
+state or force a memory limit. Use Option 1 with a pre-install backup only
+after validating the matching 14.6.7 source and new CI.
+
+For Adlice reports concerning Element Desktop, run the optional read-only
+`tools/Audit-LatticeVale-Element-Adlice.ps1` from Windows PowerShell in the
+repository root, and collect the exact detection name, flagged path, engine
+version, file signature and SHA-256. Element is a separate client, not a
+LatticeVale-managed install. Do not disable antivirus, restore a quarantined
+file or add blanket exclusions based only on a suspected false positive;
+see [Security](SECURITY.md) and [Troubleshooting](TROUBLESHOOTING.md).
+
 ## v14.6.5 architecture support
 
 > **v14.6.5:** Windows Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge. Permitted tailnet devices use the displayed service URL; exact matching Serve rules remain in place without a restart. Existing Synapse identity stays authoritative; Matrix ID domains, Element URLs, and Tailscale hostnames remain separate. Existing-stack repairs include pre-install backup progress with a per-run skip, planned Ubuntu APT refresh progress with a per-run skip, streamed cleanup output, and a fast path that skips unnecessary cache/staging cleanup when the WSL root has at least 2 GiB free. Schema 24 remains compatible.

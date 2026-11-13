@@ -1,3 +1,11 @@
+## 14.6.7 cumulative budget-recovery + Element/Adlice documentation overlay (2026-11-13)
+
+- **Distribution:** changed-files-only overwrite, not a standalone release or a direct WSL runtime patch. Apply over the complete *matching* 14.6.7 repository tree. Preserve `LatticeVale-Core/VERSION.txt` and all unchanged files; re-run `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1` from that root.
+- **Included behavior:** the budget-aware resource-controller recovery handles only verified Compose replacements that return prior borrowed memory; it retains unaffected leases and requires safe measured cgroup donor headroom, a bounded 16-MiB rebalance, locking, crash journal, and rollback safeguards. It never knowingly accepts a live envelope excess or forces model unloading.
+- **Security:** the optional Element/Adlice investigation helper collects executable identity and hash/signature evidence without modifying Windows antivirus settings or treating alerts as false positives.
+- **Manifest:** the earlier complete source contained 237 managed files; the security audit helper adds one file (238 entries). Documentation changes require regeneration and exact-coverage SHA-256 verification. The manifest does not list itself to avoid a self-hash cycle.
+- **Qualification:** confirm byte-for-byte reconstruction from baseline + cumulative overlay, all deterministic suites and Windows PowerShell 5.1/7 parsing, a **new** GitHub Actions run, and actual Ubuntu-D Option 1 repair plus repeat verification. Earlier passing CI or mocked tests do not establish end-to-end success. Accept the pre-install safety backup.
+
 > **v14.6.7 source packaging (2026-11-07):** The GitHub main branch has
 > v14.6.7 source. The original changed-files ZIP applied to commit `74050427`
 > (14.6.6); a complete installer ZIP must instead be built from the fully
@@ -18,7 +26,7 @@
 > rollback, DirectML re-admission, repair restoration, and user overrides.
 > Windows/WSL live load testing remains separately required.
 
-> **v14.6.7 current release:** `VERSION.txt` must be 14.6.7. Canonical installer-options schema is **24**, runtime-policy schema remains **13**, and managed-refresh revision remains **5**. Schema-23 install options must remain readable and migrate to schema 24 without introducing a user-facing Matrix relay-limit setting; interim schema-24 relay-limit data is tolerated but ignored.
+> **v14.6.8 current release:** `VERSION.txt` must be 14.6.7. Canonical installer-options schema is **24**, runtime-policy schema remains **13**, and managed-refresh revision remains **5**. Schema-23 install options must remain readable and migrate to schema 24 without introducing a user-facing Matrix relay-limit setting; interim schema-24 relay-limit data is tolerated but ignored.
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 

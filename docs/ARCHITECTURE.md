@@ -1,4 +1,4 @@
-# LatticeVale 14.6.6 Corrective Hotfix Architecture
+# LatticeVale 14.6.7 Architecture (inherits 14.6.6 policy v14)
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
@@ -83,6 +83,12 @@ values from canonical functions. `resource-burst-controller.py` optionally
 rebudgets live managed-container quotas within those envelopes using a
 fingerprint-bound transaction journal, Docker inspection, WSL PSI,
 `MemAvailable`, and cgroup v2 counters. `linux/bootstrap.sh` installs the
-unprivileged host-side timer; repair restores baseline limits before policy
-reconciliation. The controller itself does not write shared app state or
-restart containers. See `RESOURCE-POLICY.md`.
+unprivileged host-side timer. Repair preserves authenticated active leases
+where possible, including canonical container replacements. If a replaced
+container has returned previously borrowed memory and the combined live
+hard ceilings exceed the canonical budget, the controller may reclaim only
+the replacement-explained excess from unchanged, cgroup-safe donors above
+service floors, under its lock and a recoverable pending journal. If no donor
+qualifies, repair fails closed; it must not force static memory reductions,
+reset service identities, or restart containers. The controller does not
+write shared app state. See `RESOURCE-POLICY.md`.

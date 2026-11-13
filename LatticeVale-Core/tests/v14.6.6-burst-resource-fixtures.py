@@ -705,3 +705,157 @@ assert "--help 2>/dev/null | grep -q -- '--prepare-repair'" in _boot
 assert 'resource-burst-controller.py" --verify --stack "$stack_dir"' in _boot
 assert _boot.index('--prepare-repair --stack "$stack_dir"') < _boot.index('"$bundle_root/stack/resource-burst-controller.py" "$stack_dir/resource-burst-controller.py"')
 print('V14.6.7 PRE-STAGING OLD-CONTROLLER COMPATIBILITY: PASS')
+
+
+# Nov 13, 2026 12-service replacement-budget regression (added to the
+# existing fixture, retaining the established 151-test shard contract).
+#!/usr/bin/env python3
+"""Regression: Nov 13, 2026 12-service, 3-replacement, +16-MiB budget drift.
+
+Pure mocks: never interact with a running Docker engine or modify user state.
+"""
+import copy
+import importlib.util
+import json
+from pathlib import Path
+import sys
+import tempfile
+from unittest.mock import patch
+
+STACK = Path(__file__).resolve().parents[1] / 'stack'
+sys.path.insert(0, str(STACK))
+spec = importlib.util.spec_from_file_location('budget_recovery', STACK / 'resource-burst-controller.py')
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+MIB = mod.MIB
+
+# (canonical memory, saved memory, live memory, cpu m, floor, charged memory)
+OBSERVED = {
+    'hermes': (1072, 1072, 1072, 850, 1024, 682),
+    'synapse': (208, 208, 208, 150, 192, 204),
+    'synapse-db': (176, 176, 176, 150, 160, 126),
+    'searxng': (208, 208, 208, 150, 192, 205),
+    'searxng-valkey': (80, 80, 80, 100, 64, 35),
+    'qmd': (1040, 1024, 1024, 150, 1024, 171),
+    'qmd-indexer': (1040, 1040, 1040, 150, 1024, 14),
+    'ollama': (5728, 5760, 5760, 1350, 5632, 5648),
+    'honcho-api': (400, 400, 400, 150, 384, 352),
+    'honcho-db': (208, 192, 208, 150, 192, 114),
+    'honcho-redis': (80, 80, 80, 100, 64, 73),
+    'honcho-deriver': (272, 272, 272, 150, 256, 272),
+}
+assert sum(v[0] for v in OBSERVED.values()) == 10512
+assert sum(v[1] for v in OBSERVED.values()) == 10512
+assert sum(v[2] for v in OBSERVED.values()) == 10528
+assert sum(v[3] for v in OBSERVED.values()) == 3600
+
+
+def simulate(*, missing_charge=False, corrupt_owner=False, extra_drift=False,
+             fail_update=False, crash_mid_update=False, fake_changed_id=False):
+    with tempfile.TemporaryDirectory() as tmp:
+        root = Path(tmp)
+        store = root / 'data/latticevale/resource-burst-state.json'
+        store.parent.mkdir(parents=True)
+        expect = {k: {'name': mod.PAIRS[k], 'mem': v[0], 'cpu': v[3], 'floor': v[4]}
+                  for k,v in OBSERVED.items()}
+        state = {'POLICY_FINGERPRINT':'audit-2026-11-13', 'BUDGET_MIB':'10512',
+                 'CPU_DOCKER_ENVELOPE_MILLI':'3600', 'DIRECTML_SELECTED':'false'}
+        current = {k:{'id':'current-'+k, 'mem':v[2], 'cpu':v[3], 'memory_current_mib':v[5]}
+                   for k,v in OBSERVED.items()}
+        saved = {k:{**v,'id': ('prior-'+k if k in ('synapse-db','searxng','honcho-db') else v['id']),
+                    'up':2, 'idle':1} for k,v in current.items()}
+        for k,v in OBSERVED.items():
+            saved[k]['mem'] = v[1]
+        if missing_charge:
+            current['hermes'].pop('memory_current_mib')
+            current['qmd-indexer'].pop('memory_current_mib')
+        if extra_drift:
+            current['ollama']['mem'] += 16
+        if fake_changed_id:
+            saved['qmd']['id'] = 'old-qmd'
+        initial = {'policyFingerprint':state['POLICY_FINGERPRINT'], 'services':saved,
+                   'pending':None, 'lastSample':32, 'lastUpdate':34}
+        store.write_text(json.dumps(initial))
+        updates=[]
+        failures=[0]
+        def inspect(_root, _expected):
+            assert _root == root
+            assert set(_expected) == set(current)
+            if corrupt_owner:
+                raise RuntimeError('unverified Docker ownership')
+            return copy.deepcopy(current)
+        def fake_update(_root, container, metric, size):
+            assert _root==root
+            assert metric=='memory'
+            k=next(x for x in expect if expect[x]['name']==container)
+            size//=MIB
+            old=current[k]['mem']
+            updates.append((k,old,size))
+            current[k]['mem']=size
+            if fail_update and failures[0] == 0:
+                failures[0] += 1
+                raise RuntimeError('injected Docker update failure')
+            if crash_mid_update:
+                raise SystemExit('simulated process interruption after Docker update')
+        def compose(_root, _expected):
+            return {k: {'name':v['name'],'memory':v['mem']*MIB,'cpu':v['cpu']*1000000}
+                    for k,v in expect.items()}
+        err=None
+        with (patch.object(mod,'load_expected',return_value=(expect,state)),
+              patch.object(mod,'inspect_containers',side_effect=inspect),
+              patch.object(mod,'_static_compose_limits',side_effect=compose),
+              patch.object(mod,'_static_update_limit',side_effect=fake_update)):
+            try:
+                mod.reconcile_static_limits(root)
+            except (RuntimeError, SystemExit) as ex:
+                err=str(ex)
+            if crash_mid_update and not missing_charge:
+                assert err and 'simulated process' in err
+                assert json.loads(store.read_text())['pending'] is not None
+                # A normal next installer run must recover the pending journal.
+                with patch.object(mod,'_static_update_limit',side_effect=lambda *a: None):
+                    assert mod.reconcile_static_limits(root)==0
+                err=None
+            if err is None:
+                assert mod.verify_snapshot(root)
+                assert mod.reconcile_static_limits(root)==0
+        return err, updates, copy.deepcopy(current), json.loads(store.read_text()), initial
+
+err,updates,live,final,old=simulate()
+assert err is None,err
+assert updates==[('hermes',1072,1056)],updates
+assert live['hermes']['mem']==1056
+assert live['ollama']['mem']==5760  # Never lower a loaded model
+assert live['honcho-db']['mem']==208
+assert sum(x['mem'] for x in live.values())==10512
+assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
+assert final['services']['honcho-db']['id']=='current-honcho-db'
+assert final['services']['searxng']['id']=='current-searxng'
+assert final['services']['synapse-db']['id']=='current-synapse-db'
+assert final['services']['hermes']['mem']==1056
+assert final['services']['ollama']['up']==old['services']['ollama']['up']
+print('BUDGET REPAIR: exact +16MiB observed scenario PASS')
+
+err,updates,live,final,old=simulate(missing_charge=True)
+assert err and 'memory envelope' in err and not updates
+assert final==old,err
+print('BUDGET REPAIR: unavailable cgroup charge safely blocks donor PASS')
+
+err,updates,live,final,old=simulate(corrupt_owner=True)
+assert err and 'ownership' in err and not updates and final==old
+print('BUDGET REPAIR: ownership gate PASS')
+
+err,updates,live,final,old=simulate(extra_drift=True)
+assert err and 'unchanged container has unexplained resource drift' in err and not updates and final==old
+print('BUDGET REPAIR: independent drift gate PASS')
+
+err,updates,live,final,old=simulate(fail_update=True)
+assert err and 'injected Docker' in err and final['pending'] is None
+assert live['hermes']['mem']==1072  # failed update simulated before succeeding, then rollback
+print('BUDGET REPAIR: update failure rollback PASS')
+
+err,updates,live,final,old=simulate(crash_mid_update=True)
+assert err is None and live['hermes']['mem']==1056
+assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
+print('BUDGET REPAIR: durable journal / interruption recovery PASS')
+print('V14.6.7 REPLACEMENT MEMORY ENVELOPE RECOVERY FIXTURES: PASS')

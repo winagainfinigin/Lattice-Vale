@@ -1,5 +1,13 @@
 # LatticeVale 14.6.7 Test Confidence Levels
 
+## 14.6.7 budget-aware hotfix qualification status (2026-11-13)
+
+The deterministic regression example uses **12** LatticeVale-managed containers, three canonical replacements (`synapse-db`, `searxng`, `honcho-db`), valid saved allocations totaling **10,512 MiB**, and live ceilings totaling **10,528 MiB** because Honcho DB reverted from 192 to 208 MiB. It must recover the **16-MiB** overage using an eligible unchanged donor above the canonical floor and `ceil(cgroup charged MiB × 1.20) + 64 MiB`, without shrinking Ollama or restarting containers. Negative cases cover invalid ownership, same-ID drift, unavailable cgroup data, unsafe reductions, Docker failures with rollback, interrupted journal recovery, and repeated idempotent repair. Fixture success proves simulated behavior only.
+
+At creation of the **source-level budget-recovery hotfix**, its focused resource tests, Python syntax, Bash syntax, static audit and 238-entry reconstructed SHA-256 manifest passed; a full **151-fixture** run was not completed because execution timed out after partial shard results. Native Windows PowerShell 5.1/7 parsing, **new** GitHub Actions for this overlay, and live Ubuntu-D installer convergence were **not** established. Documentation-only revisions must be rechecked; do not copy earlier results forward without retesting. The optional Element/Adlice helper has not established a false-positive determination or cleared the user's alert.
+
+Before deployment, run the complete deterministic suite, PowerShell parsing on Windows, `installer/verify-release.ps1`, a new CI run against the actual committed tree, and live first/second Option 1 repair validation including unchanged service identity, persisted data and final controller `--verify`. A passing manifest alone is **not** functional or runtime proof. See [Windows integration matrix](WINDOWS-INTEGRATION-TEST-MATRIX.md).
+
 ## Portable CPU-priority and timer-activation follow-up verification
 
 The same-version follow-up tests static CPU weights on 1, 2, 4, 8, 16, 32,
@@ -95,3 +103,7 @@ timer registration, uninstall cleanup, source/Compose wiring, and read-only
 audit acceptance of exact dynamic snapshots. Live Windows/WSL/Docker
 reconciliation must still be verified on the target host; simulated tests
 are not an end-to-end performance result.
+
+### 14.6.8 source-candidate validation boundary
+
+The 151 deterministic fixtures retain their existing six shard ranges. The RAM-policy fixture substitutes a synthetic MemTotal only in a disposable source copy; it separately checks that insufficient RAM still fails closed. `state-audit.py` tests recorded floating-image digests offline. The Linux regression/mocked resume jobs do not prove Windows PowerShell parsing, actual WSL2 lifecycle, real Docker resource behavior, native Windows applications, Element/Adlice false-positive status, or destructive uninstaller safety. Avoid modifying high-impact PowerShell uninstall/backup/firewall logic until Windows 5.1/7 mocked behavioral tests and live qualification are available.

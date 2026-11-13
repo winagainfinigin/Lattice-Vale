@@ -7,7 +7,7 @@ import tempfile
 
 ROOT=Path(__file__).resolve().parents[1]; REPO=ROOT.parent
 version=(ROOT/'VERSION.txt').read_text(encoding='ascii').strip()
-assert version in {'14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'}, version
+assert version in {'14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7','14.6.8'}, version
 sys.path.insert(0,str(ROOT/'stack'))
 from latticevale_arch import (  # noqa:E402
     classify_backends, fingerprint, host_memory_budget, parse_compatibility, validate_install_options
@@ -30,7 +30,7 @@ for token in ('MESA_D3D12_DEFAULT_ADAPTER_NAME','directml_runtime_fingerprint','
               'LATTICEVALE_DIRECTML_VRAM_MIB','diagnose)'):
     assert token in sh, token
 # Marker format remains at 14.6.5 for compatibility with existing runtime state.
-marker_format_version = '14.6.5' if version in {'14.6.6','14.6.7'} else version
+marker_format_version = '14.6.5' if version in {'14.6.6','14.6.7','14.6.8'} else version
 assert f'VERSION={marker_format_version}' in sh
 
 # The user-visible HTTP gateway must report the current installer release instead.

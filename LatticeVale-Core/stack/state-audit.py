@@ -58,6 +58,29 @@ def read_json(path: Path, default: Any) -> Any:
         return default
 
 
+def recorded_floating_image_digests(root: Path) -> list[str]:
+    """Inspect recorded (not remote) floating tags, without exposing .env secrets."""
+    inventory = read_json(root / "data/latticevale/managed-upstreams.json", {})
+    images = inventory.get("images", {}) if isinstance(inventory, dict) else {}
+    if not isinstance(images, dict):
+        return []
+    rows = []
+    for key in ("HERMES_IMAGE", "SYNAPSE_IMAGE", "SEARXNG_IMAGE", "OLLAMA_IMAGE"):
+        item = images.get(key)
+        if not isinstance(item, dict):
+            continue
+        ref = item.get("declaredRef")
+        # Never print arbitrary user-controlled image names (possible credentials).
+        if not isinstance(ref, str) or not re.fullmatch(r"[A-Za-z0-9._/-]+:latest", ref):
+            continue
+        digests = item.get("repoDigests")
+        digests = digests if isinstance(digests, list) else []
+        hashes = sorted({match.group(1) for entry in digests if isinstance(entry, str)
+                         if (match := re.fullmatch(r"[A-Za-z0-9._/-]+@sha256:([0-9a-fA-F]{64})", entry))})
+        rows.append(f"{key}={ref} digest=" + ("sha256:" + hashes[0] if hashes else "unavailable"))
+    return rows
+
+
 def parse_memory_size_bytes(value: Any) -> int:
     """Parse Docker/Compose memory-size syntax using Docker's binary k/m/g semantics."""
     if isinstance(value, (int, float)):
@@ -1751,6 +1774,8 @@ def main() -> int:
                     print(f"    - {item.get('detail')}")
         if report.get("windowsFollowup"):
             print("Windows follow-up remains optional to Linux-stack health; rerun the PowerShell installer only if you want to repair those Windows integrations.")
+        floating = recorded_floating_image_digests(root)
+        print("Floating image tags (recorded digests): " + ("; ".join(floating) if floating else "none recorded"))
         print(f"Overall: {report['overall']}")
         if report.get("overall") == "STOPPED":
             print("The stack is configured but stopped; use ./manage.sh start or Resume / repair to start/reconcile it without treating stop state as corruption.")

@@ -15,7 +15,7 @@ boot = (root / 'linux/bootstrap.sh').read_text(encoding='utf-8')
 uninstall = (root / 'Uninstall-LatticeVale.ps1').read_text(encoding='utf-8')
 version = (root / 'VERSION.txt').read_text(encoding='utf-8').strip()
 
-assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'}, version
+assert version in {'14.4.3','14.4.4','14.4.5','14.4.6','14.4.7','14.4.8','14.4.81','14.4.82','14.4.83','14.4.84','14.4.85','14.5.0','14.5.1','14.5.2','14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7','14.6.8'}, version
 
 # Clean + repair adoption must both converge on the current canonical policy. The startup helper is the
 # repair/cold-start migration backstop when a saved adaptive overlay is stale.
@@ -35,11 +35,26 @@ for source in (cs, boot):
     assert 'autoMemoryReclaim=' not in source
 
 
-def run_refresh(mode: str, seed_v2: bool = False) -> Path:
+def run_refresh(mode: str, seed_v2: bool = False, *, mock_ram_mib: int = 16384, expect_failure: bool = False) -> Path:
     td = Path(tempfile.mkdtemp(prefix=f'lv-1443-{mode}-'))
     shutil.copy2(root / 'stack/configure-stack.sh', td / 'configure-stack.sh')
+    # All shell-side /proc/meminfo probes are redirected only in this disposable
+    # fixture copy, including the production guard's independent live-RAM check.
+    meminfo = td / 'test-meminfo'
+    meminfo.write_text(f'MemTotal: {mock_ram_mib * 1024} kB\n', encoding='ascii')
+    staged_configure = (td / 'configure-stack.sh').read_text(encoding='utf-8')
+    assert '/proc/meminfo' in staged_configure
+    (td / 'configure-stack.sh').write_text(
+        staged_configure.replace('/proc/meminfo', str(meminfo)), encoding='utf-8')
     shutil.copy2(root / 'stack/runtime-policy.py', td / 'runtime-policy.py')
     shutil.copy2(root / 'stack/latticevale_arch.py', td / 'latticevale_arch.py')
+    # Test-only memory fixture: patch ONLY the temporary copy. Production code,
+    # its /proc/meminfo probe, and the actual resource admission guard are unchanged.
+    arch_file = td / 'latticevale_arch.py'
+    staged_arch = arch_file.read_text(encoding='utf-8')
+    live_probe = '    mem_mib = _mem_total_mib()\n'
+    assert staged_arch.count(live_probe) == 1
+    arch_file.write_text(staged_arch.replace(live_probe, f'    mem_mib = {mock_ram_mib}\n'), encoding='utf-8')
     shutil.copy2(root / 'stack/hardware-capabilities.py', td / 'hardware-capabilities.py')
     shutil.copy2(root / 'stack/backend-capabilities.py', td / 'backend-capabilities.py')
     shutil.copy2(root / 'compatibility.conf', td / 'compatibility.conf')
@@ -98,6 +113,10 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
         env={**os.environ, 'HOME': str(td)},
         preexec_fn=preexec,
     )
+    if expect_failure:
+        assert proc.returncode != 0, 'Low-RAM admission unexpectedly succeeded'
+        assert 'cannot safely fit selected services' in proc.stdout, proc.stdout
+        return td
     assert proc.returncode == 0, proc.stdout
     assert (td / '.latticevale-resource-state').read_text(encoding='utf-8').startswith('POLICY_VERSION=13\n')
     env_line = next(x for x in (td / '.env').read_text(encoding='utf-8').splitlines() if x.startswith('COMPOSE_FILE='))
@@ -109,12 +128,13 @@ def run_refresh(mode: str, seed_v2: bool = False) -> Path:
     assert 'shared_buffers=' in ' '.join(map(str, services['synapse-db']['command']))
     return td
 
-clean = repair = None
+clean = repair = low_ram = None
 try:
     clean = run_refresh('fresh', False)
     repair = run_refresh('repair', True)
+    low_ram = run_refresh('fresh', mock_ram_mib=3990, expect_failure=True)
 finally:
-    for td in (clean, repair):
+    for td in (clean, repair, low_ram):
         if td:
             shutil.rmtree(td, ignore_errors=True)
 

@@ -1,4 +1,6 @@
-# LatticeVale v14.6.7 — Complete Features and Install Options Reference
+# LatticeVale v14.6.8 — Complete Features and Install Options Reference
+
+> **14.6.7 same-version maintenance note (2026-11-13):** Bounded-burst resource management now includes strict budget-aware recovery for independently verified canonical Docker container replacements while preserving valid dynamic leases. An optional read-only Element/Adlice diagnostic reports Windows executable provenance; it neither modifies malware protection nor guarantees a false-positive result. No new user-selected install component, version/schema change, antivirus integration, or persistent-data migration is introduced. See [Resource Policy](RESOURCE-POLICY.md), [Security](SECURITY.md), and [Testing](TESTING.md).
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
@@ -37,7 +39,7 @@ Resume/repair and normal stack start first give a just-started shared gateway a 
 - Conserved automatic CPU allocation: system/DirectML reservations are removed before enabled Docker services share one aggregate envelope.
 - DirectML generation uses `torch.no_grad()`; no-fallback mode cannot create or retain forced-Ollama fallback markers.
 
-> **Current managed software/source policy (v14.6.7):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
+> **Current managed software/source policy (v14.6.8):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
 
 > **v14.6.0 architecture:** canonical hardware/backend/resource state separates durable user intent from machine-derived capability. Current task docs: `QUICKSTART.md`, `INSTALLATION.md`, `REPAIR.md`, `GPU-BACKENDS.md`, `DIAGNOSTICS.md`, `RESOURCE-POLICY.md`, and `ARCHITECTURE.md`.
 
@@ -880,7 +882,7 @@ Services are activated according to selected Compose profiles/options; selecting
 
 ---
 
-# 8. Current managed software/source policy in v14.6.7
+# 8. Current managed software/source policy in v14.6.8
 
 Installer-owned application defaults use stable upstream channels at refresh time:
 
@@ -1207,3 +1209,5 @@ timer; static Compose limits and user-owned opaque `compose.override.yaml`
 remain authoritative when automatic borrowing is unavailable. QMD minimums,
 DirectML host headroom, existing GPU safeguards, and no-data-reset repair are
 preserved. See [RESOURCE-POLICY.md](RESOURCE-POLICY.md).
+
+Current package: v14.6.8. For safety and release details see [CHANGELOG](CHANGELOG.md) and [FUNCTION-INDEX](FUNCTION-INDEX.md) where applicable.

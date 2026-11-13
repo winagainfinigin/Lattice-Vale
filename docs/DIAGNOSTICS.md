@@ -1,4 +1,12 @@
-# LatticeVale 14.6.6 Diagnostics
+# LatticeVale 14.6.7 Diagnostics (inherited 14.6.6 checks)
+
+## 14.6.7 resource-rebind and Element/Adlice diagnostics (2026-11-13)
+
+**Read-only WSL:** From the selected user account, `python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack`. Inspect `journalctl -u latticevale-resource-burst.service --no-pager -n 50` and `docker compose config --format json` from `~/hermes-stack`. If the error mentions `replacement allocation exceeds canonical memory envelope`, compare the sum of *live* Docker `HostConfig.Memory` limits with `BUDGET_MIB` in `.latticevale-resource-state`, and compare each container's ID and limit against `data/latticevale/resource-burst-state.json`; inspect replacement ownership labels and cgroup `memory.current`. In the recorded regression 10,528 MiB live exceeded 10,512 MiB canonical by 16 MiB after Honcho DB returned to its 208-MiB canonical ceiling. `docker stats` differs from charged cgroup usage and does not establish safe reduction. Do not paste credentials, raw environment files or complete private snapshots into reports.
+
+**Read-only Windows Element:** From the repository root, `powershell.exe -NoLogo -NoProfile -File .\tools\Audit-LatticeVale-Element-Adlice.ps1`. Review file paths, version, Authenticode status, SHA-256, and running Element executable locations. Separately collect the **exact** Adlice detection name, flagged path, and scanner version. The helper does not clear malware alerts or set antivirus exclusions. Do not label a detection false positive without verifying the specific flagged artifact.
+
+**Confidence boundary:** A passing source manifest validates files, a passing `--verify` checks a current controller snapshot, healthy Docker containers check a different layer, and a complete Windows/WSL/Element integration pass is a further independent result. See [Testing](TESTING.md) and [Security](SECURITY.md).
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 
@@ -129,3 +137,7 @@ snapshot. Otherwise the normal static policy mismatch remains reportable.
 The timer and service journal distinguish static fallback, sustained demand,
 contention-aware holds, and a safely applied rebalance. Read-only audits
 verify the snapshot without mutating it. See `RESOURCE-POLICY.md`.
+
+### 14.6.8 recorded floating image digest audit
+
+The normal `state-audit.py` text output includes a `Floating image tags (recorded digests)` line; the existing JSON output contract is unchanged. These are **locally recorded** immutable registry digest references from `data/latticevale/managed-upstreams.json` for managed `:latest` image tags. Missing or malformed records print `unavailable` or are omitted; no remote registry request is made. This is provenance information, not proof of trust or a malware verdict.

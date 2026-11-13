@@ -7,7 +7,7 @@ CORE = Path(__file__).resolve().parents[1]
 ROOT = CORE.parent
 version=(CORE / "VERSION.txt").read_text(encoding="ascii").strip()
 display_version = f"{version} Hotfix" if version == "14.6.2" else version
-assert version in {"14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7'}
+assert version in {"14.5.2","14.5.3","14.5.4","14.5.42","14.5.43","14.5.44",'14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7','14.6.8'}
 
 headers = {
     ROOT / "README.md": f"# LatticeVale v{display_version}",
@@ -21,7 +21,7 @@ for path, prefix in headers.items():
     assert path.read_text(encoding="utf-8").startswith(prefix), path
 
 required = {
-    ROOT / "README.md": ["v14.5.2 — cleanup / reclaim disk space maintenance release", "Option 7", "v14.5.1", "resource policy **v9**", "Changed-files source candidate" if version == "14.6.7" else "Current install release"],
+    ROOT / "README.md": ["v14.5.2 — cleanup / reclaim disk space maintenance release", "Option 7", "v14.5.1", "resource policy **v9**", "Changed-files source candidate" if version == "14.6.8" else "Current install release"],
     CORE / "README.md": ["v14.5.2 adds the install-preserving Option 7", "v14.5.1 adds resource policy v9"],
     CORE / "AUDIT.md": ["v14.5.2 Option 7 cleanup safety audit", "v14.5.1 adaptive resource-policy / OOM audit"],
     ROOT / "docs/FEATURES.md": ["Cleanup / reclaim disk space", f"Current managed software/source policy (v{version})", "docker builder prune -f", "fstrim -v /"],

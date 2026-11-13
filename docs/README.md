@@ -1,4 +1,6 @@
-# LatticeVale v14.6.7 — Stable
+# LatticeVale v14.6.8 — Stable
+
+> **14.6.7 same-version budget-aware repair and Element/Adlice triage (2026-11-13):** If a verified Compose replacement restores a previously lent memory ceiling, the bounded-burst controller can recover the small resulting overage from unchanged, safely measured donors. It preserves valid leases and fails closed when reclaimable cgroup headroom is insufficient. An optional read-only Element Desktop file/signature/hash audit assists Adlice detection triage but cannot declare an alert false or modify antivirus exclusions. See [Resource Policy](RESOURCE-POLICY.md), [Repair](REPAIR.md), [Diagnostics](DIAGNOSTICS.md), [Security](SECURITY.md), and [Testing](TESTING.md). Live Windows/WSL and a new CI run remain separate verification gates.
 
 > **v14.6.5:** Windows Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge. Permitted tailnet devices use the displayed service URL; exact matching Serve rules remain in place without a restart. Existing Synapse identity stays authoritative; Matrix ID domains, Element URLs, and Tailscale hostnames remain separate. The same-version hotfix keeps speculative repair probes quiet, waits boundedly for shared-gateway convergence before migration decisions, and accepts migration timeout/nonzero status only after strict live convergence succeeds. Existing-stack repairs include pre-install backup progress with a per-run skip, planned Ubuntu APT refresh progress with a per-run skip, streamed cleanup output, and a fast path that skips unnecessary cache/staging cleanup when the WSL root has at least 2 GiB free. Schema 24 remains compatible.
 
@@ -372,3 +374,5 @@ The bounded CPU/RAM borrowing controller retains the canonical static v13
 fallback and integrates with repair/audit. [RESOURCE-POLICY.md](RESOURCE-POLICY.md)
 is the authoritative description of v14 scheduling, memory/CPU safety
 ceilings, verification, and optional systemd timer requirements.
+
+Current package: v14.6.8. For safety and release details see [CHANGELOG](CHANGELOG.md) and [FUNCTION-INDEX](FUNCTION-INDEX.md) where applicable.

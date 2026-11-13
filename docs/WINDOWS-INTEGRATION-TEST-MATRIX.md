@@ -1,5 +1,12 @@
 # Windows integration test matrix
 
+## Same-version 14.6.7 budget-rebind and Adlice live-qualification cases (2026-11-13)
+
+- On the actual WSL host, reproduce or replay verified recreated `synapse-db`, `searxng`, and `honcho-db` with canonical limits and safe unaffected leases, including a 16-MiB excess over a 10,512-MiB budget. Confirm controller ownership/fingerprint, donor headroom and journaling, final no-overage state, 12 expected running services, healthy gateways, and no data/model loss.
+- Exercise a no-safe-donor case and a pending/incomplete rebind case: recovery must stop rather than shrink loaded models or silently trust changed container IDs. Verify two successive Option 1 repairs do not churn identities, allocations, or persistent state.
+- On Windows PowerShell 5.1 and 7, parse and run the optional *read-only* Element/Adlice audit. Cross-check the executable signature/hash with the exact scanner detection. Verify that it does not add exclusions, change malware-protection state or declare an unverified alert false.
+- Record commit SHA, new GitHub Actions results, release-manifest verification and exact live host/build. These outcomes remain **unverified** until collected on the target system; mock fixtures cannot replace them.
+
 > **v14.6.5 test build:** Matrix identity domain and Element homeserver URL are separate persisted values. Existing Synapse `server_name` and state stay authoritative. Tailscale installation checks the local relay, Serve listener, and Matrix API without a second-device page challenge; exact matching routes are kept in place. Managed Hermes profiles migrate to the shared host gateway. Backup and APT refresh progress/skips, streaming Option 7 cleanup, and low-space-only pre-maintenance cleanup are also included.
 
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.

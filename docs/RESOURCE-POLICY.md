@@ -1,4 +1,21 @@
-# LatticeVale 14.6.6 Resource Scheduler v14 (Canonical Schema v13)
+# LatticeVale 14.6.7 Resource Scheduler v14 (Canonical Schema v13; 14.6.6 lineage)
+
+## 14.6.7 same-version verified replacement-budget recovery (2026-11-13)
+
+When a Compose-managed container is recreated, Docker can restore its canonical hard memory limit even though other containers retain **legitimate bounded-burst leases**. In the observed 12-container case, `honcho-db` returned from 192 to 208 MiB and pushed the total live ceiling from the valid 10,512-MiB snapshot to 10,528 MiB, exceeding the 10,512-MiB canonical envelope by 16 MiB. New IDs for `synapse-db` and `searxng` were also observed; those containers were at their canonical limits. Static quota differences alone are not necessarily drift.
+
+`resource-burst-controller.py` now accepts only independently verified canonical replacements (correct Compose project/service labels and name, original policy fingerprint, exact service topology, matching expected Compose limits, no unexplained changes on unchanged IDs). If the overage is **fully explained by those replacements**, `_replacement_budget_plan` considers only unchanged verified donors. Each donor must retain its configured service floor and **at least `ceil(charged_MiB * 1.20) + 64 MiB`** based on cgroup `memory.current`, including charged cache. Transfers use existing 16-MiB quanta. A permitted donor is selected by live safe headroom, not a fixed service name; if none can safely release enough, repair stops without forcing Ollama or another loaded model below safe usage.
+
+The repair uses an exclusive controller lock and an atomically persisted pending `rebindBudgetRecovery` transaction; it rechecks all container identities/limits and donor cgroup charges immediately before reducing any hard ceiling. The journal supports validated interrupted recovery. Successful rebind preserves unchanged services' state and counters; errors attempt guarded rollback and retain unresolved state for review. Aggregate CPU/RAM envelopes and existing effective-Compose override restrictions remain enforced. This is **hard-limit reconciliation, not a memory cleanup or guarantee of lower actual RAM use**.
+
+Read-only verification from the selected WSL user in `~/hermes-stack`:
+
+```bash
+python3 ~/hermes-stack/resource-burst-controller.py --verify --stack ~/hermes-stack
+journalctl -u latticevale-resource-burst.service --no-pager -n 50
+```
+
+A failing `--verify` is a diagnostic result and must not be papered over with direct `docker update` calls. Use the verified complete repository installer, Option 1 with a safety backup, for supported recovery. Avoid manual static restoration while models are loaded: a decrease can fail the cgroup headroom gate. Focused source tests are not proof of live 12-container repair.
 
 > **v14.6.6 demand-matched resource hotfix:** The original v14 controller
 > transferred quotas from every idle donor before checking what busy receivers
@@ -121,9 +138,12 @@ Ubuntu user, reads only the **local** rootful Docker Engine, and never exposes
 Docker's control socket to an application container. It uses a
 fingerprint- and container-ID-bound transaction snapshot at
 `data/latticevale/resource-burst-state.json`; partial changes are recovered
-or stopped for review. Every repair stops the timer, restores the static
-Compose baseline when possible (including when a new user-owned Compose
-override is detected), and then revalidates canonical state.
+or stopped for review. During repair the timer is coordinated with the installer; a valid verified
+bounded allocation may be preserved. A replaced canonical container can be
+rebound to that allocation, with budget-aware safe recovery if needed.
+Unverified states and user-owned resource-affecting Compose overrides remain
+subject to conservative static fallback and verification; lowering a live
+memory ceiling is never forced without measured cgroup headroom.
 Both the installer verifier and read-only audit distinguish a verified dynamic
 snapshot from genuine unexplained Docker drift.
 
@@ -145,9 +165,10 @@ one Docker change, it attempts the inverse transaction and keeps a recovery
 journal for the next activation. The Docker engine and QMD/model floors remain
 otherwise unchanged.
 
-To return an active installation to the canonical static quotas during a
-manual diagnostic, pause the timer and restore the verified baseline as the
-normal Linux owner: `sudo systemctl stop latticevale-resource-burst.timer
+For an explicit **mutating** return to canonical static quotas (not a read-only
+diagnostic), pause the timer and restore the verified baseline as the
+normal Linux owner **only after confirming that live cgroup memory usage permits
+every reduction**. Prefer the read-only `--verify` above first: `sudo systemctl stop latticevale-resource-burst.timer
 latticevale-resource-burst.service`, then
 `python3 ~/hermes-stack/resource-burst-controller.py --restore --stack
 ~/hermes-stack`. The next normal installer repair reconciles the policy and
