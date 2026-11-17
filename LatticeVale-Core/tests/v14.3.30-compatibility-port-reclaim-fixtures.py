@@ -45,7 +45,9 @@ for marker in (
     'Reclaimed installer-owned Windows bridge port',
 ):
     assert marker in ps, marker
-owned=ps[ps.index('function Stop-LatticeValeOwnedBridgeProcesses'):ps.index('function Prepare-LatticeValeBridgePortsForReconcile')]
+# Scope the destructive-stop assertion to the stop function. The adjacent
+# read-only preservation probe intentionally checks TCP listener ownership.
+owned=ps[ps.index('function Stop-LatticeValeOwnedBridgeProcesses'):ps.index('function Test-LatticeValeExistingRelaySafeToPreserve')]
 assert 'Stop-Process -Id' in owned
 assert '$hasScript -and $hasConfig' in owned
 assert 'Get-NetTCPConnection' not in owned  # never kill merely by listener ownership
