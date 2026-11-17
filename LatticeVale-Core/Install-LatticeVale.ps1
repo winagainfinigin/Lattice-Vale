@@ -5716,7 +5716,66 @@ function Stop-LatticeValeOwnedBridgeProcesses([object]$Paths) {
     return $stopped
 }
 
-function Restore-LatticeValeVerifiedBridgeAfterFailedRepair([object]$Paths, [string]$Name) {
+function Test-LatticeValeExistingRelaySafeToPreserve(
+    [object]$Paths, [string]$Name,
+    [bool]$DashboardEnabled, [int]$DashboardBackend, [int]$DashboardBridge,
+    [bool]$MatrixEnabled, [int]$MatrixBackend, [int]$MatrixBridge
+) {
+    # Read-only. During an otherwise healthy Option 1 do NOT tear down the
+    # remote access relay merely to select the SAME already-owned ports.
+    # Require the registered task AND the ACTUAL listening processes to belong
+    # to this exact installer-owned script/config, not merely an HTTP response.
+    if (-not (Test-LatticeValeBridgeTaskOwned $Paths)) { return $false }
+    try {
+        $task = Get-ScheduledTask -TaskName $Paths.TaskName -ErrorAction Stop
+        if ([string]$task.State -ne 'Running') { return $false }
+        $cfg = Get-Content -LiteralPath $Paths.Config -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([int]$cfg.schema -ne 5 -or [string]$cfg.transport -ne 'windows-native-tcp-relay' -or
+            [string]$cfg.distroName -ne $Name) { return $false }
+        $expected = @{}
+        if ($DashboardEnabled) { $expected['Dashboard'] = @($DashboardBackend, $DashboardBridge, '/') }
+        if ($MatrixEnabled) { $expected['Matrix'] = @($MatrixBackend, $MatrixBridge, '/_matrix/client/versions') }
+        $enabled = @($cfg.services | Where-Object { $_.enabled -eq $true })
+        if ($enabled.Count -ne $expected.Count -or $enabled.Count -lt 1) { return $false }
+        $ownedPids = @{}
+        foreach ($service in $enabled) {
+            $label = [string]$service.label
+            if (-not $expected.ContainsKey($label)) { return $false }
+            if ([int]$service.backendPort -ne [int]$expected[$label][0] -or
+                [int]$service.bridgePort -ne [int]$expected[$label][1] -or
+                [string]$service.probePath -ne [string]$expected[$label][2]) { return $false }
+            $port = [int]$service.bridgePort
+            if ($port -lt 1024 -or $port -gt 65535) { return $false }
+            $listeners = @(Get-NetTCPConnection -State Listen -LocalPort $port -ErrorAction Stop |
+                Where-Object { $_.LocalAddress -in @('127.0.0.1','::1') })
+            if ($listeners.Count -lt 1) { return $false }
+            $validOwner = $false
+            foreach ($listener in $listeners) {
+                $listenerPid = [int]$listener.OwningProcess
+                if ($listenerPid -le 0) { continue }
+                $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$listenerPid" -ErrorAction Stop
+                if ($null -eq $proc -or [string]$proc.Name -notin @('powershell.exe','pwsh.exe')) { continue }
+                $command = [string]$proc.CommandLine
+                if ($command.IndexOf([string]$Paths.Script, [StringComparison]::OrdinalIgnoreCase) -lt 0 -or
+                    $command.IndexOf([string]$Paths.Config, [StringComparison]::OrdinalIgnoreCase) -lt 0) { continue }
+                $validOwner = $true
+            }
+            if (-not $validOwner) { return $false }
+            if (-not (Test-HttpEndpointNoProxy "http://127.0.0.1:$port$([string]$service.probePath)" 1)) {
+                return $false
+            }
+            $ownedPids[$port] = $true
+        }
+        if ($ownedPids.Count -ne $enabled.Count) { return $false }
+        return $true
+    } catch {
+        # Missing privilege/telemetry or malformed previous JSON is not
+        # permission to reserve an apparently occupied foreign port.
+        return $false
+    }
+}
+
+function Restore-LatticeValeVerifiedBridgeAfterFailedRepair([object]$Paths, [string]$Name, [object]$FallbackSpec = $null) {
     # The installer stops its owned relay during port reconciliation. If the
     # Linux repair then fails, restore the *existing* Windows bridge instead of
     # leaving healthy Matrix/Dashboard backends hidden behind HTTPS 502 errors.
@@ -5733,16 +5792,66 @@ function Restore-LatticeValeVerifiedBridgeAfterFailedRepair([object]$Paths, [str
         }
     }
     try {
-        $config = Get-Content -LiteralPath $Paths.Config -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        # An earlier repair proved this branch could itself throw
+        # "Invalid JSON primitive: ." after Linux reconciliation failed. A
+        # broken installer-owned JSON file must not make a best-effort relay
+        # rollback unconditionally impossible. Rebuild it ONLY from the saved
+        # validated Option 1 component/port selection, never from untrusted
+        # content, and only for the exact already-owned task.
+        $config = $null
+        $badJson = ''
+        try {
+            $config = Get-Content -LiteralPath $Paths.Config -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            $badJson = [string]$_.Exception.Message
+        }
+        if ($null -eq $config) {
+            if ($null -eq $FallbackSpec) { throw "Previous relay JSON could not be parsed ($badJson); no verified fallback configuration exists." }
+            $dashboard = ([bool]$FallbackSpec.DashboardEnabled)
+            $matrix = ([bool]$FallbackSpec.MatrixEnabled)
+            $db = [int]$FallbackSpec.DashboardBackendPort
+            $dp = [int]$FallbackSpec.DashboardBridgePort
+            $mb = [int]$FallbackSpec.MatrixBackendPort
+            $mp = [int]$FallbackSpec.MatrixBridgePort
+            if (-not ($dashboard -or $matrix) -or
+                ($dashboard -and ($db -lt 1024 -or $db -gt 65535 -or $dp -lt 1024 -or $dp -gt 65535)) -or
+                ($matrix -and ($mb -lt 1024 -or $mb -gt 65535 -or $mp -lt 1024 -or $mp -gt 65535)) -or
+                ($dashboard -and $matrix -and $dp -eq $mp)) {
+                throw 'No valid, bounded persisted bridge-port selection for safe relay recovery.'
+            }
+            # Preserve malformed configuration for diagnosis; never overwrite
+            # it invisibly. The installer owns this exact config and task.
+            $savedCorrupt = $Paths.Config + '.invalid-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.bak'
+            Copy-Item -LiteralPath $Paths.Config -Destination $savedCorrupt -ErrorAction Stop
+            $mode = [string]$FallbackSpec.NetworkingMode
+            $rebuilt = Write-LatticeValeBridgeConfig $Name $dashboard $db $dp $matrix $mb $mp '' $mode
+            if ([string]$rebuilt.Config -cne [string]$Paths.Config -or
+                [string]$rebuilt.TaskName -cne [string]$Paths.TaskName -or
+                -not (Test-LatticeValeBridgeTaskOwned $Paths)) {
+                throw 'Rebuilt relay path or task ownership changed unexpectedly.'
+            }
+            $config = Get-Content -LiteralPath $Paths.Config -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+            Write-Warning 'Reconstructed malformed installer-owned relay JSON from verified persisted component/port selections; the original file was saved as .invalid-*.bak.'
+        }
+        if ([int]$config.schema -ne 5 -or [string]$config.transport -ne 'windows-native-tcp-relay') {
+            throw 'Existing relay config does not match the supported installer-owned transport/schema.'
+        }
         if ([string]$config.distroName -ne $Name) { throw 'Existing relay belongs to a different WSL distro.' }
         $services = @($config.services | Where-Object { $_.enabled -eq $true })
         if ($services.Count -lt 1 -or $services.Count -gt 2) { throw 'No bounded, enabled relay service list.' }
         $ports = @{}
+        $serviceNames = @{}
         foreach ($service in $services) {
             $port = [int]$service.bridgePort
-            if ([string]$service.label -notin @('Dashboard','Matrix') -or $port -lt 1024 -or
-                $port -gt 65535 -or $ports.ContainsKey($port)) { throw 'Invalid saved relay service or bridge port.' }
+            $backend = [int]$service.backendPort
+            $label = [string]$service.label
+            if ($label -notin @('Dashboard','Matrix') -or $port -lt 1024 -or
+                $port -gt 65535 -or $backend -lt 1024 -or $backend -gt 65535 -or
+                $ports.ContainsKey($port) -or $serviceNames.ContainsKey($label)) {
+                throw 'Invalid saved relay service or bridge port.'
+            }
             $ports[$port] = $true
+            $serviceNames[$label] = $true
         }
         $task = Get-ScheduledTask -TaskName $Paths.TaskName -ErrorAction Stop
         if ([string]$task.State -ne 'Running') {
@@ -8855,29 +8964,58 @@ if ($null -ne $existingOptions) {
 # installer-owned Windows loopback TCP relay. In mirrored mode that relay targets WSL
 # through Windows localhost; NAT/compatibility mode targets the current reachable WSL IPv4.
 $script:BridgeRestoreOnFailedRepair = $null
+$script:BridgeRestoreSpec = $null
+$script:PreserveExistingRelayDuringRepair = $false
 if ($tailscaleDashboard -or $tailscaleMatrix) {
+    # Capture only the ports that belonged to the prior persisted installation,
+    # not new ports chosen after tearing down the old relay. These are used
+    # ONLY if the exact-owned task's previous JSON is demonstrably malformed.
+    $oldDashboardBridge = if ($priorDashboardBridgePort -ge 1024 -and $priorDashboardBridgePort -le 65535) { $priorDashboardBridgePort } else { $dashboardBridgePort }
+    $oldMatrixBridge = if ($priorMatrixBridgePort -ge 1024 -and $priorMatrixBridgePort -le 65535) { $priorMatrixBridgePort } else { $matrixBridgePort }
+    $oldNetworkingMode = ''
+    try { $oldNetworkingMode = $oldNetworkingMode } catch { }
+    $script:BridgeRestoreSpec = [pscustomobject]@{
+        DashboardEnabled = [bool]$tailscaleDashboard
+        MatrixEnabled = [bool]$tailscaleMatrix
+        DashboardBackendPort = [int](Get-OptionTcpPort $existingOptions 'dashboardLocalPort' $dashboardLocalPort)
+        DashboardBridgePort = [int]$oldDashboardBridge
+        MatrixBackendPort = [int](Get-OptionTcpPort $existingOptions 'matrixLocalPort' $matrixLocalPort)
+        MatrixBridgePort = [int]$oldMatrixBridge
+        NetworkingMode = $oldNetworkingMode
+    }
     # Capture only a relay task that ALREADY belonged to this installation.
     # Never start a newly created or foreign task as a failure rollback.
     $previousBridge = Get-LatticeValeBridgePaths $DistroName
     if (Test-LatticeValeBridgeTaskOwned $previousBridge) {
         $script:BridgeRestoreOnFailedRepair = $previousBridge
+        $script:PreserveExistingRelayDuringRepair = Test-LatticeValeExistingRelaySafeToPreserve `
+            $previousBridge $DistroName ([bool]$tailscaleDashboard) `
+            ([int]$script:BridgeRestoreSpec.DashboardBackendPort) ([int]$dashboardBridgePort) `
+            ([bool]$tailscaleMatrix) ([int]$script:BridgeRestoreSpec.MatrixBackendPort) `
+            ([int]$matrixBridgePort)
     }
 }
 try {
 if ($tailscaleDashboard -or $tailscaleMatrix) {
     Remove-LegacyV14BridgeSupport $DistroName
     Remove-LegacyHermesManualRelay $DistroName
-    # Stop only provably LatticeVale-owned current/orphan relays BEFORE allocating
-    # bridge ports so an old install cannot reserve its own canonical ports.
-    [void](Prepare-LatticeValeBridgePortsForReconcile $DistroName @(19119,18008,$dashboardBridgePort,$matrixBridgePort,$priorDashboardBridgePort,$priorMatrixBridgePort))
+    if ($script:PreserveExistingRelayDuringRepair) {
+        Write-Info 'Verified existing Windows relay owns all selected active bridge listeners; preserving remote Dashboard/Matrix access during Linux Option 1 repair.'
+    } else {
+        # Stop only provably LatticeVale-owned current/orphan relays BEFORE
+        # allocating ports; unknown listeners are never stopped.
+        [void](Prepare-LatticeValeBridgePortsForReconcile $DistroName @(19119,18008,$dashboardBridgePort,$matrixBridgePort,$priorDashboardBridgePort,$priorMatrixBridgePort))
+    }
 }
-if ($tailscaleDashboard) {
-    $priorOwned = ($priorDashboardBridgePort -gt 0)
-    $dashboardBridgePort = Resolve-LatticeValeWindowsBridgePort 'Dashboard' 19119 $dashboardBridgePort $priorOwned @($hermesApiPort,$dashboardLocalPort,$matrixLocalPort,$searxngLocalPort,$honchoLocalPort,$tailscaleDashboardPort,$tailscaleMatrixPort)
-}
-if ($tailscaleMatrix) {
-    $priorOwned = ($priorMatrixBridgePort -gt 0)
-    $matrixBridgePort = Resolve-LatticeValeWindowsBridgePort 'Matrix' 18008 $matrixBridgePort $priorOwned @($hermesApiPort,$dashboardLocalPort,$matrixLocalPort,$searxngLocalPort,$honchoLocalPort,$tailscaleDashboardPort,$tailscaleMatrixPort,$dashboardBridgePort)
+if (-not $script:PreserveExistingRelayDuringRepair) {
+    if ($tailscaleDashboard) {
+        $priorOwned = ($priorDashboardBridgePort -gt 0)
+        $dashboardBridgePort = Resolve-LatticeValeWindowsBridgePort 'Dashboard' 19119 $dashboardBridgePort $priorOwned @($hermesApiPort,$dashboardLocalPort,$matrixLocalPort,$searxngLocalPort,$honchoLocalPort,$tailscaleDashboardPort,$tailscaleMatrixPort)
+    }
+    if ($tailscaleMatrix) {
+        $priorOwned = ($priorMatrixBridgePort -gt 0)
+        $matrixBridgePort = Resolve-LatticeValeWindowsBridgePort 'Matrix' 18008 $matrixBridgePort $priorOwned @($hermesApiPort,$dashboardLocalPort,$matrixLocalPort,$searxngLocalPort,$honchoLocalPort,$tailscaleDashboardPort,$tailscaleMatrixPort,$dashboardBridgePort)
+    }
 }
 
 $wslNetworking = Get-WslGlobalNetworkingMode
@@ -9078,7 +9216,7 @@ if ($kanban) {
 Write-Info 'Skill-management policy: managed Hermes profiles receive validated skill-authoring/recovery guidance. Clean installs default automatic agent skill writes on; repair/update preserves an explicit existing skill write-approval choice.'
 if (-not (Read-ChoiceExplicit 'Proceed with installation?' 'Confirms the selected existing Ubuntu distro, its verified storage partition, and component choices before stack files are changed.' 'Cancel and restore an authenticated pre-existing Windows relay, if it was paused for port selection.' $true)) {
     if ($null -ne $script:BridgeRestoreOnFailedRepair) {
-        [void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName)
+        [void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName $script:BridgeRestoreSpec)
     }
     Write-Host 'Installation cancelled; managed Linux stack files were not changed.'
     exit 0
@@ -9955,7 +10093,7 @@ if ($obsidian) {
 }
 } catch {
     if ($null -ne $script:BridgeRestoreOnFailedRepair) {
-        [void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName)
+        [void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName $script:BridgeRestoreSpec)
     }
     throw
 }

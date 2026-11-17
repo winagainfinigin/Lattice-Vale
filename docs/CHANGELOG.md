@@ -1,5 +1,7 @@
 # Changelog
 
+- **v14.6.8 same-version Option 1 recurrence correction (2026-11-16):** verified replacement rebind now reconciles **both** CPU and RAM envelopes atomically (including restored 50m QMD-indexer CPU quota) without undoing Ollama's verified burst; failed repairs preserve healthy exact-owned relay listeners and can rebuild only malformed installer-owned relay JSON from persisted ports. Adds mixed CPU/RAM rollback and interruption regressions; live Windows end-to-end verification remains required.
+
 ## 14.6.8 (test reliability, audit transparency, function index)
 
 - **2026-11-16 recurrence hotfix:** repaired safe 32-MiB container-replacement budget rebind; a failed Option 1 now attempts to restart only its previously authenticated Windows Tailscale relay. Added focused regression coverage; live Windows functionality must be separately verified.

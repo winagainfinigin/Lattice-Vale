@@ -1,5 +1,12 @@
 # LatticeVale 14.6.7 Resource Scheduler v14 (Canonical Schema v13; 14.6.6 lineage)
 
+## 14.6.8 second recurrence: replacement CPU quota, not just memory (2026-11-16)
+
+The initial +32 MiB replacement overage was recoverable from QMD and QMD Indexer. The next Option 1 stopped at `replacement allocation exceeds permitted CPU envelope`. Comparing the earlier 100m QMD Indexer reading with its now-canonical 150m ceiling, and the independently logged 1400m Ollama allocation (canonical 1350m), points to a 50m restored CPU donation. If the other quotas remained at their recorded values, this yields 3650m against the 3600m CPU budget; the exact live total was not printed in the failed installer log. The previous patch had **no CPU-rebind planner**, so it could not handle that class of CPU overage even when the memory recovery had a safe donor plan. This hotfix returns exactly the authenticated 50m replacement CPU donation and, when necessary, bounded priority-floor CPU from unchanged managed donors; it never silently adopts unrelated CPU drift.
+
+Both CPU and memory reductions use one durable pending journal, a strict managed-project/ID/Compose baseline gate, ordered Docker updates, verification after each change, and complete rollback or interruption resume. Missing cgroup charge or unsafe memory headroom still stops RAM reductions. A verified *fresh* DirectML idle loan remains optionally admissible by the pre-existing resource policy; a stale/unverified reserve is never silently borrowed.
+
+
 ## 14.6.8 repair hotfix: bounded recovery when replacement donors restore 32 MiB (2026-11-16)
 
 A live Ubuntu-D repair exposed 12 healthy containers with a valid 10,512-MiB saved snapshot but 10,544 MiB in live Docker ceilings. Two recreated QMD services (`qmd` and `qmd-indexer`) each restored 16 MiB that they had previously donated. The earlier budget-recovery algorithm **excluded all replaced containers from donors**, even when their exact saved allocation and current cgroup headroom proved they could safely return their own restored capacity. Option 1 therefore stopped with `no verified donor has 32 MiB of safe reclaimable cgroup headroom` despite 32 MiB being safely recoverable.

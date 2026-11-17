@@ -1,5 +1,12 @@
 # LatticeVale 14.6.7 Troubleshooting
 
+## 14.6.8 second recurrence: CPU envelope or invalid Windows relay JSON
+
+If Option 1 already starts 12/12 managed containers but reports `replacement allocation exceeds permitted CPU envelope`, inspect the read-only resource snapshot for a new container ID at canonical CPU after an earlier verified quota donation. A reported 3650m/3600m CPU overage may arise independently of the 32 MiB memory overage; never infer the memory hotfix itself has failed. The corrected controller reclaims only CPU capacity established by verified ownership, policy, original lease, service floor and Docker identity. No WSL reset or arbitrary CPU-cap override is appropriate.
+
+If Linux repair fails and the rollback prints `Invalid JSON primitive: .`, it could not parse its own prior Windows relay config. The corrective fallback preserves malformed JSON as `.invalid-*.bak`, regenerates only a previously exact-owned relay from persisted selected ports, and validates real loopback forwarding. If the task/config does not match installer ownership, LatticeVale fails closed; inspect its relay log rather than disabling Tailscale security. On a healthy relay, Option 1 should leave it running throughout Linux repair to avoid an unnecessary 502 outage.
+
+
 ## 14.6.8: Option 1 fails with memory envelope error and remote Matrix/Dashboard show 502
 
 Distinguish the Linux resource failure from the remote transport failure. On the observed machine, all 12 Docker containers were running, Windows direct Dashboard/Matrix returned HTTP 200, bridge ports 19119/18008 refused connections, and the Tailscale HTTPS endpoints returned 502. The failed installer had stopped its previously owned relay before Linux resource reconciliation. This hotfix attempts to restore a verified pre-existing relay on installer failure; it does **not** change any user's Tailscale ACLs, Windows native Ollama, WSL distro, or Matrix identity.

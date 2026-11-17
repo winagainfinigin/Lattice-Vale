@@ -360,8 +360,50 @@ assert 'Disable-WindowsTailscaleServe' not in recovery
 main=ps[ps.index('$script:BridgeRestoreOnFailedRepair = $null'): ]
 assert main.index('try {') < main.index('[void](Prepare-LatticeValeBridgePortsForReconcile')
 assert main.rfind('} catch {') > main.index('Invoke-LatticeValeWslInteractiveGuarded $DistroName')
-assert '[void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName)' in main
+assert '[void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName $script:BridgeRestoreSpec)' in main
 assert main.rstrip().endswith('throw\n}'.replace('\\n','\n'))
 assert 'Installation cancelled; managed Linux stack files were not changed.' in main
-assert main.count('Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName') >= 2
+assert main.count('Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName $script:BridgeRestoreSpec') >= 2
 print('FAILED REPAIR PRESERVES PREVIOUS AUTHENTICATED WINDOWS RELAY: PASS')
+
+# Nov 16 second failed repair: exact-owned relay existed, but its saved JSON
+# would not parse ('Invalid JSON primitive: .'). Once validated Linux repair
+# fails, rollback must not rely on being able to parse malformed installer
+# state. Recovery is allowed to reconstruct only for a preexisting OWNED task,
+# using bounded persisted ports and a valid source-controlled relay script;
+# the malformed file is preserved and neither Serve nor ACLs is modified.
+assert 'Get-WslNetworkingMode $DistroName' in main
+assert '$script:BridgeRestoreSpec = [pscustomobject]@{' in main
+assert 'ConvertFrom-Json -ErrorAction Stop' in recovery
+assert '$null -eq $FallbackSpec' in recovery
+assert 'Copy-Item -LiteralPath $Paths.Config -Destination $savedCorrupt' in recovery
+assert 'Write-LatticeValeBridgeConfig $Name $dashboard $db $dp $matrix $mb $mp' in recovery
+assert 'Test-LatticeValeBridgeTaskOwned $Paths' in recovery
+assert 'if ([int]$config.schema -ne 5' in recovery
+assert '($dashboard -and $matrix -and $dp -eq $mp)' in recovery
+assert 'Enable-WindowsTailscaleServe' not in recovery
+assert 'Disable-WindowsTailscaleServe' not in recovery
+print('NOV16 MALFORMED PRIOR RELAY JSON FALLBACK SAFETY GUARDS: PASS')
+
+# Healthy installer-owned remote endpoints remain reachable during an
+# otherwise unrelated Linux Option 1. The read-only admission predicate
+# requires registered-task identity, JSON schema/route identity, live PID
+# cmdline ownership and a real HTTP response, before bypassing the early
+# stop/reselect of ports. Ambiguous or missing evidence retains old fail-closed
+# reconciliation. These guards do not replace live Windows task testing.
+keep=ps[ps.index('function Test-LatticeValeExistingRelaySafeToPreserve'):ps.index('function Restore-LatticeValeVerifiedBridgeAfterFailedRepair')]
+assert 'Test-LatticeValeBridgeTaskOwned $Paths' in keep
+assert "[string]$task.State -ne 'Running'" in keep
+assert "[int]$cfg.schema -ne 5" in keep
+assert "[string]$cfg.distroName -ne $Name" in keep
+assert 'Get-NetTCPConnection -State Listen -LocalPort $port' in keep
+assert 'Get-CimInstance Win32_Process -Filter "ProcessId=$listenerPid"' in keep
+assert '[string]$Paths.Script' in keep and '[string]$Paths.Config' in keep
+assert 'Test-HttpEndpointNoProxy' in keep
+assert 'return $false' in keep and 'return $true' in keep
+assert 'Stop-ScheduledTask' not in keep and 'Stop-Process' not in keep
+assert '$script:PreserveExistingRelayDuringRepair = Test-LatticeValeExistingRelaySafeToPreserve' in main
+assert 'if ($script:PreserveExistingRelayDuringRepair) {' in main
+assert 'if (-not $script:PreserveExistingRelayDuringRepair) {' in main
+assert main.index('if ($script:PreserveExistingRelayDuringRepair) {') < main.index('[void](Prepare-LatticeValeBridgePortsForReconcile')
+print('NOV16 VERIFIED ACTIVE RELAY PRESERVATION SOURCE GUARDS: PASS')

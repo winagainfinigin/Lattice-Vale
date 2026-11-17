@@ -964,3 +964,166 @@ err,updates,live,final,original=recover_audit_32(interrupted=True)
 assert err is None and live['qmd']['mem']==1024 and live['qmd-indexer']['mem']==1024
 assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
 print('NOV16 replaced-donor interruption resume: PASS')
+
+# Nov 16 post-memory-hotfix Option 1 reproduced a SECOND failure. The +32 MiB
+# was recoverable, but a QMD Indexer replacement had also reinstated 50m of
+# previously donated CPU. Ollama retained its verified 1400m burst (1350m
+# canonical). The restored 50m made the live 3650m total exceed the 3600m
+# envelope; the former controller rejected it before executing the RAM plan.
+# Validate CPU-only, combined CPU+RAM, rollback, crash-resume and no-adoption.
+AUDIT_CPU = {
+    'hermes': (1072,1072,1024),
+    'honcho-api': (400,432,384),
+    'honcho-db': (208,192,192),
+    'honcho-deriver': (272,288,256),
+    'honcho-redis': (80,80,64),
+    'ollama': (5728,5728,5632),
+    'qmd': (1040,1024,1024),
+    'qmd-indexer': (1040,1024,1024),
+    'searxng': (208,208,192),
+    'searxng-valkey': (80,80,64),
+    'synapse': (208,208,192),
+    'synapse-db': (176,176,160),
+}
+AUDIT_CPU_CANONICAL = {
+    'hermes':850,'honcho-api':150,'honcho-db':150,'honcho-deriver':150,
+    'honcho-redis':100,'ollama':1350,'qmd':150,'qmd-indexer':150,
+    'searxng':150,'searxng-valkey':100,'synapse':150,'synapse-db':150,
+}
+assert sum(AUDIT_CPU_CANONICAL.values())==3600
+
+
+def cpu_recurrence(*, memory_excess=True, fail_cpu=False, crash_cpu=False,
+                   external_cpu_drift=False, corrupt_owner=False):
+    with tempfile.TemporaryDirectory(prefix='lv-cpu-nov16-') as tmp:
+        root=Path(tmp)
+        store=root/'data/latticevale/resource-burst-state.json'
+        store.parent.mkdir(parents=True)
+        expect={k:{'name':module.PAIRS[k],'mem':v[0],
+                   'cpu':AUDIT_CPU_CANONICAL[k], 'floor':v[2]}
+                for k,v in AUDIT_CPU.items()}
+        st={'POLICY_FINGERPRINT':'live-2026-11-16','BUDGET_MIB':'10512',
+            'CPU_DOCKER_ENVELOPE_MILLI':'3600','DIRECTML_SELECTED':'false'}
+        live={k:{'id':'current-'+k,'mem':v[1],
+                 'cpu':AUDIT_CPU_CANONICAL[k],
+                 'memory_current_mib':4 if k=='qmd-indexer' else
+                   161 if k=='qmd' else 4975 if k=='ollama' else 100}
+              for k,v in AUDIT_CPU.items()}
+        # Other unchanged managed services retain the already verified leases.
+        live['ollama']['cpu']=1400
+        live['qmd-indexer']['cpu']=150
+        if memory_excess:
+            live['qmd']['mem']=1040
+            live['qmd-indexer']['mem']=1040
+        else:
+            # Two canonical replacements, but a different unchanged lease has
+            # already returned the 32 MiB, leaving only a CPU overage.
+            live['qmd']['mem']=1040
+            live['qmd-indexer']['mem']=1040
+            live['honcho-api']['mem']=400
+        saved=deepcopy(live)
+        saved['qmd']['id']='previous-qmd'
+        saved['qmd-indexer']['id']='previous-qmd-indexer'
+        saved['qmd-indexer']['cpu']=100
+        if memory_excess:
+            saved['qmd']['mem']=1024
+            saved['qmd-indexer']['mem']=1024
+        if external_cpu_drift:
+            live['ollama']['cpu']+=50  # Unchanged ID; NOT an innocent replacement.
+        if corrupt_owner:
+            saved['qmd-indexer']['id']=''  # Not a legitimate previous identity.
+        assert sum(x['cpu'] for x in saved.values())==3600
+        assert sum(x['cpu'] for x in live.values())==3650+(50 if external_cpu_drift else 0)
+        if memory_excess:
+            assert sum(x['mem'] for x in live.values())==10544
+        record={'policyFingerprint':st['POLICY_FINGERPRINT'],
+                'services':deepcopy(saved), 'pending':None,'lastSample':35}
+        store.write_text(json.dumps(record))
+        current=deepcopy(live)
+        changes=[]
+        tripped=[False]
+        def inspect(_root,_expect):
+            assert _root==root
+            if corrupt_owner:
+                raise RuntimeError('unverified Docker ownership')
+            return deepcopy(current)
+        def compose(_root,_expect):
+            return {k:{'name':v['name'], 'memory':v['mem']*module.MIB,
+                       'cpu':v['cpu']*1000000} for k,v in expect.items()}
+        def update(_root,container,metric,value):
+            k=next(k for k in expect if expect[k]['name']==container)
+            m='mem' if metric=='memory' else 'cpu'
+            val=value//(module.MIB if m=='mem' else 1000000)
+            changes.append((k,m,current[k][m],val))
+            current[k][m]=val
+            if m=='cpu' and fail_cpu and not tripped[0]:
+                tripped[0]=True
+                raise RuntimeError('simulated CPU Docker update failure after apply')
+            if m=='cpu' and crash_cpu and not tripped[0]:
+                tripped[0]=True
+                raise SystemExit('simulated interruption after CPU update')
+        error=None
+        with (patch.object(module,'load_expected',return_value=(expect,st)),
+              patch.object(module,'inspect_containers',side_effect=inspect),
+              patch.object(module,'_static_compose_limits',side_effect=compose),
+              patch.object(module,'_static_update_limit',side_effect=update)):
+            try:
+                module.reconcile_static_limits(root)
+            except (RuntimeError,SystemExit) as exc:
+                error=str(exc)
+            if crash_cpu and not external_cpu_drift:
+                assert error and 'interruption' in error
+                assert json.loads(store.read_text())['pending'] is not None
+                assert module.reconcile_static_limits(root)==0
+                error=None
+            if error is None:
+                assert module.verify_snapshot(root)
+                assert module.reconcile_static_limits(root)==0
+        return error,changes,current,json.loads(store.read_text()),record
+
+err,ops,cur,final,original=cpu_recurrence()
+assert err is None,err
+assert ops==[('qmd','mem',1040,1024),('qmd-indexer','mem',1040,1024),
+             ('qmd-indexer','cpu',150,100)],ops
+assert sum(c['mem'] for c in cur.values())==10512
+assert sum(c['cpu'] for c in cur.values())==3600
+assert cur['ollama']['cpu']==1400 and cur['ollama']['mem']==5728
+assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
+print('NOV16 COMBINED +32 MiB/+50m CPU replaced QMD recovery: PASS')
+
+err,ops,cur,final,original=cpu_recurrence(memory_excess=False)
+assert err is None and ops==[('qmd-indexer','cpu',150,100)],(err,ops)
+print('NOV16 +50m CPU-only replacement recovery: PASS')
+
+err,ops,cur,final,original=cpu_recurrence(fail_cpu=True)
+assert err and 'simulated CPU Docker update failure' in err
+assert cur['qmd']['mem']==1040 and cur['qmd-indexer']['mem']==1040
+assert cur['qmd-indexer']['cpu']==150 and final==original
+print('NOV16 CPU failure after apply rolls back both CPU and memory: PASS')
+
+err,ops,cur,final,original=cpu_recurrence(crash_cpu=True)
+assert err is None and cur['qmd-indexer']['cpu']==100
+assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
+print('NOV16 interrupted combined CPU/RAM journal resumes: PASS')
+
+err,ops,cur,final,original=cpu_recurrence(external_cpu_drift=True)
+assert err and 'unexplained resource drift' in err and not ops and final==original
+print('NOV16 independent unchanged-container CPU drift rejected: PASS')
+
+err,ops,cur,final,original=cpu_recurrence(corrupt_owner=True)
+assert err and 'ownership' in err and not ops and final==original
+print('NOV16 unverified owner rejected: PASS')
+
+# Preserve the previously permitted DirectML idle CPU loan, but only while
+# its independently verified telemetry is fresh; never use a stale reserve.
+now=time.time()
+directml_state={'CPU_DOCKER_ENVELOPE_MILLI':'2800',
+                'DIRECTML_SELECTED':'true','CPU_DIRECTML_RESERVE_MILLI':'900',
+                'CPUS':'4'}
+assert module._replacement_cpu_envelope(directml_state,
+    {'lastSample':now,'directmlCpuTelemetry':{'busy':False}})==3100
+assert module._replacement_cpu_envelope(directml_state,
+    {'lastSample':now-180,'directmlCpuTelemetry':{'busy':False}})==2800
+assert module._replacement_cpu_envelope(directml_state,
+    {'lastSample':now,'directmlCpuTelemetry':{'busy':True}})==2800
+print('VERIFIED DIRECTML IDLE CPU RESERVE COMPATIBILITY: PASS')

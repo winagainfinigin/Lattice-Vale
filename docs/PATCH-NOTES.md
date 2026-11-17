@@ -84,6 +84,13 @@ Live Windows/WSL/Docker end-to-end qualification remains required.
 
 # Current v14.6.8 patch notes
 
+## 14.6.8 second recurrence correction: CPU rebind and malformed relay JSON (2026-11-16)
+
+- A further Option 1 audit proved the 32-MiB memory recovery was no longer the blocking error: the next failure was `replacement allocation exceeds permitted CPU envelope`. Canonical recreation restores previously donated **CPU as well as RAM**; the previous fix handled RAM only. QMD Indexer can return its verified 50m CPU donation to the 3600m envelope while preserving Ollama's verified 1400m active quota. CPU+RAM changes now share one durable pending journal, per-metric identity checks and rollback. The canonical Compose/ownership, per-service floors, user overrides and memory cgroup safety checks are unchanged.
+- A failed-repair Windows relay recovery produced `Invalid JSON primitive: .` when reading its previous installer-owned JSON. The fallback now accepts only a pre-existing exact-owned task, retains the malformed file as a timestamped backup, rebuilds the **installer-owned** config from validated persisted ports and the bundled relay script, then tests the live local bridges. It never changes Tailscale ACLs or Serve ownership.
+- Option 1 keeps an already-running, exactly owned, correctly configured and demonstrably listening Windows relay alive during Linux repair; an ambiguous or foreign listener does not qualify and falls back to the original safe port-reconciliation logic.
+- Added 12-container combined +32-MiB/+50m, CPU-only, failing Docker update, interrupted transaction and independent-drift cases to the existing fixture; no schema or fixture-count change. Mock tests do not replace Windows/WSL end-to-end verification.
+
 ## 14.6.8 same-version recurrence hotfix: resource rebind and relay failure recovery (2026-11-16)
 
 - Fixed the repeated 32-MiB replacement-budget failure by permitting canonical QMD replacements to return **at most their own verified previous donation**; all cgroup safety margins, locks, journals, rollbacks and service floors remain enforced.

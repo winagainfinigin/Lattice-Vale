@@ -1,5 +1,12 @@
 # LatticeVale 14.6.7 Resume / Repair
 
+## 14.6.8 CPU/RAM repair and early relay preservation (2026-11-16)
+
+An already-running authenticated Windows relay is now preserved through Linux repair if LatticeVale can prove the task action, current listener process command line and live HTTP responses refer to exactly its selected Dashboard/Matrix bridge ports. If any check fails, the former conservative stop/reselect path applies; a foreign process is never killed. An unsuccessful repair still invokes the bounded existing-task recovery path. If its previous JSON is malformed (observed `Invalid JSON primitive: .`), that path can rebuild *only* its own selected relay configuration from persisted options, preserving the bad file and reporting whether the actual bridges work.
+
+The previously recurrent 32-MiB memory-envelope problem could be followed by a second, separate `replacement allocation exceeds permitted CPU envelope` failure. Authenticated canonical container replacements now reconcile returned 16-MiB memory and 50m CPU donations under a single identity-verified journal. Memory reductions retain cgroup safeguards; CPU reductions retain configured donor floors. Failed or interrupted changes are rolled back or resumed only with verified live limits. These are source-level guarantees; require a successful Option 1, live service checks and second-run idempotence before treating a particular deployment as repaired.
+
+
 ## 14.6.8 targeted repair failure recovery (2026-11-16)
 
 A failed Option 1 previously could leave both remote endpoints at HTTP 502: the installer stopped an already-owned Windows Tailscale relay during early bridge-port reconciliation, then the Linux Docker resource-controller stage failed before Windows relay registration/start. Local Dashboard and Matrix remained healthy (HTTP 200); the Windows relay ports refused connections. On any terminating installer error after bridge reconciliation begins, the installer now attempts to restart **only the pre-existing, independently verified installer-owned scheduled relay**, validating its task action, script/config safety, distro name, enabled ports, and localhost HTTP forwarding. Failure to restore emits a warning while preserving the original installer failure. It never rewrites Tailscale ACLs or Serve mappings, and never starts a foreign task. The relay can remain temporarily unavailable during a long repair; this change restores it on a failed repair rather than guaranteeing uninterrupted access.
