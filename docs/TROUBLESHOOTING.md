@@ -1,5 +1,12 @@
 # LatticeVale 14.6.7 Troubleshooting
 
+## 14.6.8: Option 1 fails with memory envelope error and remote Matrix/Dashboard show 502
+
+Distinguish the Linux resource failure from the remote transport failure. On the observed machine, all 12 Docker containers were running, Windows direct Dashboard/Matrix returned HTTP 200, bridge ports 19119/18008 refused connections, and the Tailscale HTTPS endpoints returned 502. The failed installer had stopped its previously owned relay before Linux resource reconciliation. This hotfix attempts to restore a verified pre-existing relay on installer failure; it does **not** change any user's Tailscale ACLs, Windows native Ollama, WSL distro, or Matrix identity.
+
+For `replacement allocation exceeds canonical memory envelope by 32 MiB`, inspect the read-only controller snapshot and live container IDs. Previously recreated QMD and QMD Indexer restored 16 MiB each, leaving the live allocation 32 MiB above budget. The corrected controller first considers safe returned donations from authenticated replacements, with all existing cgroup margins/floors and crash journal protections. If current usage no longer has safe headroom, repair still stops and reports why; do not force a memory reduction or interpret a 502 as proof that Synapse itself failed.
+
+
 > **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
 
 

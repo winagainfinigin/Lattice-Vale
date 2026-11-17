@@ -344,3 +344,24 @@ print('TAILSCALE SELECTIVE MULTIPATH POLICY MATRIX: PASS (12 cases)')
 # user-managed paths share the listener; disabling still requires exclusivity.
 assert '($portState.MatchesExpected -or $portState.MatchesExpectedAllRoutes -or $portState.MatchesExpectedRoot)' in ps
 assert 'if (-not $state.MatchesExpected)' in multipath
+
+# A failing Linux Option 1 must not permanently disconnect a previously
+# installer-owned Tailscale Serve -> Windows relay route. The recovery is
+# scoped to verified script+config task ownership and does not rewrite Serve.
+recovery=ps[ps.index('function Restore-LatticeValeVerifiedBridgeAfterFailedRepair'):ps.index('function Prepare-LatticeValeBridgePortsForReconcile')]
+assert 'Test-LatticeValeBridgeTaskOwned $Paths' in recovery
+assert 'Get-Item -LiteralPath $path -Force' in recovery
+assert 'ReparsePoint' in recovery
+assert '[string]$config.distroName -ne $Name' in recovery
+assert 'Start-ScheduledTask -TaskName $Paths.TaskName' in recovery
+assert 'Test-HttpEndpointNoProxy' in recovery
+assert 'Enable-WindowsTailscaleServe' not in recovery
+assert 'Disable-WindowsTailscaleServe' not in recovery
+main=ps[ps.index('$script:BridgeRestoreOnFailedRepair = $null'): ]
+assert main.index('try {') < main.index('[void](Prepare-LatticeValeBridgePortsForReconcile')
+assert main.rfind('} catch {') > main.index('Invoke-LatticeValeWslInteractiveGuarded $DistroName')
+assert '[void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName)' in main
+assert main.rstrip().endswith('throw\n}'.replace('\\n','\n'))
+assert 'Installation cancelled; managed Linux stack files were not changed.' in main
+assert main.count('Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName') >= 2
+print('FAILED REPAIR PRESERVES PREVIOUS AUTHENTICATED WINDOWS RELAY: PASS')

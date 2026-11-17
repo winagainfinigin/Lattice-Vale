@@ -2,6 +2,8 @@
 
 ## 14.6.8 (test reliability, audit transparency, function index)
 
+- **2026-11-16 recurrence hotfix:** repaired safe 32-MiB container-replacement budget rebind; a failed Option 1 now attempts to restart only its previously authenticated Windows Tailscale relay. Added focused regression coverage; live Windows functionality must be separately verified.
+
 - Preserves the cumulative 14.6.7 resource-budget recovery, Docker ownership safeguards, Element/Adlice read-only signature diagnostic, and its documentation.
 - Makes the RAM-policy fixture host-independent using a test-only temporary source override; verifies both valid capacity and low-RAM rejection without changing the production admission guard.
 - Displays floating `:latest` image tags with **recorded** local registry digests in the read-only state audit; no network lookups, update decisions, credential printing, or runtime modifications.

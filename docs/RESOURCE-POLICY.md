@@ -1,5 +1,14 @@
 # LatticeVale 14.6.7 Resource Scheduler v14 (Canonical Schema v13; 14.6.6 lineage)
 
+## 14.6.8 repair hotfix: bounded recovery when replacement donors restore 32 MiB (2026-11-16)
+
+A live Ubuntu-D repair exposed 12 healthy containers with a valid 10,512-MiB saved snapshot but 10,544 MiB in live Docker ceilings. Two recreated QMD services (`qmd` and `qmd-indexer`) each restored 16 MiB that they had previously donated. The earlier budget-recovery algorithm **excluded all replaced containers from donors**, even when their exact saved allocation and current cgroup headroom proved they could safely return their own restored capacity. Option 1 therefore stopped with `no verified donor has 32 MiB of safe reclaimable cgroup headroom` despite 32 MiB being safely recoverable.
+
+This hotfix allows an authenticated replacement to return **only the capacity above its own previously verified saved allocation**, never less. The existing checks remain mandatory: canonical Compose identity/limits and project labels, matching policy fingerprint, original snapshot within budget, fixed 12-service topology, no unexplained drift, service floor, 20% cgroup charge headroom plus 64 MiB, 16-MiB increments, CPU/RAM envelope, lock, journal, rollback, and re-inspection after adjustment. Unchanged-container donors remain a fallback. Memory telemetry that is missing or insufficient still causes a safe refusal: no hotfix can promise recovery under unsafe conditions.
+
+The regression reproduces the exact 32-MiB live allocation, verifies QMD and its indexer each return 16 MiB without touching Ollama, and tests unavailable telemetry, Docker-update failure/rollback, and interrupted recovery. These are mocked source-level tests; Windows/WSL functional verification is still required.
+
+
 ## 14.6.7 same-version verified replacement-budget recovery (2026-11-13)
 
 When a Compose-managed container is recreated, Docker can restore its canonical hard memory limit even though other containers retain **legitimate bounded-burst leases**. In the observed 12-container case, `honcho-db` returned from 192 to 208 MiB and pushed the total live ceiling from the valid 10,512-MiB snapshot to 10,528 MiB, exceeding the 10,512-MiB canonical envelope by 16 MiB. New IDs for `synapse-db` and `searxng` were also observed; those containers were at their canonical limits. Static quota differences alone are not necessarily drift.

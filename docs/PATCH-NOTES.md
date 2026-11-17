@@ -84,6 +84,14 @@ Live Windows/WSL/Docker end-to-end qualification remains required.
 
 # Current v14.6.8 patch notes
 
+## 14.6.8 same-version recurrence hotfix: resource rebind and relay failure recovery (2026-11-16)
+
+- Fixed the repeated 32-MiB replacement-budget failure by permitting canonical QMD replacements to return **at most their own verified previous donation**; all cgroup safety margins, locks, journals, rollbacks and service floors remain enforced.
+- Added a verified-ownership-only Windows relay restoration attempt when any terminating repair error occurs after early port reconciliation. Keeps the original failure visible; does not remove or reset Tailscale Serve or touch unowned tasks.
+- Added source-level regression cases for exact 12-service/32-MiB allocations, missing telemetry, rollback and crash recovery, and recovery path checks in the existing Tailscale fixture.
+- Live Windows/WSL execution and CI remain separately required; the initial cause of the containers being stopped before repair was not established.
+
+
 ## v14.6.6 Hermes shared-gateway parked-profile compatibility (also affects 14.6.5 upgrades)
 
 Hermes `hermes -p NAME gateway stop` writes a persistent `gateway.parked` marker. During fresh and resume setup, LatticeVale now tracks its own temporary stop operations for **every managed profile** and removes only those installer-owned markers before shared-gateway convergence. On existing 14.6.5/14.6.6 installations, parked managed non-standalone profiles without an ownership receipt are listed and require a one-time interactive approval; a user-origin park cannot safely be distinguished retrospectively. Explicit standalone and unrelated profiles are preserved. The shared gateway must still report the complete expected served-profile roster; the verifier has not been weakened. Normal startup does not silently unpark ambiguous historical state. This is an overwrite patch for 14.6.6 source bundles, not a version upgrade; the same failure can originate in 14.6.5 state.

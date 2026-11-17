@@ -681,22 +681,28 @@ def _replacement_budget_plan(expected, state, actual, saved, replacements):
     # whole controller memory quanta to avoid fractional/hard-limit drift.
     choices = []
     for name, cfg in expected.items():
-        if name in replacements:
-            continue
         charge = actual[name].get('memory_current_mib')
         if type(charge) is not int or charge < 0:
             continue
         safe_floor = max(cfg['floor'], math.ceil(charge * 1.20) + 64)
         available = max(0, (actual[name]['mem'] - safe_floor) // MEM_QUANTUM_MIB * MEM_QUANTUM_MIB)
+        if name in replacements:
+            # Compose recreated this verified managed container at its canonical
+            # ceiling. It may safely return capacity it had donated previously,
+            # but must never be reduced below its saved, verified lease.
+            previously_donated = actual[name]['mem'] - saved[name]['mem']
+            available = min(available, max(0, previously_donated))
         if available:
-            choices.append((available, name))
-    choices.sort(key=lambda row: (-row[0], row[1]))
+            # Recover the newly restored donation before touching an unchanged
+            # service. The original saved allocations already fit the budget.
+            choices.append((0 if name in replacements else 1, -available, name))
+    choices.sort()
     # Do not silently over-recover or under-recover. Runtime quotas are
     # integral MiB, but the controller borrows in 16-MiB increments.
     needed = math.ceil(excess / MEM_QUANTUM_MIB) * MEM_QUANTUM_MIB
     target = {k: {'mem': actual[k]['mem'], 'cpu': actual[k]['cpu']} for k in expected}
-    for available, name in choices:
-        amount = min(available, needed)
+    for _, negative_available, name in choices:
+        amount = min(-negative_available, needed)
         target[name]['mem'] -= amount
         needed -= amount
         if needed == 0:
@@ -738,8 +744,8 @@ def _finish_replacement_budget_recovery(root, expected, state, actual, record):
             goal['mem'] < cfg['floor'] or goal['cpu'] < 50 or goal['mem'] > prev['mem']):
             raise RuntimeError(f'{name}: live identity/resource drift during recovery')
         if goal['mem'] < prev['mem']:
-            if name in old_ids:
-                raise RuntimeError('replaced container cannot be used as a recovery donor')
+            if name in old_ids and goal['mem'] < old_ids[name]['mem']:
+                raise RuntimeError('replacement recovery would exceed its previously donated capacity')
             donors.append(name)
     if not donors or sum(target[k]['mem'] for k in expected) > int(state['BUDGET_MIB']):
         raise RuntimeError('recovery journal violates canonical memory envelope')
@@ -813,7 +819,10 @@ def _finish_replacement_budget_recovery(root, expected, state, actual, record):
             for name, old in old_ids.items():
                 record['services'][name] = old
             for name in donors:
-                record['services'][name]['mem'] = old_limits[name]
+                # Replaced donors must keep their OLD saved allocation/identity
+                # after rollback, so the next retry can authenticate them again.
+                if name not in old_ids:
+                    record['services'][name]['mem'] = old_limits[name]
             record['pending'] = None
             record.pop('rebindBudgetRecovery', None)
             write_json(root / 'data/latticevale/resource-burst-state.json', record)
@@ -960,7 +969,10 @@ def run_once(root, restore=False):
             # --restore intentionally has different, canonical-reset semantics.
             replacements = reconcile_verified_replacements(root, expected, state, actual)
             if replacements:
-                print('Rebound canonical replacement(s) without changing live resources: ' + ', '.join(replacements))
+                # Recovery may have reduced verified container memory limits.
+                # Never pass an outdated pre-recovery inspection to safe_state.
+                actual = inspect_containers(root, expected)
+                print('Rebound canonical replacement(s): ' + ', '.join(replacements))
         snapshot = safe_state(root, expected, state, actual)
         if snapshot.pop('_requires_restore', False):
             safe_baseline = {k: {'mem': expected[k]['mem'], 'cpu': expected[k]['cpu']} for k in expected}

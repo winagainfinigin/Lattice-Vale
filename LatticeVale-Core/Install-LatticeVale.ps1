@@ -5716,6 +5716,63 @@ function Stop-LatticeValeOwnedBridgeProcesses([object]$Paths) {
     return $stopped
 }
 
+function Restore-LatticeValeVerifiedBridgeAfterFailedRepair([object]$Paths, [string]$Name) {
+    # The installer stops its owned relay during port reconciliation. If the
+    # Linux repair then fails, restore the *existing* Windows bridge instead of
+    # leaving healthy Matrix/Dashboard backends hidden behind HTTPS 502 errors.
+    # Never adopt a foreign task, overwrite the relay config, or alter Serve.
+    if ($null -eq $Paths -or -not (Test-LatticeValeBridgeTaskOwned $Paths)) {
+        Write-Warning 'Repair failed: an existing LatticeVale relay task could not be independently authenticated; no task was started.'
+        return $false
+    }
+    foreach ($path in @($Paths.Script, $Paths.Config)) {
+        $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+        if ($null -eq $item -or $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            Write-Warning 'Repair failed: the previous relay script/config is missing or unsafe; leaving the Windows task untouched.'
+            return $false
+        }
+    }
+    try {
+        $config = Get-Content -LiteralPath $Paths.Config -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        if ([string]$config.distroName -ne $Name) { throw 'Existing relay belongs to a different WSL distro.' }
+        $services = @($config.services | Where-Object { $_.enabled -eq $true })
+        if ($services.Count -lt 1 -or $services.Count -gt 2) { throw 'No bounded, enabled relay service list.' }
+        $ports = @{}
+        foreach ($service in $services) {
+            $port = [int]$service.bridgePort
+            if ([string]$service.label -notin @('Dashboard','Matrix') -or $port -lt 1024 -or
+                $port -gt 65535 -or $ports.ContainsKey($port)) { throw 'Invalid saved relay service or bridge port.' }
+            $ports[$port] = $true
+        }
+        $task = Get-ScheduledTask -TaskName $Paths.TaskName -ErrorAction Stop
+        if ([string]$task.State -ne 'Running') {
+            Start-ScheduledTask -TaskName $Paths.TaskName -ErrorAction Stop
+        }
+        $deadline = [DateTime]::UtcNow.AddSeconds(30)
+        do {
+            $allReady = $true
+            foreach ($service in $services) {
+                $port = [int]$service.bridgePort
+                $probePath = [string]$service.probePath
+                if ([string]::IsNullOrWhiteSpace($probePath)) { $probePath = '/' }
+                if (-not (Test-HttpEndpointNoProxy "http://127.0.0.1:$port$probePath" 2)) {
+                    $allReady = $false
+                    break
+                }
+            }
+            if ($allReady) {
+                Write-Host 'Failed repair: restored and verified the previously owned Matrix/Dashboard Windows relay.' -ForegroundColor Green
+                return $true
+            }
+            Start-Sleep -Seconds 2
+        } while ([DateTime]::UtcNow -lt $deadline)
+        Write-Warning 'The previous installer-owned relay task was started after failed repair, but live HTTP forwarding did not verify. Inspect its log; Linux repair failure is unchanged.'
+    } catch {
+        Write-Warning "Could not restore the previously owned Windows relay after failed repair: $($_.Exception.Message)"
+    }
+    return $false
+}
+
 function Prepare-LatticeValeBridgePortsForReconcile([string]$Name, [int[]]$Ports = @()) {
     # Stop the CURRENT installer-owned relay before choosing bridge ports. Older
     # releases selected ports first, so their own still-running listener could make
@@ -8797,6 +8854,16 @@ if ($null -ne $existingOptions) {
 # topology (upstream issue #9228). Selected remote services therefore receive an
 # installer-owned Windows loopback TCP relay. In mirrored mode that relay targets WSL
 # through Windows localhost; NAT/compatibility mode targets the current reachable WSL IPv4.
+$script:BridgeRestoreOnFailedRepair = $null
+if ($tailscaleDashboard -or $tailscaleMatrix) {
+    # Capture only a relay task that ALREADY belonged to this installation.
+    # Never start a newly created or foreign task as a failure rollback.
+    $previousBridge = Get-LatticeValeBridgePaths $DistroName
+    if (Test-LatticeValeBridgeTaskOwned $previousBridge) {
+        $script:BridgeRestoreOnFailedRepair = $previousBridge
+    }
+}
+try {
 if ($tailscaleDashboard -or $tailscaleMatrix) {
     Remove-LegacyV14BridgeSupport $DistroName
     Remove-LegacyHermesManualRelay $DistroName
@@ -9009,8 +9076,11 @@ if ($kanban) {
     Write-Info 'Kanban policy: substantive user requests enter triage; valid existing routing profiles are preserved, stale routing names are repaired from the discovered Hermes profile roster, and worker lifecycle tools require an actual claimed task context.'
 }
 Write-Info 'Skill-management policy: managed Hermes profiles receive validated skill-authoring/recovery guidance. Clean installs default automatic agent skill writes on; repair/update preserves an explicit existing skill write-approval choice.'
-if (-not (Read-ChoiceExplicit 'Proceed with installation?' 'Confirms the selected existing Ubuntu distro, its verified storage partition, and component choices before packages or stack files are changed.' 'No changes are made; the installer exits.' $true)) {
-    Write-Host 'No changes were made.'
+if (-not (Read-ChoiceExplicit 'Proceed with installation?' 'Confirms the selected existing Ubuntu distro, its verified storage partition, and component choices before stack files are changed.' 'Cancel and restore an authenticated pre-existing Windows relay, if it was paused for port selection.' $true)) {
+    if ($null -ne $script:BridgeRestoreOnFailedRepair) {
+        [void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName)
+    }
+    Write-Host 'Installation cancelled; managed Linux stack files were not changed.'
     exit 0
 }
 
@@ -9882,4 +9952,10 @@ if ($obsidian) {
     Write-Host "Obsidian vault (Windows): $obsidianVaultWindowsPath"
     Write-Host "Hermes/QMD vault source (WSL): $obsidianVaultWslPath"
     Write-Host 'Open that Windows folder as the vault in the Obsidian app. Do not open the \\wsl.localhost stack path as a Windows Obsidian vault.'
+}
+} catch {
+    if ($null -ne $script:BridgeRestoreOnFailedRepair) {
+        [void](Restore-LatticeValeVerifiedBridgeAfterFailedRepair $script:BridgeRestoreOnFailedRepair $DistroName)
+    }
+    throw
 }

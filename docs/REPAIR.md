@@ -1,5 +1,12 @@
 # LatticeVale 14.6.7 Resume / Repair
 
+## 14.6.8 targeted repair failure recovery (2026-11-16)
+
+A failed Option 1 previously could leave both remote endpoints at HTTP 502: the installer stopped an already-owned Windows Tailscale relay during early bridge-port reconciliation, then the Linux Docker resource-controller stage failed before Windows relay registration/start. Local Dashboard and Matrix remained healthy (HTTP 200); the Windows relay ports refused connections. On any terminating installer error after bridge reconciliation begins, the installer now attempts to restart **only the pre-existing, independently verified installer-owned scheduled relay**, validating its task action, script/config safety, distro name, enabled ports, and localhost HTTP forwarding. Failure to restore emits a warning while preserving the original installer failure. It never rewrites Tailscale ACLs or Serve mappings, and never starts a foreign task. The relay can remain temporarily unavailable during a long repair; this change restores it on a failed repair rather than guaranteeing uninterrupted access.
+
+Resource rebind now permits independently verified replacement QMD containers to return only their own previously donated 16-MiB increments to make the aggregate envelope valid again. If no safe donor exists, Option 1 still fails closed and preserves live limits. Do not reset WSL, delete containers, or reduce model memory to circumvent that safety gate. Actual Windows task and end-to-end remote-device testing is required before declaring a local repair successful.
+
+
 ## 14.6.7 verified bounded-lease recovery (2026-11-13)
 
 For an existing managed stack, use **Option 1 — Resume / repair** from a verified complete 14.6.7 source tree, accept the offered backup, and preserve managed identities, models and volumes. The same-version correction handles a verified Compose replacement that restores its original memory limit while unchanged containers still hold legitimate dynamic leases. It requires matching ownership, canonical limits, policy fingerprints and a non-pending trusted snapshot; an overage caused by the replacement may be reclaimed from measured safe donors under the controller lock with a pending recovery journal and guarded rollback. A real invalid snapshot, missing charge telemetry, insufficient donor headroom, noncanonical replacement, or unexplained drift remains a hard failure rather than a reason to force memory limits downward.

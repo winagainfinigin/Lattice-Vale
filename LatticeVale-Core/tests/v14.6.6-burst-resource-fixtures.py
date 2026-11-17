@@ -859,3 +859,108 @@ assert err is None and live['hermes']['mem']==1056
 assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
 print('BUDGET REPAIR: durable journal / interruption recovery PASS')
 print('V14.6.7 REPLACEMENT MEMORY ENVELOPE RECOVERY FIXTURES: PASS')
+
+# Nov 16 live WSL audit: +32 MiB and two newly canonical QMD containers.
+# Previously the plan excluded EVERY replacement from donation even when it
+# could safely return only its own restored 16-MiB allocation. That stranded
+# two genuinely safe 16-MiB donors and made the installer leave the relay down.
+AUDIT_32 = {
+    'hermes': (1072,1072,1072,960,1024),
+    'honcho-api': (400,432,432,386,384),
+    'honcho-db': (208,192,192,97,192),
+    'honcho-deriver': (272,288,288,255,256),
+    'honcho-redis': (80,80,80,57,64),
+    'ollama': (5728,5728,5728,4975,5632),
+    'qmd': (1040,1024,1040,161,1024),
+    'qmd-indexer': (1040,1024,1040,4,1024),
+    'searxng': (208,208,208,142,192),
+    'searxng-valkey': (80,80,80,28,64),
+    'synapse': (208,208,208,191,192),
+    'synapse-db': (176,176,176,110,160),
+}
+assert sum(v[1] for v in AUDIT_32.values()) == 10512
+assert sum(v[2] for v in AUDIT_32.values()) == 10544
+
+
+def recover_audit_32(*, unavailable_indexer=False, fail_second=False, interrupted=False):
+    with tempfile.TemporaryDirectory(prefix='lv-nov16-recurrence-') as tmp:
+        root = Path(tmp)
+        store = root/'data/latticevale/resource-burst-state.json'
+        store.parent.mkdir(parents=True)
+        expected = {k:{'name':mod.PAIRS[k], 'mem':v[0], 'cpu':150, 'floor':v[4]}
+                    for k,v in AUDIT_32.items()}
+        state = {'POLICY_FINGERPRINT':'nov16-2026', 'BUDGET_MIB':'10512',
+                 'CPU_DOCKER_ENVELOPE_MILLI':'3600', 'DIRECTML_SELECTED':'false'}
+        live = {k:{'id':'new-'+k, 'mem':v[2], 'cpu':150,
+                   'memory_current_mib':v[3]} for k,v in AUDIT_32.items()}
+        original = {k:{**live[k], 'mem':v[1],
+                       'id':('old-'+k if k in ('hermes','qmd','qmd-indexer','searxng') else 'new-'+k),
+                       'up':3, 'idle':2} for k,v in AUDIT_32.items()}
+        if unavailable_indexer:
+            live['qmd-indexer'].pop('memory_current_mib')
+        record = {'policyFingerprint':state['POLICY_FINGERPRINT'],
+                  'services':copy.deepcopy(original), 'pending':None}
+        store.write_text(json.dumps(record))
+        updates=[]
+        failures=[0]
+        def inspect(_root,_expected):
+            assert _root==root
+            return copy.deepcopy(live)
+        def desired(_root,_expected):
+            return {k:{'name':v['name'],'memory':v['mem']*MIB,
+                       'cpu':v['cpu']*1000000} for k,v in expected.items()}
+        def update(_root,container,metric,value):
+            assert metric=='memory'
+            name=next(k for k in expected if expected[k]['name']==container)
+            updates.append((name,live[name]['mem'],value//MIB))
+            live[name]['mem']=value//MIB
+            if fail_second and name=='qmd-indexer' and failures[0] == 0:
+                failures[0] += 1
+                raise RuntimeError('injected update failure')
+            if interrupted and name=='qmd':
+                raise SystemExit('injected interruption')
+        error=None
+        with (patch.object(mod,'load_expected',return_value=(expected,state)),
+              patch.object(mod,'inspect_containers',side_effect=inspect),
+              patch.object(mod,'_static_compose_limits',side_effect=desired),
+              patch.object(mod,'_static_update_limit',side_effect=update)):
+            try:
+                mod.reconcile_static_limits(root)
+            except (RuntimeError,SystemExit) as exc:
+                error=str(exc)
+            if interrupted:
+                assert 'interruption' in error
+                assert json.loads(store.read_text())['pending'] is not None
+                # After interruption a second run completes the durable journal.
+                with patch.object(mod,'_static_update_limit',side_effect=lambda _r,c,m,v: live[next(k for k in expected if expected[k]['name']==c)].update(mem=v//MIB)):
+                    assert mod.reconcile_static_limits(root)==0
+                error=None
+            if error is None:
+                assert mod.verify_snapshot(root)
+        return error,updates,live,json.loads(store.read_text()),record
+
+err,updates,live,final,original=recover_audit_32()
+assert err is None,err
+assert updates==[('qmd',1040,1024),('qmd-indexer',1040,1024)],updates
+assert sum(item['mem'] for item in live.values())==10512
+assert live['ollama']['mem']==5728
+assert final['services']['qmd']['id']=='new-qmd'
+assert final['services']['qmd-indexer']['id']=='new-qmd-indexer'
+assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
+print('NOV16 +32MiB two-replaced-donor non-disruptive recovery: PASS')
+
+err,updates,live,final,original=recover_audit_32(unavailable_indexer=True)
+assert err and 'memory envelope' in err and not updates
+assert final==original
+print('NOV16 missing donor telemetry fails closed: PASS')
+
+err,updates,live,final,original=recover_audit_32(fail_second=True)
+assert err and 'injected update failure' in err
+assert live['qmd']['mem']==1040 and live['qmd-indexer']['mem']==1040
+assert final==original
+print('NOV16 replacement-donor rollback restores old IDs/leases: PASS')
+
+err,updates,live,final,original=recover_audit_32(interrupted=True)
+assert err is None and live['qmd']['mem']==1024 and live['qmd-indexer']['mem']==1024
+assert final['pending'] is None and final.get('rebindBudgetRecovery') is None
+print('NOV16 replaced-donor interruption resume: PASS')
