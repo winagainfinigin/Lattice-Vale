@@ -1526,21 +1526,31 @@ PY_NATIVE_UNLOAD
 }
 
 managed_ollama_processor_class() {
-  # Load the selected model once, then use Ollama's own PROCESSOR report as the
-  # runtime truth.  Device discovery alone is not accepted as proof of GPU offload.
-  # Output: gpu, cpu, or unknown.  Any CPU/GPU split counts as GPU-backed because
-  # the resource policy only needs proof that an accelerator is actually in use.
+  # The canonical DirectML coexistence policy sets OLLAMA_KEEP_ALIVE=0s.  That
+  # unloads a CLI-run model before a subsequent `ollama ps` can inspect it.
+  # Override keep-alive for this one verification request, not for the server.
+  # GPU/CPU classification is bound to the exact requested model; another
+  # resident model must never supply proof of this model's GPU offload.
   local model="$1" ps_output processor_line result=unknown
   managed_ollama_enabled || { printf 'unknown\n'; return 0; }
-  if ! timeout --foreground --kill-after=15s 240s docker compose exec -T ollama ollama run "$model" 'Reply with OK only.' >/dev/null 2>&1; then
+  if ! timeout --foreground --kill-after=15s 240s docker compose exec -T ollama ollama run "$model" --keepalive 60s 'Reply with OK only.' >/dev/null; then
+    echo "Managed Ollama model inference failed for '$model' (check the error above, model load, container health, and memory limits)." >&2
     printf 'unknown\n'
     return 0
   fi
-  ps_output="$(timeout --foreground --kill-after=5s 30s docker compose exec -T ollama ollama ps 2>/dev/null || true)"
-  processor_line="$(printf '%s\n' "$ps_output" | awk -v wanted="$model" 'NR>1 && ($1==wanted || ($1 ~ ("^" wanted ":") && wanted !~ /:/)) {print; exit}')"
-  [[ -n "$processor_line" ]] || processor_line="$(printf '%s\n' "$ps_output" | awk 'NR>1 {print; exit}')"
-  if [[ "$processor_line" == *GPU* ]]; then result=gpu
-  elif [[ "$processor_line" == *CPU* ]]; then result=cpu
+  if ! ps_output="$(timeout --foreground --kill-after=5s 30s docker compose exec -T ollama ollama ps)"; then
+    echo "Managed Ollama 'ollama ps' failed after inference for '$model'; the GPU/CPU backend is unverified." >&2
+  else
+    processor_line="$(printf '%s\n' "$ps_output" | awk -v wanted="$model" 'NR>1 && ($1==wanted || ($1 ~ ("^" wanted ":") && wanted !~ /:/)) {print; exit}')"
+    if [[ -z "$processor_line" ]]; then
+      echo "Managed Ollama model '$model' was absent from 'ollama ps' despite a 60s request-scoped keep-alive; no backend classification is possible." >&2
+    elif [[ "$processor_line" == *GPU* ]]; then
+      result=gpu
+    elif [[ "$processor_line" == *CPU* ]]; then
+      result=cpu
+    else
+      echo "Managed Ollama did not report a recognizable CPU/GPU PROCESSOR class for '$model'." >&2
+    fi
   fi
   unload_ollama_model "$model"
   printf '%s\n' "$result"
