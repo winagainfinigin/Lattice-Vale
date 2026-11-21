@@ -2545,14 +2545,69 @@ http_status_ok() {
   [[ "$code" =~ ^(2|3|401|403) ]]
 }
 
+# Hermes owns GET /health (unauthenticated JSON). A 2xx from an unrelated
+# process, or a 401/403, is not evidence that the Hermes API listener is ready.
+# Keep this separate from the generic HTTP probe used for other services.
+hermes_api_health_ok() {
+  curl -fsS --noproxy '*' --connect-timeout 2 --max-time 5 \
+    "http://127.0.0.1:${HERMES_API_HOST_PORT}/health" 2>/dev/null | \
+    jq -e 'type == "object" and .status == "ok" and .platform == "hermes-agent"' >/dev/null 2>&1
+}
+
+# A local-only probe distinguishes a broken host-port publication from a gateway
+# whose API listener is absent. The internal port is read from the installed
+# default profile, not a user's Windows-facing published port.
+hermes_api_container_health_ok() {
+  local port
+  port="$(sed -n 's/^API_SERVER_PORT=//p' data/hermes/.env 2>/dev/null | head -n1)"
+  [[ "$port" =~ ^[0-9]+$ && "$port" -ge 1 && "$port" -le 65535 ]] || return 2
+  timeout --foreground --kill-after=3s 10s docker exec -u hermes hermes-agent python -c '
+import json,sys,urllib.request
+try:
+    with urllib.request.urlopen("http://127.0.0.1:%s/health" % sys.argv[1], timeout=4) as response:
+        body=json.load(response)
+        ok=response.status==200 and isinstance(body,dict) and body.get("status")=="ok" and body.get("platform")=="hermes-agent"
+except Exception:
+    ok=False
+raise SystemExit(0 if ok else 1)
+' "$port" >/dev/null 2>&1
+}
+
+# Only public status/port metadata is emitted. In particular, do not print
+# Hermes environment files, API keys, Matrix tokens or unfiltered message logs.
+diagnose_hermes_api_readiness() {
+  local code curl_rc=0 state published image
+  if code="$(curl -sS --noproxy '*' --connect-timeout 2 --max-time 5 \
+      -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HERMES_API_HOST_PORT}/health" 2>/dev/null)"; then
+    :
+  else
+    curl_rc=$?
+  fi
+  [[ "$code" =~ ^[0-9]{3}$ ]] || code=unavailable
+  state="$(docker inspect -f '{{.State.Status}}' hermes-agent 2>/dev/null || true)"
+  image="$(docker inspect -f '{{.Config.Image}}' hermes-agent 2>/dev/null || true)"
+  published="$(docker port hermes-agent 8642/tcp 2>/dev/null | head -n1 || true)"
+  echo "Hermes API diagnostics: host /health HTTP=${code}; curlExit=${curl_rc}; container=${state:-unavailable}; image=${image:-unavailable}; internal 8642/tcp publication=${published:-unavailable}." >&2
+  if hermes_api_container_health_ok; then
+    echo 'Hermes API diagnostics: container-local /health=verified; host-side publication, port ownership or network path needs investigation.' >&2
+  else
+    echo 'Hermes API diagnostics: container-local /health is unavailable or did not identify Hermes.' >&2
+  fi
+  timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent \
+    /command/s6-svstat /run/hermes-service/gateway-default >&2 2>/dev/null || true
+  if ! timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent \
+      sh -c 'command -v pnpm >/dev/null 2>&1' >/dev/null 2>&1; then
+    echo 'Hermes API diagnostics: pnpm not available in the current image; this is an upstream compatibility signal, not established as the API failure cause.' >&2
+  fi
+}
 
 wait_hermes_gateway_surfaces() {
-  local context="${1:-gateway lifecycle}" tries="${2:-60}" i api_ok dashboard_ok
+  local context="${1:-gateway lifecycle}" tries="${2:-60}" quiet="${3:-false}" i api_ok dashboard_ok
   for i in $(seq 1 "$tries"); do
     api_ok=false
     dashboard_ok=true
     if timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 && \
-       http_status_ok "http://127.0.0.1:${HERMES_API_HOST_PORT}/health"; then
+       hermes_api_health_ok; then
       api_ok=true
     fi
     if [[ "$(opt_bool dashboard)" == true ]] && ! http_status_ok "http://127.0.0.1:${DASHBOARD_HOST_PORT}/"; then
@@ -2561,9 +2616,9 @@ wait_hermes_gateway_surfaces() {
     [[ "$api_ok" == true && "$dashboard_ok" == true ]] && return 0
     sleep 2
   done
+  [[ "$quiet" == true ]] && return 1
   echo "Hermes gateway surfaces did not recover after ${context}: API health and/or Dashboard remained unavailable after the bounded wait." >&2
-  timeout --foreground --kill-after=5s 15s docker exec -u hermes hermes-agent /command/s6-svstat /run/hermes-service/gateway-default 2>&1 >&2 || true
-  timeout --foreground --kill-after=5s 15s docker logs --tail 120 hermes-agent 2>&1 | tail -n 120 >&2 || true
+  diagnose_hermes_api_readiness
   return 1
 }
 
@@ -3472,8 +3527,9 @@ verify_reconcile() {
     echo 'Reconcile verification failed: Hermes CLI is not ready inside hermes-agent.' >&2
     return 1
   fi
-  if ! http_status_ok http://127.0.0.1:${HERMES_API_HOST_PORT}/health; then
+  if ! hermes_api_health_ok; then
     echo 'Reconcile verification failed: Hermes API health endpoint is not ready.' >&2
+    diagnose_hermes_api_readiness
     return 1
   fi
   if [[ "$(opt_bool dashboard)" == true ]] && ! http_status_ok http://127.0.0.1:${DASHBOARD_HOST_PORT}/; then
@@ -3565,7 +3621,7 @@ verify_kanban_gateway() {
   local matrix_profile matrix_profile_secret matrix_profile_state
   docker compose ps --status running hermes 2>/dev/null | grep -q hermes || return 1
   docker exec -u hermes hermes-agent hermes --version >/dev/null 2>&1 || return 1
-  http_status_ok "http://127.0.0.1:${HERMES_API_HOST_PORT}/health" || return 1
+  hermes_api_health_ok || return 1
   if [[ "$(opt_bool dashboard)" == true ]]; then
     http_status_ok "http://127.0.0.1:${DASHBOARD_HOST_PORT}/" || return 1
   fi
@@ -6279,6 +6335,35 @@ verify_live_resource_policy_limits || {
   echo 'Reconcile completed but the live Docker CPU/RAM ceilings still do not match policy v13.' >&2
   return 1
 }
+# A resource/Compose reconciliation can interrupt gateway responsiveness after
+# the earlier readiness barrier. Recheck the *actual* Hermes API after the last
+# mutation; do not treat an s6 PID, Matrix connectivity, or generic 2xx as proof.
+if ! wait_hermes_gateway_surfaces 'post-resource reconciliation' 15 true; then
+  if hermes_api_health_ok; then
+    echo 'Hermes API is healthy, but Dashboard is unavailable after resource reconciliation; leaving the live gateway untouched.' >&2
+    diagnose_hermes_api_readiness
+    return 1
+  fi
+  if hermes_api_container_health_ok; then
+    echo 'Hermes API works inside the container but not through its host port; not restarting a healthy API process for a Docker port-publication issue.' >&2
+    diagnose_hermes_api_readiness
+    return 1
+  fi
+  echo 'Hermes API remained unavailable inside and outside its container after the bounded settle window; attempting one exact default-gateway lifecycle recovery.' >&2
+  if ! start_or_restart_default_gateway_exact; then
+    diagnose_hermes_api_readiness
+    return 1
+  fi
+  if ! wait_hermes_gateway_surfaces 'exact default-gateway API recovery' 30; then
+    return 1
+  fi
+  if [[ "$(opt_bool matrix)" == true ]]; then
+    wait_matrix_adapter_runtime_configure default data/hermes/gateway_state.json matrix 30 || return 1
+  fi
+  if [[ -s .installer-managed-profiles && -e .installer-gateway-multiplex-owned ]]; then
+    wait_live_multiplex_gateway_configure 30 || return 1
+  fi
+fi
 return 0
 }
 

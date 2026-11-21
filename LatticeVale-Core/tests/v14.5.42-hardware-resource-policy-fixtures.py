@@ -149,6 +149,100 @@ forced_gpu_branch = offload_verify.split('if [[ "$requested" != auto ]]; then', 
 assert "return 1" in forced_gpu_branch, "explicitly selected GPU must fail closed"
 assert "cpu|unknown)" in offload_verify, "Auto must handle unverified GPU execution"
 assert 'if [[ "$processor" != cpu ]]; then' in offload_verify, "Auto CPU recovery needs runtime processor proof"
+# v14.7.0 same-version Hermes API convergence after resource reconciliation:
+# a generic HTTP success (including an unrelated listener) cannot claim that
+# Hermes is healthy, and final resource changes require a second bounded barrier.
+hermes_health = cfg[cfg.index("hermes_api_health_ok() {"):cfg.index("hermes_api_container_health_ok() {")]
+assert "curl -fsS --noproxy '*'" in hermes_health
+assert '.status == "ok" and .platform == "hermes-agent"' in hermes_health
+wait_api = cfg[cfg.index("wait_hermes_gateway_surfaces() {"):cfg.index("verify_prepare_config() {")]
+assert "hermes_api_health_ok" in wait_api
+assert 'quiet="${3:-false}"' in wait_api
+assert "diagnose_hermes_api_readiness" in wait_api
+verify_reconcile_api = cfg[cfg.index("verify_reconcile() {"):cfg.index("verify_kanban_gateway() {")]
+verify_kanban_api = cfg[cfg.index("verify_kanban_gateway() {"):cfg.index("verify_finalize() {")]
+assert "if ! hermes_api_health_ok; then" in verify_reconcile_api
+assert "diagnose_hermes_api_readiness" in verify_reconcile_api
+assert "hermes_api_health_ok || return 1" in verify_kanban_api
+stage_reconcile_api = cfg[cfg.index("stage_reconcile() {"):cfg.index("stage_kanban_gateway() {")]
+assert stage_reconcile_api.index('resource-burst-controller.py --reconcile-static') < stage_reconcile_api.index("wait_hermes_gateway_surfaces 'post-resource reconciliation' 15 true")
+assert stage_reconcile_api.index("wait_hermes_gateway_surfaces 'post-resource reconciliation' 15 true") < stage_reconcile_api.index("start_or_restart_default_gateway_exact", stage_reconcile_api.index("resource-burst-controller.py --reconcile-static"))
+assert "if hermes_api_container_health_ok; then" in stage_reconcile_api
+assert "if hermes_api_health_ok; then" in stage_reconcile_api
+assert "not restarting a healthy API process" in stage_reconcile_api
+assert "wait_matrix_adapter_runtime_configure default data/hermes/gateway_state.json matrix 30" in stage_reconcile_api
+assert "wait_live_multiplex_gateway_configure 30" in stage_reconcile_api
+# No untrusted package installation or whole-container restart during API repair.
+api_recovery = stage_reconcile_api[stage_reconcile_api.index("wait_hermes_gateway_surfaces 'post-resource reconciliation'"):]
+assert 'docker compose restart hermes' not in api_recovery
+assert 'docker restart hermes-agent' not in api_recovery
+assert 'pnpm install' not in api_recovery
+
+# Execute the actual shell functions under mocked health signals. These cases
+# are completely system-independent: no network, Docker or WSL is needed.
+api_health_fn = cfg[cfg.index("hermes_api_health_ok() {"):cfg.index("\n}", cfg.index("hermes_api_health_ok() {")) + 2]
+for raw, expected in (
+    ('{"status":"ok","platform":"hermes-agent"}', 0),
+    ('{"status":"ok","platform":"unrelated-service"}', 1),
+    ('{"status":"failed","platform":"hermes-agent"}', 1),
+    ('Unauthorized', 1),
+):
+    harness = 'set -Eeuo pipefail\nHERMES_API_HOST_PORT=8642\ncurl() { printf %s "$MOCK_HEALTH_JSON"; }\n' + api_health_fn + '\nhermes_api_health_ok\n'
+    env = dict(os.environ, MOCK_HEALTH_JSON=raw)
+    observed = subprocess.run(['bash', '-c', harness], env=env, capture_output=True, text=True, timeout=10)
+    assert (observed.returncode == 0) == (expected == 0), (raw, observed.returncode, observed.stderr)
+
+post_resource_recovery = stage_reconcile_api[
+    stage_reconcile_api.index("# A resource/Compose reconciliation can interrupt gateway responsiveness"):
+    stage_reconcile_api.index("\nreturn 0\n}\n", stage_reconcile_api.index("# A resource/Compose reconciliation can interrupt gateway responsiveness"))
+]
+# The once-only retry must not occur if the API is healthy but the Dashboard is
+# down, or if the container API is healthy but its host publication is broken.
+for scenario, expect_success, restart_expected in (
+    ('settled', True, False),
+    ('dashboard_only', False, False),
+    ('host_port_only', False, False),
+    ('restart_success', True, True),
+    ('restart_fails', False, True),
+    ('restart_no_api', False, True),
+):
+    with tempfile.TemporaryDirectory() as temporary:
+        temp = Path(temporary)
+        (temp / '.installer-managed-profiles').write_text('assistant\n', encoding='utf-8')
+        (temp / '.installer-gateway-multiplex-owned').touch()
+        harness = r'''set -Eeuo pipefail
+call=0
+wait_hermes_gateway_surfaces() {
+  call=$((call + 1))
+  printf 'wait\n' >> trace
+  case "$SCENARIO" in
+    settled) return 0 ;;
+    restart_success) [[ "$call" -ge 2 ]] ;;
+    *) return 1 ;;
+  esac
+}
+hermes_api_health_ok() { [[ "$SCENARIO" == dashboard_only ]]; }
+hermes_api_container_health_ok() { [[ "$SCENARIO" == host_port_only ]]; }
+start_or_restart_default_gateway_exact() {
+  printf 'restart\n' >> trace
+  [[ "$SCENARIO" != restart_fails ]]
+}
+diagnose_hermes_api_readiness() { printf 'diagnose\n' >> trace; }
+opt_bool() { printf 'true\n'; }
+wait_matrix_adapter_runtime_configure() { printf 'matrix\n' >> trace; }
+wait_live_multiplex_gateway_configure() { printf 'multiplex\n' >> trace; }
+''' + post_resource_recovery + '\n'
+        env = dict(os.environ, SCENARIO=scenario)
+        result = subprocess.run(['bash', '-c', harness], cwd=temp, env=env, capture_output=True, text=True, timeout=10)
+        assert (result.returncode == 0) == expect_success, (scenario, result.returncode, result.stderr)
+        calls = (temp / 'trace').read_text(encoding='utf-8').splitlines()
+        assert ('restart' in calls) == restart_expected, (scenario, calls)
+        assert calls.count('restart') <= 1, (scenario, calls)
+        if scenario == 'restart_success':
+            assert calls[-2:] == ['matrix', 'multiplex'], calls
+        if scenario in {'dashboard_only', 'host_port_only'}:
+            assert 'diagnose' in calls and 'restart' not in calls, (scenario, calls)
+
 assert 'details.append(f"GPU execution verified at runtime by ollama ps ({resolved_accel})")' in audit
 
 # Native Windows Ollama is advisory/user-owned: LatticeVale documents conservative
