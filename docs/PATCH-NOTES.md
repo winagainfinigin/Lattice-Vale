@@ -1,7 +1,7 @@
 ## v14.7.0 — reproducible package and qualification tooling
 
 - Builds the release ZIP solely from the verified source manifest, checks the exact archive root and forbidden metadata, and emits SHA-256 plus source-commit provenance.
-- Pins GitHub Actions by commit and enables reviewed Dependabot updates.
+- Pins GitHub Actions by commit SHA; updates remain manual.
 - Adds a manual, disposable-stack-only Windows/WSL health and bounded load qualification; DirectML inference is checked separately without recording prompts or completions.
 - Records bounded sanitized resource decisions. The canonical allocation formula, service floors, aggregate budget, user overrides, and persisted application data are unchanged.
 - Adds opt-in, redacting Hermes/Kanban audit utilities.

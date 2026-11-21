@@ -3,7 +3,7 @@
 ## 14.7.0 — reproducible releases, runtime qualification, and auditability
 
 - Build the release archive from the SHA-256 source manifest, verify the exact `Lattice-Vale/` root, and reject Git metadata, bytecode, unlisted files, and path escapes. Record source commit and archive SHA-256 beside the ZIP; publish those artifacts from the exact matching release tag.
-- Pin GitHub Actions to commit SHAs and add Dependabot for reviewed action updates.
+- Pin GitHub Actions to commit SHAs; updates are manually reviewed.
 - Add an opt-in, manually dispatched Windows/WSL qualification path for a disposable marked stack, with read-only repair/health checks and a bounded synthetic load probe. Live qualification is not run on ordinary CI or production installations.
 - Record sanitized, bounded resource-controller decision history without changing the canonical planner, service floors, aggregate envelope, Compose overrides, or user data.
 - Include scoped, redacting Hermes/Kanban audit helpers so card comments, paths, and worker errors are not emitted by default.

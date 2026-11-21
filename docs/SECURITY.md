@@ -283,7 +283,7 @@ Controller state is stored mode 0600. Failure or missing telemetry retains the
 static resource policy. The timer is removed by the LatticeVale uninstaller.
 ## v14.7.0 release and diagnostic evidence
 
-GitHub Actions in the validation and release workflows are pinned to verified commit SHAs; Dependabot raises reviewable action updates. The release ZIP is assembled from the SHA-256 source manifest rather than recursively archiving the checkout. The builder rejects unsafe paths, unmanifested source, `.git`, Python bytecode, and an unexpected archive root. A SHA-256 sidecar and provenance record identify the archive and source commit.
+GitHub Actions in the validation and release workflows remain pinned to verified commit SHAs; action updates are reviewed manually. The release ZIP is assembled from the SHA-256 source manifest rather than recursively archiving the checkout. The builder rejects unsafe paths, unmanifested source, `.git`, Python bytecode, and an unexpected archive root. A SHA-256 sidecar and provenance record identify the archive and source commit.
 
 Managed application images still follow the documented latest-supported channels so the existing due/forced update behavior remains intact. After a successful pull/build, the stack records the local image ID and registry digests in `data/latticevale/managed-upstreams.json`; this records what ran but does not claim upstream tags are immutable. Explicit user image/source overrides remain preserved.
 

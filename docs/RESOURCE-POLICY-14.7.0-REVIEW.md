@@ -11,7 +11,7 @@
 ## Improvements in this release
 
 1. CI can package a release only from a manifest-verified tree. The generated archive has exactly one `Lattice-Vale/` root, excludes Git metadata and bytecode, records the source commit and archive SHA-256, and is checked before upload.
-2. Release-tag builds attach the package, SHA-256 sidecar, and provenance record to the matching GitHub release. Workflow actions are pinned to commit SHAs and Dependabot tracks action updates.
+2. Release-tag builds attach the package, SHA-256 sidecar, and provenance record to the matching GitHub release. Workflow actions remain pinned to reviewed commit SHAs; updates are manual.
 3. A manually dispatched Windows/WSL qualification workflow is available for a dedicated disposable runner. It requires an explicit stack marker, performs read-only verification, and runs a CPU/memory-limited load probe while watching service health and pressure metrics.
 4. The resource controller records a bounded, sanitized decision history with per-service before/after limits and the measured signals used by the planner. Allocation rules and aggregate limits are unchanged.
 5. The supplied Hermes/Kanban utilities are included as opt-in tools with output redaction, scoped export options, and a clear distinction between safe card metadata and sensitive comments, paths, and worker errors.
