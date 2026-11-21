@@ -127,18 +127,35 @@ fi
 exit 44
 """, encoding='utf-8')
     docker.chmod(0o755)
+    # Match Ollama's documented fixed-width columns. A processor report is
+    # authoritative only for its selected row and its PROCESSOR column.
+    def ps_table(rows, header=True):
+        fmt = '{:<36}{:<18}{:<12}{:<22}{}\n'
+        text = fmt.format('NAME', 'ID', 'SIZE', 'PROCESSOR', 'UNTIL') if header else 'MALFORMED HEADER\n'
+        for model_name, processor in rows:
+            text += fmt.format(model_name, 'abc', '4.0 GB', processor, '1 minute from now')
+        return text
+
     cases = [
-        ('gpu', 'ok', 'ok', 'qwen3.5:4b abc 4GB 100% GPU 1 minute from now\n', 'gpu', ''),
-        ('mixed', 'ok', 'ok', 'qwen3.5:4b abc 4GB 40%/60% CPU/GPU 1 minute from now\n', 'gpu', ''),
-        ('cpu', 'ok', 'ok', 'qwen3.5:4b abc 4GB 100% CPU 1 minute from now\n', 'cpu', ''),
-        ('other', 'ok', 'ok', 'some-other:1b abc 4GB 100% GPU 1 minute from now\n', 'unknown', 'was absent'),
-        ('no-model', 'ok', 'ok', '', 'unknown', 'was absent'),
-        ('generation-error', 'failed', 'ok', '', 'unknown', 'model inference failed'),
-        ('ps-error', 'ok', 'failed', '', 'unknown', "'ollama ps' failed"),
+        # name, requested model, status of run, status of ps, loaded rows, expected, diagnostic
+        ('gpu', 'qwen3.5:4b', 'ok', 'ok', [('qwen3.5:4b','100% GPU')], 'gpu', ''),
+        ('mixed', 'qwen3.5:4b', 'ok', 'ok', [('qwen3.5:4b','40%/60% CPU/GPU')], 'gpu', ''),
+        ('cpu', 'qwen3.5:4b', 'ok', 'ok', [('qwen3.5:4b','100% CPU')], 'cpu', ''),
+        ('other', 'qwen3.5:4b', 'ok', 'ok', [('some-other:1b','100% GPU')], 'unknown', 'was absent'),
+        ('no-model', 'qwen3.5:4b', 'ok', 'ok', [], 'unknown', 'was absent'),
+        ('generation-error', 'qwen3.5:4b', 'failed', 'ok', [], 'unknown', 'model inference failed'),
+        ('ps-error', 'qwen3.5:4b', 'ok', 'failed', [], 'unknown', "'ollama ps' failed"),
+        ('gpu-in-name', 'UpperGPU:4b', 'ok', 'ok', [('UpperGPU:4b','100% CPU')], 'cpu', ''),
+        ('cpu-named-but-gpu', 'UpperCPU:4b', 'ok', 'ok', [('UpperCPU:4b','100% GPU')], 'gpu', ''),
+        ('literal-name-match', 'model.name:latest', 'ok', 'ok', [('modelXname:latest','100% GPU')], 'unknown', 'was absent'),
+        ('exact-first-model', 'qwen3.5:4b', 'ok', 'ok', [('other:latest','100% GPU'),('qwen3.5:4b','100% CPU')], 'cpu', ''),
+        ('implicit-latest', 'qwen3.5', 'ok', 'ok', [('qwen3.5:latest','100% GPU')], 'gpu', ''),
+        ('other-tag-not-proof', 'qwen3.5', 'ok', 'ok', [('qwen3.5:8b','100% GPU')], 'unknown', 'was absent'),
+        ('unknown-processor', 'qwen3.5:4b', 'ok', 'ok', [('qwen3.5:4b','unverified')], 'unknown', 'not report a recognizable'),
     ]
-    for name, run_status, ps_status, rows, expected, msg in cases:
+    for name, model, run_status, ps_status, rows, expected, msg in cases:
         ps_file = root / (name + '.ps')
-        ps_file.write_text('NAME ID SIZE PROCESSOR UNTIL\n' + rows, encoding='utf-8')
+        ps_file.write_text(ps_table(rows), encoding='utf-8')
         calls = root / (name + '.calls')
         env = dict(os.environ)
         env.update(PATH=str(root) + os.pathsep + env['PATH'],
@@ -146,8 +163,8 @@ exit 44
                    FAKE_RUN_STATUS=run_status, FAKE_PS_STATUS=ps_status)
         script = """set -o pipefail
 managed_ollama_enabled() { return 0; }
-unload_ollama_model() { printf 'unload:%s\\n' "$1" >> "$FAKE_DOCKER_CALLS"; }
-""" + fn + '\nmanaged_ollama_processor_class qwen3.5:4b\n'
+unload_ollama_model() { printf 'unload:%s\n' "$1" >> "$FAKE_DOCKER_CALLS"; }
+""" + fn + '\nmanaged_ollama_processor_class ' + model + '\n'
         done = subprocess.run(['bash', '-c', script], text=True, capture_output=True, env=env, timeout=25)
         assert done.returncode == 0, (name, done.stderr)
         assert done.stdout.strip() == expected, (name, done.stdout, done.stderr)
@@ -156,8 +173,8 @@ unload_ollama_model() { printf 'unload:%s\\n' "$1" >> "$FAKE_DOCKER_CALLS"; }
         assert '--keepalive 60s' in history, name
         if run_status == 'ok':
             assert history.count('ollama ps') == 1, name
-            assert 'unload:qwen3.5:4b' in history, name
         else:
             assert 'ollama ps' not in history, name
+        assert f'unload:{model}' in history, name
     assert 'OLLAMA_KEEP_ALIVE' in fn and '--keepalive 60s' in fn
-print('PASS: request-scoped Ollama keep-alive, exact-model offload, and diagnostics (7 cases)')
+print('PASS: request-scoped model offload, cleanup, and exact PROCESSOR parsing (14 cases)')

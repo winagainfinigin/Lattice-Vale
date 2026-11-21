@@ -56,7 +56,7 @@ cfff6868b6d7292e450e630e0b92d9f50a16d60b97d3a248264ef8a4597d0267  LatticeVale-Co
 673a0200dcc242d9491f16963230fa011951c1018b727f325abdec5dd1898d64  LatticeVale-Core/stack/backend-capabilities.py
 9c249153e43f63760a5153c6f450dd5a60d5aa8b4951b3b6489916ab8fc29337  LatticeVale-Core/stack/checkpoint-metadata.json
 5b1e8508b006fa5fbf9f38cdded4d5ad379cd584f53d3d9d4a7ed14b799b4993  LatticeVale-Core/stack/compose.yaml
-2951d1300227f691037810a49cf27d97622e99dc066dc916e8b7914a9187dbfd  LatticeVale-Core/stack/configure-stack.sh
+dca26961704e013be213f80bb1be58f0ec5ba88fb13fe50ba9058be873ba9c6e  LatticeVale-Core/stack/configure-stack.sh
 d1a864fdd17db474b41f436ea746a9b36a74db901291294030aedce6dc5ed111  LatticeVale-Core/stack/diagnostics.py
 8028fbb4d7b4f9e5423a4b7f1172a9008cac2bdd284b566295ce9fd39bf85e72  LatticeVale-Core/stack/directml-gateway.py
 1fbf5ace216c3c4359f92ee8d3feb12c0497b4b485504acc34adc7732b64d3f5  LatticeVale-Core/stack/directml-gateway.sh
@@ -217,11 +217,11 @@ a5a257ba4205895a07e30a803754aa3de50c404ecf0763cdca12a40da87f9dd4  LatticeVale-Co
 a0c3ec6b91113f50fbf9fb4c8c97b835b32bcfe15ab3bf907e08491a475c1f02  LatticeVale-Core/tests/v14.5.44-directml-preflight-fixtures.py
 ec16c06189f4674eb5896fc10e98fe9327cdf92194906b100cd26052fcaf1fd7  LatticeVale-Core/tests/v14.5.45-powershell-generic-list-compat-fixtures.py
 2c5b5e441edc97489c436e45e46dc6aa4b09e58b3f37aacb7b16ad7faf6aca99  LatticeVale-Core/tests/v14.5.46-gpu-onboarding-fixtures.py
-50bc01439de60fcde1934a183c4bf2c42623b346d2a4eb993f491829d68a285d  LatticeVale-Core/tests/v14.5.47-gpu-recovery-fixtures.py
+650f196effad487fd02892f0436936bb820d182886fc5ed3a9eedabd947d1308  LatticeVale-Core/tests/v14.5.47-gpu-recovery-fixtures.py
 cf79d51ba8646fdcd1446cc9ca4594dcfbb8dce52c370c3666c416ce4640d7cc  LatticeVale-Core/tests/v14.6.0-canonical-architecture-fixtures.py
 31b8c56a01b18ff5cb4b8980b2e3c1edb853ec3455143aa1ef43482e945a9c0d  LatticeVale-Core/tests/v14.6.0-documentation-release-fixtures.py
 df423fed7ff70e2bf05680986758f75bc90a93d0c2b99ba3d3d2ab9ad13060b9  LatticeVale-Core/tests/v14.6.1-eight-option-baseline-fixtures.py
-a6fbdf1572b4ef9de01f99ff21764edf52da583f99abb492eb774aa13e43e6de  LatticeVale-Core/tests/v14.6.1-runtime-policy-repair-fixtures.py
+70ef4a5d2983c0c070aa104641c26896de3bf79ff4f94b78dcf8a396f56280b0  LatticeVale-Core/tests/v14.6.1-runtime-policy-repair-fixtures.py
 2c50c5e9a5df0593c37d5001529079e5cc33b34d41afc8f1ec9a50c2c5b830d8  LatticeVale-Core/tests/v14.6.2-hotfix-bootstrap-staging-fixtures.py
 bc1a5739f294e1b9af4b2ba5f44886af629a5f983af9b29b00ead22176e4cd6e  LatticeVale-Core/tests/v14.6.2-latest-supported-upstream-fixtures.py
 17d8ebcc51fc5b68036cb2f6fdf59ec31fa7f88292694c7b000c94846183d482  LatticeVale-Core/tests/v14.6.3-matrix-identity-gateway-hotfix-fixtures.py

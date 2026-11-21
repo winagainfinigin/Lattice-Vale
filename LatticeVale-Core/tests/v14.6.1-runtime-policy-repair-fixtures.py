@@ -38,7 +38,11 @@ readme = (REPO / 'README.md').read_text(encoding='utf-8')
 # options -> hardware -> backend -> policy -> generated runtime configuration.
 assert 'options → hardware → backend capability/health → resource policy → generated runtime configuration' in readme
 assert 'Resume / repair installation' in readme
-assert 'patch ZIP remains for source checkouts only' in readme
+if version == '14.7.0':
+    assert 'Changed-files ZIPs are **source-tree overlays**' in readme
+    assert 'never extract it directly into a live `~/hermes-stack`' in readme
+else:
+    assert 'patch ZIP remains for source checkouts only' in readme
 
 # Exact observed topology: 3 WSL CPUs, 9946 MiB WSL RAM, RX 6700 XT-class bounded
 # DirectML admission, no Linux-native Ollama GPU, DirectML text + managed CPU Ollama.

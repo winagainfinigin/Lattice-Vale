@@ -1531,25 +1531,43 @@ managed_ollama_processor_class() {
   # Override keep-alive for this one verification request, not for the server.
   # GPU/CPU classification is bound to the exact requested model; another
   # resident model must never supply proof of this model's GPU offload.
-  local model="$1" ps_output processor_line result=unknown
+  local model="$1" ps_output processor_line processor_field result=unknown
   managed_ollama_enabled || { printf 'unknown\n'; return 0; }
   if ! timeout --foreground --kill-after=15s 240s docker compose exec -T ollama ollama run "$model" --keepalive 60s 'Reply with OK only.' >/dev/null; then
     echo "Managed Ollama model inference failed for '$model' (check the error above, model load, container health, and memory limits)." >&2
+    # A timed-out/failed request may have loaded the model before it failed.
+    # Reclaim its temporary residency without changing the normal keep-alive.
+    unload_ollama_model "$model"
     printf 'unknown\n'
     return 0
   fi
   if ! ps_output="$(timeout --foreground --kill-after=5s 30s docker compose exec -T ollama ollama ps)"; then
     echo "Managed Ollama 'ollama ps' failed after inference for '$model'; the GPU/CPU backend is unverified." >&2
   else
-    processor_line="$(printf '%s\n' "$ps_output" | awk -v wanted="$model" 'NR>1 && ($1==wanted || ($1 ~ ("^" wanted ":") && wanted !~ /:/)) {print; exit}')"
+    # Bind proof to exactly this model. Treat names as literal text rather than
+    # an awk regex, and accept only its implicit :latest tag when unspecified.
+    processor_line="$(printf '%s\n' "$ps_output" | awk -v wanted="$model" '
+      NR>1 && ($1==wanted || (index(wanted, ":")==0 && $1==wanted ":latest")) {print; exit}
+    ')"
     if [[ -z "$processor_line" ]]; then
       echo "Managed Ollama model '$model' was absent from 'ollama ps' despite a 60s request-scoped keep-alive; no backend classification is possible." >&2
-    elif [[ "$processor_line" == *GPU* ]]; then
-      result=gpu
-    elif [[ "$processor_line" == *CPU* ]]; then
-      result=cpu
     else
-      echo "Managed Ollama did not report a recognizable CPU/GPU PROCESSOR class for '$model'." >&2
+      # Ollama's CLI prints a fixed-width header with PROCESSOR and UNTIL
+      # columns. Reading only PROCESSOR prevents e.g. an uppercase GPU in the
+      # model name or other columns from being mistaken for accelerator proof.
+      processor_field="$(printf '%s\n' "$ps_output" | awk -v wanted="$model" '
+        NR==1 { start=index($0,"PROCESSOR"); end=index($0,"UNTIL"); next }
+        start>0 && end>start && ($1==wanted || (index(wanted, ":")==0 && $1==wanted ":latest")) {
+          print substr($0,start,end-start); exit
+        }
+      ')"
+      if [[ "$processor_field" =~ (^|[^[:alpha:]])GPU([^[:alpha:]]|$) ]]; then
+        result=gpu
+      elif [[ "$processor_field" =~ (^|[^[:alpha:]])CPU([^[:alpha:]]|$) ]]; then
+        result=cpu
+      else
+        echo "Managed Ollama did not report a recognizable CPU/GPU PROCESSOR class for '$model'; the report header may be missing or malformed." >&2
+      fi
     fi
   fi
   unload_ollama_model "$model"
@@ -1557,7 +1575,7 @@ managed_ollama_processor_class() {
 }
 
 verify_or_rebudget_managed_ollama_acceleration() {
-  local accel="$1" model="$2" requested processor metrics old_auto current_context cpu_context
+  local accel="$1" model="$2" requested processor metrics old_auto current_context cpu_context health_backend
   [[ "$accel" == nvidia || "$accel" == amd || "$accel" == vulkan ]] || return 0
   echo "Verifying managed Ollama $accel offload with Ollama's live PROCESSOR report."
   processor="$(managed_ollama_processor_class "$model")"
