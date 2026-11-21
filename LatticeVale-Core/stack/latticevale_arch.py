@@ -44,6 +44,7 @@ REASON = {
     "ROCM_ARCH_UNSUPPORTED": "ROCM_ARCH_UNSUPPORTED",
     "ROCM_RUNTIME_VISIBLE": "ROCM_RUNTIME_VISIBLE",
     "VULKAN_RENDER_NODE_MISSING": "VULKAN_RENDER_NODE_MISSING",
+    "VULKAN_GPU_DEVICE_UNVERIFIED": "VULKAN_GPU_DEVICE_UNVERIFIED",
     "VULKAN_RUNTIME_PROBE_FAILED": "VULKAN_RUNTIME_PROBE_FAILED",
     "VULKAN_RUNTIME_VISIBLE": "VULKAN_RUNTIME_VISIBLE",
     "WINDOWS_NATIVE_UNAVAILABLE": "WINDOWS_NATIVE_UNAVAILABLE",
@@ -784,7 +785,29 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
     amd_drm = [x for x in drm_adapters if str(x.get("vendor") or "") == "amd"]
     rocm_topology = bool((wsl.get("kfd") or {}).get("present")) and bool(render_nodes)
     rocm_ok = rocm_topology and arch == "x86_64" and (bool(amd_drm) or not drm_adapters)
-    vulkan_topology = bool(render_nodes)
+    # WSLg commonly publishes a /dev/dri/renderD* node belonging to vgem's
+    # faux_driver. That virtual buffer-management device is not evidence of
+    # a compute-capable Vulkan GPU (nor an Ollama GPU inside Docker). In Auto
+    # mode do not select Vulkan solely from such a render node. An identifiable
+    # non-virtual DRM device is a *candidate*, not verified GPU offload.
+    vulkan_probe = wsl.get("vulkan") or {}
+    virtual_drm_drivers = {"faux_driver", "vgem", "vkms"}
+    eligible_drm = [x for x in drm_adapters
+                    if str(x.get("renderNode") or "") in render_nodes
+                    and str(x.get("driver") or "").lower() not in virtual_drm_drivers
+                    and str(x.get("pciAddress") or "").lower() != "vgem"]
+    # If sysfs identification is unavailable, require a successful Vulkan
+    # enumeration naming a hardware GPU, not llvmpipe/lavapipe/SwiftShader.
+    # This does not prove Docker offload: the later Ollama check still must.
+    software_gpu_terms = ("llvmpipe", "lavapipe", "softpipe", "swiftshader", "software rasterizer")
+    reported_hw_vulkan = bool(vulkan_probe.get("probeSucceeded")) and any(
+        device.strip() and not any(term in device.lower() for term in software_gpu_terms)
+        for device in (vulkan_probe.get("devices") or []) if isinstance(device, str)
+    )
+    vulkan_topology = bool(render_nodes) and (bool(eligible_drm) or (not drm_adapters and reported_hw_vulkan))
+    vulkan_reason = (REASON["VULKAN_RUNTIME_VISIBLE"] if vulkan_topology else
+                     REASON["VULKAN_GPU_DEVICE_UNVERIFIED"] if render_nodes else
+                     REASON["VULKAN_RENDER_NODE_MISSING"])
     native = windows.get("nativeOllama") if isinstance(windows.get("nativeOllama"), dict) else {}
     native_ready = bool(native.get("apiReady"))
 
@@ -802,7 +825,6 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
     else:
         rocm_reason = REASON["ROCM_RUNTIME_VISIBLE"] if rocm_ok else REASON["ROCM_DEVICE_MISSING"]
 
-    vulkan_probe = wsl.get("vulkan") or {}
     caps: dict[str, dict[str, Any]] = {
         "directml": {
             "structuralStatus": dml_structural_status,
@@ -830,12 +852,12 @@ def classify_backends(hardware: dict[str, Any], options: dict[str, Any], stack: 
         },
         "vulkan": {
             "structuralStatus": "available-unverified" if vulkan_topology else "unsupported",
-            "structuralReasonCode": REASON["VULKAN_RUNTIME_VISIBLE"] if vulkan_topology else REASON["VULKAN_RENDER_NODE_MISSING"],
+            "structuralReasonCode": vulkan_reason,
             "status": "available-unverified" if vulkan_topology else "unsupported",
-            "reasonCode": REASON["VULKAN_RUNTIME_VISIBLE"] if vulkan_topology else REASON["VULKAN_RENDER_NODE_MISSING"],
+            "reasonCode": vulkan_reason,
             "available": vulkan_topology,
             "experimental": False,
-            "topology": {"renderNodeCount": len(render_nodes), "drmAdapters": drm_adapters},
+            "topology": {"renderNodeCount": len(render_nodes), "eligibleDrmAdapterCount": len(eligible_drm), "drmAdapters": drm_adapters},
             "probe": {"toolPresent": bool(vulkan_probe.get("toolPresent")), "succeeded": bool(vulkan_probe.get("probeSucceeded")), "devices": list(vulkan_probe.get("devices") or [])},
         },
         "windows-native": {

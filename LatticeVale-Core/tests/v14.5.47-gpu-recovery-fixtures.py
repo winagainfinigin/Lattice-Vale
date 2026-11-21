@@ -88,6 +88,52 @@ with tempfile.TemporaryDirectory() as td:
 assert selected['selection']['inferenceBackend']=='directml'
 assert selected['adapterSelection']['selected']['id']=='gpu-test'
 
+# A WSLg virtual vgem/faux DRM node is not a Vulkan compute device. This
+# exact topology must choose CPU for managed Ollama without blocking DirectML.
+import copy
+with tempfile.TemporaryDirectory() as td:
+    virtual_hw = copy.deepcopy(hardware)
+    virtual_hw['wsl']['driRenderNodes'] = ['/dev/dri/renderD128']
+    virtual_hw['wsl']['drmAdapters'] = [{
+        'renderNode':'/dev/dri/renderD128', 'driver':'faux_driver',
+        'pciAddress':'vgem', 'vendor':'unknown', 'vendorId':'', 'vramMiB':0,
+    }]
+    virtual_hw['hardwareFingerprint'] = fingerprint(virtual_hw)
+    result = classify_backends(virtual_hw, options, Path(td), compat)
+    assert result['selection']['textBackend'] == 'directml', result['selection']
+    assert result['selection']['ollamaAcceleration'] == 'cpu', result['selection']
+    assert result['capabilities']['vulkan']['reasonCode'] == 'VULKAN_GPU_DEVICE_UNVERIFIED'
+    assert result['capabilities']['directml']['available'] is True
+    # Real AMD/Intel/NVIDIA render devices remain eligible for the subsequent
+    # actual Ollama GPU offload check (but are not pre-labelled verified).
+    for vendor, driver, vid in [('amd','amdgpu','0x1002'),('intel','i915','0x8086'),('nvidia','nvidia','0x10de')]:
+        real_hw = copy.deepcopy(virtual_hw)
+        real_hw['wsl']['drmAdapters'][0].update(
+            driver=driver, pciAddress='0000:01:00.0', vendor=vendor, vendorId=vid)
+        real_hw['hardwareFingerprint'] = fingerprint(real_hw)
+        selected_real = classify_backends(real_hw, options, Path(td), compat)
+        assert selected_real['selection']['ollamaAcceleration'] == 'vulkan', (vendor, selected_real['selection'])
+        assert selected_real['capabilities']['vulkan']['status'] == 'available-unverified'
+    # A software-only Vulkan enumeration must not stand in for a GPU when
+    # DRM sysfs identity is missing. A reported real Vulkan device may.
+    unknown_hw = copy.deepcopy(virtual_hw)
+    unknown_hw['wsl']['drmAdapters'] = []
+    unknown_hw['wsl']['vulkan'] = {'toolPresent':True, 'probeSucceeded':True, 'devices':['llvmpipe (LLVM 19)']}
+    unknown_hw['hardwareFingerprint'] = fingerprint(unknown_hw)
+    result_sw = classify_backends(unknown_hw, options, Path(td), compat)
+    assert result_sw['selection']['ollamaAcceleration'] == 'cpu'
+    unknown_hw['wsl']['vulkan']['devices'] = ['AMD Radeon Graphics']
+    unknown_hw['hardwareFingerprint'] = fingerprint(unknown_hw)
+    result_hw = classify_backends(unknown_hw, options, Path(td), compat)
+    assert result_hw['selection']['ollamaAcceleration'] == 'vulkan'
+
+# The independent WSL-host DirectML dependency installation must precede
+# optional managed-Ollama GPU verification. Gateway self-test remains last,
+# after the Ollama fallback has been made ready.
+infra_source = cfg[cfg.index('stage_infrastructure() {'):]
+assert infra_source.index('Preparing the independently selected WSL PyTorch DirectML GPU environment') < infra_source.index('verify_or_rebudget_managed_ollama_acceleration "$current_managed_accel"')
+assert infra_source.index('verify_or_rebudget_managed_ollama_acceleration "$current_managed_accel"') < infra_source.index('  repair_directml_gateway || return 1', infra_source.index('verify_or_rebudget_managed_ollama_acceleration "$current_managed_accel"'))
+
 boot=(ROOT/'linux/bootstrap.sh').read_text(encoding='utf-8')
 assert "'vulkan'" in boot and '/dev/dri/renderD*' in boot
 audit=(ROOT/'stack/state-audit.py').read_text(encoding='utf-8')
@@ -178,3 +224,77 @@ unload_ollama_model() { printf 'unload:%s\n' "$1" >> "$FAKE_DOCKER_CALLS"; }
         assert f'unload:{model}' in history, name
     assert 'OLLAMA_KEEP_ALIVE' in fn and '--keepalive 60s' in fn
 print('PASS: request-scoped model offload, cleanup, and exact PROCESSOR parsing (14 cases)')
+
+
+# Behavioral proof: Auto tolerates a failed GPU runtime only by rebuilding a
+# CPU-only Ollama instance and confirming actual CPU inference. Explicit GPU
+# selections stay fail-closed; a failed CPU retry is also a hard failure.
+fn_verify_match = re.search(r'(?ms)^verify_or_rebudget_managed_ollama_acceleration\(\) \{\n.*?^\}\n', src)
+assert fn_verify_match
+fn_verify = fn_verify_match.group(0)
+for requested_accel, first_processor, retry_processor, expected_rc in (
+    ('auto','unknown','cpu',0),
+    ('auto','unknown','unknown',1),
+    ('vulkan','unknown','cpu',1),
+    ('auto','cpu','',0),
+):
+    script = r'''set -Eeuo pipefail
+processors=("$FIRST" "$SECOND")
+managed_ollama_processor_class() {
+  local count=0
+  [[ -f "$TEST_COUNT" ]] && count="$(cat "$TEST_COUNT")"
+  printf '%s\n' "${processors[count]:-unknown}"
+  printf '%s\n' "$((count+1))" > "$TEST_COUNT"
+}
+opt_text() { printf '%s\n' "$REQUESTED"; }
+ollama_gpu_metrics() { printf '0:0:0:0'; }
+mark_ollama_gpu_fallback() { printf 'MARK\n' >> "$TEST_LOG"; }
+set_env() { printf 'ENV:%s=%s\n' "$2" "$3" >> "$TEST_LOG"; }
+choose_ollama_context_length() { printf 4096; }
+opt_bool() { printf true; }
+write_latticevale_compose_overlay() { printf 'CPU_OVERLAY\n' >> "$TEST_LOG"; }
+wait_managed_ollama_healthy() { return 0; }
+write_resource_policy_report() { :; }
+clear_ollama_gpu_fallback() { :; }
+timeout() {
+  while [ $# -gt 0 ]; do
+    case "$1" in --foreground|--kill-after=*) shift ;; [0-9]*s) shift; break ;; *) break ;; esac
+  done
+  "$@"
+}
+docker() { printf 'DOCKER:%s\n' "$*" >> "$TEST_LOG"; }
+python3() { return 0; }
+''' + fn_verify + '\nverify_or_rebudget_managed_ollama_acceleration vulkan "qwen3.5:4b"\n'
+    with tempfile.TemporaryDirectory() as d:
+        env = dict(os.environ)
+        env.update(REQUESTED=requested_accel, FIRST=first_processor,
+                   SECOND=retry_processor, TEST_LOG=str(Path(d)/'history'), TEST_COUNT=str(Path(d)/'count'))
+        (Path(d)/'.env').write_text('OLLAMA_CONTEXT_LENGTH=16384\n',encoding='utf-8')
+        run = subprocess.run(['bash','-c',script],cwd=d,text=True,capture_output=True,env=env,timeout=15)
+        assert run.returncode == expected_rc, (requested_accel,first_processor,retry_processor,run.returncode,run.stderr)
+        hist = (Path(d)/'history').read_text() if (Path(d)/'history').exists() else ''
+        if requested_accel == 'auto':
+            assert 'CPU_OVERLAY' in hist and 'DOCKER:compose up' in hist
+        else:
+            assert 'CPU_OVERLAY' not in hist
+print('PASS: fail-closed explicit GPU and verified Auto CPU rescue (4 cases)')
+
+# Verify shell-side GPU candidate selection agrees with canonical Python.
+# Render nodes are symlinks to the host's harmless /dev/null character device
+# in this fixture; no device nodes, drivers, or packages are changed.
+vk_fn_match = re.search(r'(?ms)^vulkan_dri_runtime_ready\(\) \{\n.*?^\}\n', src)
+assert vk_fn_match
+vk_fn = vk_fn_match.group(0).replace('/dev/dri/renderD*', '"$FAKE_DRI"/renderD*').replace('/sys/class/drm/', '${FAKE_SYS}/')
+for driver, expected_ok in [('faux_driver', False), ('vgem', False), ('vkms', False), ('amdgpu', True), ('i915', True)]:
+    with tempfile.TemporaryDirectory(prefix='lv-vulkan-driver-') as d:
+        path = Path(d)
+        dri = path/'dri'; dri.mkdir()
+        (dri/'renderD128').symlink_to('/dev/null')
+        sysroot = path/'sys'; dev = sysroot/'renderD128'/'device'; dev.mkdir(parents=True)
+        driver_path = path/'drivers'/driver; driver_path.mkdir(parents=True)
+        (dev/'driver').symlink_to(driver_path)
+        (dev/'vendor').write_text('0x1002\n')
+        env = dict(os.environ, FAKE_DRI=str(dri), FAKE_SYS=str(sysroot))
+        done = subprocess.run(['bash','-c',vk_fn+'\nvulkan_dri_runtime_ready\n'], env=env, timeout=8)
+        assert (done.returncode == 0) == expected_ok, (driver,done.returncode)
+print('PASS: host Vulkan render-node identity classification (5 cases)')

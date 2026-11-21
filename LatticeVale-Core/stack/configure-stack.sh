@@ -450,13 +450,34 @@ nvidia_container_runtime_ready() {
 }
 
 vulkan_dri_runtime_ready() {
-  # Ollama's experimental Vulkan path can use DRM render nodes for AMD/Intel and
-  # other Mesa-supported devices. Device presence is only a candidate signal;
-  # model startup + `ollama ps` below remains the authoritative offload proof.
-  local dev
+  # A DRM render character node is not necessarily a GPU. WSLg may expose a
+  # vgem/faux_driver renderD* node that cannot accelerate Vulkan compute.
+  # Keep DirectML (/dev/dxg) independent. An eligible node is only a candidate;
+  # actual GPU execution is still proven by Ollama's PROCESSOR report.
+  local dev sysdev driver device_name vendor
   shopt -s nullglob
   for dev in /dev/dri/renderD*; do
-    [[ -c "$dev" ]] && { shopt -u nullglob; return 0; }
+    [[ -c "$dev" ]] || continue
+    sysdev="/sys/class/drm/${dev##*/}/device"
+    driver="$(readlink -f "$sysdev/driver" 2>/dev/null || true)"
+    device_name="$(readlink -f "$sysdev" 2>/dev/null || true)"
+    case "${driver##*/}" in faux_driver|vgem|vkms) continue ;; esac
+    [[ "${device_name##*/}" == vgem ]] && continue
+    # No identified DRM adapter? Require a confirmed non-software Vulkan
+    # enumeration rather than guessing based on an anonymous render node.
+    vendor="$(cat "$sysdev/vendor" 2>/dev/null || true)"
+    if [[ -z "$driver" && -z "$vendor" ]]; then
+      if ! command -v vulkaninfo >/dev/null 2>&1; then continue; fi
+      if ! timeout --foreground --kill-after=3s 10s vulkaninfo --summary 2>/dev/null | awk '
+        /deviceName[[:space:]]*=/ {
+          s=tolower($0)
+          if (s !~ /llvmpipe|lavapipe|softpipe|swiftshader|software rasterizer/) found=1
+        }
+        END { exit !found }
+      '; then continue; fi
+    fi
+    shopt -u nullglob
+    return 0
   done
   shopt -u nullglob
   return 1
@@ -605,7 +626,7 @@ resolve_ollama_acceleration() {
       [[ -n "$metrics" ]] || { echo 'Ollama AMD/ROCm acceleration was selected, but LatticeVale could not inventory per-GPU VRAM. Refusing GPU-sized resource assumptions.' >&2; return 1; }
       printf '%s' amd ;;
     vulkan)
-      vulkan_dri_runtime_ready || { echo 'Ollama Vulkan acceleration was explicitly selected, but no /dev/dri/renderD* device is visible in this WSL distro. Use DirectML, native Windows Ollama, a vendor runtime, Auto, or CPU.' >&2; return 1; }
+      vulkan_dri_runtime_ready || { echo 'Ollama Vulkan acceleration was explicitly selected, but no GPU-capable DRM render device could be confirmed in this WSL distro (a virtual WSLg/vgem node is insufficient). Use DirectML, native Windows Ollama, a vendor runtime, Auto, or CPU.' >&2; return 1; }
       printf '%s' vulkan ;;
     auto)
       if nvidia_container_runtime_ready && metrics="$(ollama_gpu_metrics nvidia 2>/dev/null || true)" && [[ -n "$metrics" ]]; then
@@ -1590,18 +1611,27 @@ verify_or_rebudget_managed_ollama_acceleration() {
       echo "Managed Ollama runtime verification passed: $model is using GPU offload."
       return 0
       ;;
-    cpu)
+    cpu|unknown)
       requested="$(opt_text ollamaAcceleration)"; [[ -n "$requested" ]] || requested=cpu
       if [[ "$requested" != auto ]]; then
-        echo "Ollama $accel acceleration was explicitly selected, but Ollama reports CPU execution for '$model'. Refusing to retain GPU-sized resource assumptions. Choose Auto/CPU or repair the GPU runtime." >&2
+        echo "Ollama $accel acceleration was explicitly selected, but GPU execution was not verified for '$model' (PROCESSOR=$processor). Refusing unverified GPU-sized resource assumptions. Choose Auto/CPU or repair the GPU runtime." >&2
         return 1
+      fi
+      if [[ "$processor" == unknown ]]; then
+        echo "Auto-selected Ollama $accel could not complete GPU inference or report a processor for '$model'. Retrying with a CPU-only container; acceptance requires a successful CPU inference and exact PROCESSOR proof." >&2
       fi
       metrics="$(ollama_gpu_metrics "$accel" 2>/dev/null || true)"
       [[ "$accel" == vulkan && -z "$metrics" ]] && metrics='0:0:0:0'
       [[ -n "$metrics" ]] || { echo 'Ollama fell back to CPU and the GPU fingerprint could not be recorded safely.' >&2; return 1; }
       mark_ollama_gpu_fallback "$accel" "$metrics" || return 1
       health_backend="$(case "$accel" in nvidia) printf cuda;; amd) printf rocm;; vulkan) printf vulkan;; esac)"
-      [[ -n "$health_backend" ]] && python3 latticevale_arch.py record-health "$health_backend" failed OLLAMA_GPU_EXECUTION_FELL_BACK_TO_CPU --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --detail "Ollama PROCESSOR report showed CPU execution" >/dev/null 2>&1 || true
+      if [[ -n "$health_backend" ]]; then
+        if [[ "$processor" == cpu ]]; then
+          python3 latticevale_arch.py record-health "$health_backend" failed OLLAMA_GPU_EXECUTION_FELL_BACK_TO_CPU --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --detail "Ollama PROCESSOR report showed CPU execution" >/dev/null 2>&1 || true
+        else
+          python3 latticevale_arch.py record-health "$health_backend" failed OLLAMA_GPU_RUNTIME_UNVERIFIED --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --detail "Ollama GPU inference or PROCESSOR verification failed; attempting CPU proof" >/dev/null 2>&1 || true
+        fi
+      fi
       python3 backend-capabilities.py --stack . --compat compatibility.conf --hardware data/latticevale/hardware-capabilities.json --options install-options.json --output data/latticevale/backend-capabilities.json >/dev/null 2>&1 || true
       set_env .env LATTICEVALE_OLLAMA_ACCELERATION cpu
       set_env .env LATTICEVALE_OLLAMA_GPU_OFFLOAD_VERIFIED cpu
@@ -1612,15 +1642,21 @@ verify_or_rebudget_managed_ollama_acceleration() {
         set_env .env OLLAMA_CONTEXT_LENGTH "$cpu_context"
       fi
       set_env .env LATTICEVALE_OLLAMA_CONTEXT_AUTO "$cpu_context"
-      echo "Auto-selected $accel was detected but Ollama executed on CPU. Re-budgeting this hardware/runtime fingerprint as CPU; a driver/kernel/VRAM fingerprint change will retry GPU acceleration."
+      echo "Auto-selected $accel was not verified for GPU compute. Re-budgeting this hardware/runtime fingerprint as CPU; a driver/kernel/VRAM fingerprint change will retry GPU acceleration."
       write_latticevale_compose_overlay cpu "$(opt_bool containerResourceLimits)" || return 1
       timeout --foreground --kill-after=10s 180s docker compose up -d --pull never --no-build ollama || return 1
       wait_managed_ollama_healthy 60 || return 1
+      if [[ "$processor" == unknown ]]; then
+        # A failed GPU startup is not proof that the CPU backend works. Test the
+        # recreated CPU-only server before allowing the installer to proceed.
+        processor="$(managed_ollama_processor_class "$model")"
+        if [[ "$processor" != cpu ]]; then
+          echo "Ollama CPU fallback was selected but successful CPU execution could not be proved for '$model' (PROCESSOR=$processor). Failing closed without claiming GPU or CPU success." >&2
+          return 1
+        fi
+        echo "Managed Ollama CPU recovery verification passed for '$model'."
+      fi
       return 0
-      ;;
-    *)
-      echo "Ollama $accel acceleration was selected, but LatticeVale could not prove GPU offload from a bounded 'ollama ps' PROCESSOR check for '$model'. Refusing unverified GPU-sized resource assumptions." >&2
-      return 1
       ;;
   esac
 }
@@ -4380,6 +4416,16 @@ fi
 if local_ai_enabled; then
   echo 'Quiescing existing Hermes/Honcho model consumers before local-model validation.'
   timeout --foreground --kill-after=10s 90s docker compose stop hermes honcho-api honcho-deriver >/dev/null 2>&1 || true
+
+  # Provision the independently selected WSL-host PyTorch/DirectML runtime
+  # before probing the optional managed-Ollama fallback. A failed Docker GPU
+  # path must not prevent an eligible DirectML GPU environment from installing.
+  # The gateway inference/self-test still runs after Ollama initialization so
+  # explicit managed fallback retains its existing dependency ordering.
+  if directml_text_enabled; then
+    echo 'Preparing the independently selected WSL PyTorch DirectML GPU environment before Ollama fallback verification.'
+    timeout --foreground --kill-after=20s 3900s ./directml-gateway.sh install || return 1
+  fi
 
   if ollama_role_enabled; then
     if managed_ollama_enabled; then
