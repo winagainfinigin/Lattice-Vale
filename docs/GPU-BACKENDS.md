@@ -66,3 +66,9 @@ GPU memory is not blindly aggregated. Per-device identity/capacity is retained, 
 ## External driver ownership
 
 LatticeVale does not install or replace Windows/vendor display drivers and does not fabricate missing WSL GPU device projection. CUDA/ROCm/Vulkan/DirectML availability depends on the host/WSL environment exposed by those external components. Once a LatticeVale-managed backend is selected, its isolated packages, probes, adapter selection, admission policy, and safe fallback are LatticeVale responsibilities.
+
+### v14.6.9 DirectML vs Linux Vulkan GPU admission
+
+A working WSL `/dev/dxg` and DirectML bridge can expose a Windows AMD GPU to `torch-directml` without exposing a native Linux Vulkan/ROCm render device to Docker Ollama. `/sys/class/drm/renderD*` entries and ordinary files are **not** a usable Vulkan device; only a `/dev/dri/renderD*` character device is considered a candidate. GPU offload remains subject to actual model-start verification.
+
+For DirectML on dedicated-VRAM GPUs, installer resource admission now respects the VRAM type when budgeting the separate WSL-host gateway and all selected Docker services. The reserve never falls below protected host minimums; UMA/shared and unverified adapters do not receive this relaxation.

@@ -81,3 +81,11 @@ minimum exceeds the percentage cap, the model floor takes precedence.
 
 This source-only change requires live WSL/Docker/agent load verification
 before claiming reduced hangs.
+
+### v14.6.9 DirectML GPU topology/admission hotfix
+
+The GPU selection path previously reserved 28% of WSL RAM unconditionally for a WSL-host DirectML process even when the selected Windows adapter had **verified dedicated** VRAM. In the reported twelve-service 11,680-MiB WSL configuration, this gave Docker 8,410 MiB against 9,440 MiB protected service floors. The installer correctly rejected the impossible plan, but the cause was a GPU-mode budgeting assumption, not a proven Docker OOM or bad per-process memory limit.
+
+The corrected planner uses the selected adapter's canonical `directmlAdmission.memoryKind` and independently recomputes protected service floors. Only a dedicated-VRAM adapter may relinquish discretionary host reserve; shared/UMA, lower-bound-only and unknown adapters retain the conservative policy. A 2-GiB-or-greater host floor and at least 128 MiB container budget beyond service floors are targeted when possible, with explicit refusal if the combined protected floors cannot fit. The 11,680-MiB example allocates 2,112 MiB to WSL-host reserve and 9,568 MiB to Docker. This is not a prediction of runtime model memory usage; validate inference under load before publishing a stability claim.
+
+The hardware snapshot now excludes sysfs-only or regular-file `/dev/dri/renderD*` entries. `/dev/dxg` can support DirectML while Vulkan/ROCm remain unavailable. Auto Ollama accelerator selection must not treat a non-character render node as an actual Vulkan device.

@@ -1226,3 +1226,45 @@ loaded_goal, _ = module.plan(ram_roles, ram_live, ram_loaded, ram_record,
                               budget=10512, host_memory_mib=11680, now=510)
 assert loaded_goal['ollama']['mem'] == 7000
 print('v14.6.9 WSL-RAM-scaled per-container ceilings + safe legacy lease recovery: PASS')
+
+# v14.6.9 same-version GPU admission hotfix. The original log reproduced a
+# dedicated Radeon + DirectML text + managed CPU/Ollama fallback topology:
+# WSL 11,680 MiB; 12 selected services; protected minimum 9,440 MiB. The
+# unconditional DirectML reserve previously left 8,410 MiB for containers.
+from latticevale_arch import service_minimum_budget, ollama_model_floor
+reference_floor = ollama_model_floor(11680, 3171, 16384, 'cpu', True)
+assert reference_floor == 4864
+admission = service_minimum_budget(matrix=True, searxng=True, qmd=True,
+    ollama=True, honcho=True, hermes_floor=1024, ollama_floor=reference_floor)
+assert admission == 9440
+legacy_gpu_plan = host_memory_budget(11680, 'cpu', True, True)
+assert legacy_gpu_plan['containerBudgetMiB'] == 8410
+verified_dedicated = host_memory_budget(11680, 'cpu', True, True,
+    minimum_container_mib=admission, directml_memory_kind='dedicated')
+assert verified_dedicated == {'reserveMiB': 2112,
+    'directmlHostReserveMiB': 2112, 'containerBudgetMiB': 9568}
+assert sum(service_memory_plan(verified_dedicated['containerBudgetMiB'],
+    matrix=True, searxng=True, qmd=True, ollama=True, honcho=True,
+    hermes_floor=1024, ollama_floor=reference_floor).values()) <= verified_dedicated['containerBudgetMiB']
+for kind in ('unknown', 'shared-uma', 'dedicated-lower-bound'):
+    try:
+        host_memory_budget(11680, 'cpu', True, True,
+            minimum_container_mib=admission, directml_memory_kind=kind)
+    except ValueError as exc:
+        assert 'cannot fit' in str(exc) and kind in str(exc)
+    else:
+        raise AssertionError(f'GPU memory provenance {kind} must not authorize a smaller host reserve')
+try:
+    host_memory_budget(11680, 'cpu', True, True,
+        minimum_container_mib=admission + 900, directml_memory_kind='dedicated')
+except ValueError as exc:
+    assert 'cannot fit' in str(exc)
+else:
+    raise AssertionError('dedicated VRAM must not override WSL physical-RAM limits')
+assert host_memory_budget(11680, 'cpu', True, False,
+    minimum_container_mib=500, directml_memory_kind='dedicated') == host_memory_budget(11680, 'cpu', True, False)
+# Do not accept a stale sysfs or regular-file render node as a Vulkan GPU.
+arch_source = (STACK / 'latticevale_arch.py').read_text()
+assert 'render.name).is_char_device()' in arch_source
+assert 'glob("renderD*") if p.is_char_device()' in arch_source
+print('v14.6.9 DirectML dedicated-GPU admission, WSL render-node verification and safe failure: PASS')

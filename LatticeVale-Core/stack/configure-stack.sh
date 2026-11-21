@@ -312,6 +312,12 @@ canonical_directml_admission_confidence() {
   [[ -n "$v" ]] || v=legacy
   printf '%s' "$v"
 }
+canonical_directml_memory_kind() {
+  local v
+  v="$(jq -r '.adapterSelection.selected.directmlAdmission.memoryKind // empty' data/latticevale/backend-capabilities.json 2>/dev/null || true)"
+  [[ -n "$v" ]] || v=unknown
+  printf '%s' "$v"
+}
 
 
 adaptive_directml_context_length() {
@@ -535,8 +541,8 @@ resource_cpu_profile() {
 resource_host_memory_budget() {
   # Compatibility wrapper around the canonical 14.6 resource-policy engine.
   # Generation, verification, diagnostics and state audit all consume this API.
-  local mem_mib="$1" accel="${2:-cpu}" managed_ollama="${3:-false}" directml_selected="${4:-false}"
-  python3 runtime-policy.py host-budget "$mem_mib" "$accel" "$managed_ollama" "$directml_selected"
+  local mem_mib="$1" accel="${2:-cpu}" managed_ollama="${3:-false}" directml_selected="${4:-false}" minimum_container="${5:-0}" memory_kind="${6:-unknown}"
+  python3 runtime-policy.py host-budget "$mem_mib" "$accel" "$managed_ollama" "$directml_selected" "$minimum_container" "$memory_kind"
 }
 
 resource_ram_context_recommendation() {
@@ -717,7 +723,7 @@ resource_ollama_context_length() {
     # Size the Ollama fallback/embedding context from the container envelope that
     # remains after the WSL-host DirectML reserve, not from a fixed hybrid context.
     local hb reserve dml_reserve budget
-    hb="$(resource_host_memory_budget "$mem_mib" "$accel" true true)" || return 1
+    hb="$(resource_host_memory_budget "$mem_mib" "$accel" true true 0 "$(canonical_directml_memory_kind)")" || return 1
     IFS=: read -r reserve dml_reserve budget <<<"$hb"
     ram_ctx="$(resource_ram_context_recommendation "$budget")" || return 1
   elif declare -F choose_ollama_context_length >/dev/null 2>&1; then
@@ -821,7 +827,8 @@ write_resource_policy_report() {
     printf 'DirectML enabled: %s\n' "$(statev DIRECTML_SELECTED)"
     printf 'DirectML GPU: %s / %s\n' "$(statev DIRECTML_GPU_VENDOR)" "$(statev DIRECTML_ADAPTER_NAME)"
     printf 'DirectML VRAM limit: %s%%\n' "$(statev DIRECTML_VRAM_LIMIT_PCT)"
-    printf 'DirectML bounded admission capacity: %s MiB (source=%s; confidence=%s)\n' "$(statev DIRECTML_ADMISSION_MIB)" "$(statev DIRECTML_ADMISSION_SOURCE)" "$(statev DIRECTML_ADMISSION_CONFIDENCE)"
+    printf 'DirectML bounded admission capacity: %s MiB (source=%s; confidence=%s; memoryKind=%s)\n' "$(statev DIRECTML_ADMISSION_MIB)" "$(statev DIRECTML_ADMISSION_SOURCE)" "$(statev DIRECTML_ADMISSION_CONFIDENCE)" "$(statev DIRECTML_MEMORY_KIND)"
+    printf 'Canonical protected Docker minimum: %s MiB\n' "$(statev HOST_BUDGET_ADMISSION_MIB)"
     printf 'Shared Ollama/DirectML vendor envelope: %s\n' "$(statev GPU_SHARED_WITH_DIRECTML)"
     printf 'Ollama context length: %s\n' "$(statev OLLAMA_CONTEXT_LENGTH)"
     printf 'Ollama model floor: %s MiB\n' "$(statev OLLAMA_MODEL_FLOOR_MIB)"
@@ -864,6 +871,19 @@ write_latticevale_compose_overlay() {
   ollama_metrics="$(resource_ollama_model_metrics "$accel")" || return 1
   IFS=: read -r ollama_text_mib ollama_embed_mib ollama_context ollama_floor_mib <<<"$ollama_metrics"
   [[ "$ollama_text_mib" =~ ^[0-9]+$ && "$ollama_embed_mib" =~ ^[0-9]+$ && "$ollama_context" =~ ^[0-9]+$ && "$ollama_floor_mib" =~ ^[0-9]+$ ]] || { echo 'Could not determine model-aware Ollama resource metrics.' >&2; return 1; }
+  # This is a GPU-mode admission calculation, not a change to any per-service
+  # hard memory floor. The same floor definitions are used for generation and
+  # verification, and the trusted adapter class comes from canonical backend state.
+  local protected_minimum_mib=0 directml_memory_kind=unknown
+  if [[ "$limits" == true ]]; then
+    protected_minimum_mib="$(python3 runtime-policy.py service-minimum \
+      "$(opt_bool matrix)" "$(opt_bool searxng)" "$(opt_bool qmd)" \
+      "$(if managed_ollama_enabled; then printf true; else printf false; fi)" \
+      "$(opt_bool honcho)" "$hermes_floor_mib" "$ollama_floor_mib")" || return 1
+  fi
+  if resource_directml_selected; then
+    directml_memory_kind="$(canonical_directml_memory_kind)"
+  fi
   ram_profile="$(resource_ram_profile "$mem_mib")"
   cpu_profile="$(resource_cpu_profile "$cpus")"
   if [[ "$accel" == nvidia || "$accel" == amd ]]; then
@@ -883,7 +903,7 @@ write_latticevale_compose_overlay() {
   local reserve_mib directml_reserve_mib budget_mib host_budget managed_ollama_selected=false directml_selected_for_budget=false
   managed_ollama_enabled && managed_ollama_selected=true
   directml_text_enabled && directml_selected_for_budget=true
-  host_budget="$(resource_host_memory_budget "$mem_mib" "$accel" "$managed_ollama_selected" "$directml_selected_for_budget")" || return 1
+  host_budget="$(resource_host_memory_budget "$mem_mib" "$accel" "$managed_ollama_selected" "$directml_selected_for_budget" "$protected_minimum_mib" "$directml_memory_kind")" || return 1
   IFS=: read -r reserve_mib directml_reserve_mib budget_mib <<<"$host_budget"
 
   # Canonical 14.6 CPU, application tuning, and service-memory planning.  These
@@ -990,6 +1010,7 @@ write_latticevale_compose_overlay() {
     [CPU_DOCKER_ENVELOPE_MILLI]="$cpu_docker_envelope_milli" [CPU_DOCKER_ALLOCATED_MILLI]="$cpu_docker_allocated_milli"
     [MEM_MIB]="$mem_mib" [RAM_PROFILE]="$ram_profile"
     [RESERVE_MIB]="$reserve_mib" [DIRECTML_HOST_RESERVE_MIB]="$directml_reserve_mib"
+    [HOST_BUDGET_ADMISSION_MIB]="$protected_minimum_mib" [DIRECTML_MEMORY_KIND]="$directml_memory_kind"
     [RESOURCE_POLICY_MODE]=adaptive [RESOURCE_BURST_STRATEGY]=bounded-v14
     [BUDGET_MIB]="$budget_mib" [MATRIX_PROFILE_GATEWAYS]="$matrix_profile_gateways"
     [KANBAN_CONCURRENCY]="$kanban_concurrency" [HERMES_MIN_MIB]="$hermes_floor_mib"

@@ -408,6 +408,11 @@ def _drm_adapters() -> list[dict[str, Any]]:
     if not root.is_dir():
         return adapters
     for render in sorted(root.glob("renderD*"), key=lambda p: p.name):
+        # A sysfs render entry alone does not make the corresponding device
+        # usable by Docker/Ollama.  Require the real character device, just
+        # as resolve_ollama_acceleration() does at execution time.
+        if not (Path("/dev/dri") / render.name).is_char_device():
+            continue
         dev = render / "device"
         if not dev.exists():
             continue
@@ -508,8 +513,8 @@ def probe_hardware(stack: Path, compat: dict[str, str], windows_snapshot: dict[s
     drm_adapters = _drm_adapters()
     dri_render = [str(item.get("renderNode") or "") for item in drm_adapters if item.get("renderNode")]
     # Preserve the topology signal even when sysfs identity is unavailable (some WSL/kernel combinations).
-    if not dri_render and Path("/dev/dri").exists():
-        dri_render = sorted(str(p) for p in Path("/dev/dri").glob("renderD*") if p.exists())
+    if not dri_render and Path("/dev/dri").is_dir():
+        dri_render = sorted(str(p) for p in Path("/dev/dri").glob("renderD*") if p.is_char_device())
     kfd = _device("/dev/kfd")
     bridge: dict[str, dict[str, Any]] = {}
     for name in ("libd3d12.so", "libd3d12core.so", "libdxcore.so"):
@@ -1109,7 +1114,8 @@ def _round_step(value: float | int, step: int = 64) -> int:
     return int((float(value) + (step / 2.0)) // step) * step
 
 
-def host_memory_budget(mem_mib: int, accel: str, managed_ollama: bool, directml_selected: bool) -> dict[str, int]:
+def host_memory_budget(mem_mib: int, accel: str, managed_ollama: bool, directml_selected: bool,
+                       *, minimum_container_mib: int = 0, directml_memory_kind: str = "unknown") -> dict[str, int]:
     """Derive host/container memory from live WSL RAM and selected execution paths.
 
     This intentionally has no machine-size table.  Safety floors/caps protect tiny
@@ -1148,7 +1154,38 @@ def host_memory_budget(mem_mib: int, accel: str, managed_ollama: bool, directml_
         directml = _clamp_int(int(mem_mib * 0.28), dml_floor, directml_cap)
         reserve = max(reserve, directml)
 
+    # GPU hotfix: the old unconditional 28% reserve is appropriate for an
+    # unverified or shared/UMA DirectML adapter, but can make a discrete GPU
+    # impossible to select even when its VRAM can hold the accelerator payload.
+    # Rebalance only the *discretionary* part of that reserve if the canonical
+    # adapter has verified dedicated VRAM and protected Docker service floors
+    # are known.  A minimum WSL-host DirectML reserve remains mandatory.
+    # Memory floors, per-container caps, user overrides and total host memory
+    # are never increased, reduced or overcommitted to force admission.
+    if minimum_container_mib < 0:
+        raise ValueError("minimum container budget must be nonnegative")
+    if (directml_selected and directml_memory_kind == "dedicated" and
+            minimum_container_mib > 0 and mem_mib - reserve < minimum_container_mib + 128):
+        minimum_host = max(2048, min(8192, int(mem_mib * 0.16)),
+                           _clamp_int(int(mem_mib * base_ratio), 768, base_cap))
+        if minimum_host + minimum_container_mib > mem_mib:
+            raise ValueError(
+                "Dedicated DirectML GPU topology cannot fit its protected host "
+                f"reserve and Docker services: WSL={mem_mib}MiB, "
+                f"host-minimum={minimum_host}MiB, Docker-minimum={minimum_container_mib}MiB. "
+                "Choose fewer services/a smaller fallback model, or increase WSL RAM."
+            )
+        reserve = max(minimum_host, min(reserve, mem_mib - minimum_container_mib - 128))
+        directml = reserve
+
     budget = mem_mib - reserve
+    if minimum_container_mib and budget < minimum_container_mib:
+        raise ValueError(
+            f"GPU/DirectML selected service topology cannot fit its protected "
+            f"memory floors: budget={budget}MiB, minimum={minimum_container_mib}MiB, "
+            f"DirectML-memory-kind={directml_memory_kind}. No service memory "
+            "floor has been reduced."
+        )
     if budget < 384:
         raise ValueError("too little memory remains for a safe LatticeVale container budget")
     return {"reserveMiB": reserve, "directmlHostReserveMiB": directml, "containerBudgetMiB": budget}
@@ -1345,6 +1382,15 @@ def _service_specs(
         cap = min(absolute_max, max(minimum, minimum + adaptive_extra))
         specs.append((name, weight, minimum, cap))
     return specs
+
+
+def service_minimum_budget(*, matrix: bool, searxng: bool, qmd: bool,
+                           ollama: bool, honcho: bool, hermes_floor: int,
+                           ollama_floor: int) -> int:
+    """Compute the minimum for the installed service set with no duplicated floors."""
+    return sum(item[2] for item in _service_specs(
+        0, matrix=matrix, searxng=searxng, qmd=qmd, ollama=ollama,
+        honcho=honcho, hermes_floor=hermes_floor, ollama_floor=ollama_floor))
 
 
 def service_memory_plan(
@@ -1636,7 +1682,34 @@ def validate_runtime_policy_state(
     accel = state.get("OLLAMA_ACCELERATION", "cpu")
     managed = state.get("MANAGED_OLLAMA_SELECTED", "false") == "true" if "MANAGED_OLLAMA_SELECTED" in state else True
     directml = state.get("DIRECTML_SELECTED", "false") == "true"
-    expected = host_memory_budget(mem, accel, managed, directml)
+    admission_minimum = _int_state(state, "HOST_BUDGET_ADMISSION_MIB", 0) if "HOST_BUDGET_ADMISSION_MIB" in state else 0
+    memory_kind = "unknown"
+    if directml and isinstance(backends, dict):
+        selected = ((backends.get("adapterSelection") or {}).get("selected") or {})
+        gpu_admission = selected.get("directmlAdmission") if isinstance(selected, dict) else None
+        if isinstance(gpu_admission, dict):
+            memory_kind = str(gpu_admission.get("memoryKind") or "unknown")
+    if "DIRECTML_MEMORY_KIND" in state and state["DIRECTML_MEMORY_KIND"] != memory_kind:
+        raise ValueError("DirectML memory kind changed; regenerate canonical hardware/backend policy")
+    if admission_minimum:
+        computed_minimum = service_minimum_budget(
+            matrix=bool(options.get("matrix")) if options is not None else "CPU_SYNAPSE_MILLI" in state,
+            searxng=bool(options.get("searxng")) if options is not None else "CPU_SEARXNG_MILLI" in state,
+            qmd=bool(options.get("qmd")) if options is not None else "CPU_QMD_MILLI" in state,
+            ollama=managed,
+            honcho=bool(options.get("honcho")) if options is not None else "CPU_HONCHO_API_MILLI" in state,
+            hermes_floor=_int_state(state, "HERMES_MIN_MIB", 1024),
+            ollama_floor=_int_state(state, "OLLAMA_MODEL_FLOOR_MIB", 0),
+        )
+        if admission_minimum != computed_minimum:
+            raise ValueError(f"HOST_BUDGET_ADMISSION_MIB mismatch: expected {computed_minimum}, found {admission_minimum}")
+    # Legacy release states with no admission metadata still use their old
+    # host-budget calculation, and can be migrated by a fresh installer write.
+    if "DIRECTML_MEMORY_KIND" not in state:
+        memory_kind = "unknown"
+    expected = host_memory_budget(mem, accel, managed, directml,
+                                  minimum_container_mib=admission_minimum,
+                                  directml_memory_kind=memory_kind)
     actual = {
         "reserveMiB": _int_state(state, "RESERVE_MIB", 0),
         "directmlHostReserveMiB": _int_state(state, "DIRECTML_HOST_RESERVE_MIB", 0),
@@ -1808,7 +1881,7 @@ def validate_runtime_policy_state(
         "cpuEnvelope": {**cpu_envelope, "allocatedDockerMilli": allocated_cpu},
         "tuning": tuning,
         "ollamaRuntime": ollama_runtime,
-        "directmlRuntime": {"contextLength": dml_context, "cpuThreads": dml_threads, "maxNewTokens": dml_generation, "admissionMiB": vram_mib, "admissionSource": vram_source, "admissionConfidence": vram_confidence},
+        "directmlRuntime": {"contextLength": dml_context, "cpuThreads": dml_threads, "maxNewTokens": dml_generation, "admissionMiB": vram_mib, "admissionSource": vram_source, "admissionConfidence": vram_confidence, "memoryKind": memory_kind},
         "policyFingerprint": policy_fp,
     }
 
