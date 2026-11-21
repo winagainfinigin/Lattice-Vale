@@ -212,7 +212,7 @@ eda9b6b60831b4089c1651dfc881f20bcd1e30cdad677cc6a30780c34a6aa98d  LatticeVale-Co
 9d8ffca0eb9f296d53729b6d94b40f73be216e23bc64c49be1c8f554a572c6e4  LatticeVale-Core/tests/v14.5.2-release-identity-fixtures.py
 8bc3ef109e5414057cd8d68c63b68c14fe864a0bf6447576b182e35c8c2b2be5  LatticeVale-Core/tests/v14.5.3-directml-hybrid-fixtures.py
 a8f9b62823851bd2f257a15c4b30f4678e8983716c4574edf125396cd61409c3  LatticeVale-Core/tests/v14.5.4-vram-lowmem-fixtures.py
-1aeb5d80dcb95a8a70396cde2844127b340677810f8df7ebd6c0e843e52e9f29  LatticeVale-Core/tests/v14.5.42-hardware-resource-policy-fixtures.py
+8493bb3a24025a2992c282b87e7a8ef2eaef2ddc82bed11ed52c8d984781fcee  LatticeVale-Core/tests/v14.5.42-hardware-resource-policy-fixtures.py
 a5a257ba4205895a07e30a803754aa3de50c404ecf0763cdca12a40da87f9dd4  LatticeVale-Core/tests/v14.5.43-universal-repair-migration-fixtures.py
 a0c3ec6b91113f50fbf9fb4c8c97b835b32bcfe15ab3bf907e08491a475c1f02  LatticeVale-Core/tests/v14.5.44-directml-preflight-fixtures.py
 ec16c06189f4674eb5896fc10e98fe9327cdf92194906b100cd26052fcaf1fd7  LatticeVale-Core/tests/v14.5.45-powershell-generic-list-compat-fixtures.py

@@ -136,10 +136,19 @@ else:
 # explicitly forced GPU is fail-closed.
 for marker in (
     "managed_ollama_processor_class() {", "ollama ps", "LATTICEVALE_OLLAMA_GPU_OFFLOAD_VERIFIED",
-    "if [[ \"$requested\" != auto ]]; then", "Refusing to retain GPU-sized resource assumptions",
+    "if [[ \"$requested\" != auto ]]; then",
     "Re-budgeting this hardware/runtime fingerprint as CPU", "write_latticevale_compose_overlay cpu",
 ):
     assert marker in cfg, marker
+
+# Check the fail-closed control flow rather than fragile diagnostic wording.
+# A forced GPU selection must abort, whereas Auto may rebudget to CPU only
+# after the selected model's CPU execution has actually been verified.
+offload_verify = cfg.split("verify_or_rebudget_managed_ollama_acceleration() {", 1)[1].split("\nverify_honcho_embedding_model() {", 1)[0]
+forced_gpu_branch = offload_verify.split('if [[ "$requested" != auto ]]; then', 1)[1].split('\n      fi', 1)[0]
+assert "return 1" in forced_gpu_branch, "explicitly selected GPU must fail closed"
+assert "cpu|unknown)" in offload_verify, "Auto must handle unverified GPU execution"
+assert 'if [[ "$processor" != cpu ]]; then' in offload_verify, "Auto CPU recovery needs runtime processor proof"
 assert 'details.append(f"GPU execution verified at runtime by ollama ps ({resolved_accel})")' in audit
 
 # Native Windows Ollama is advisory/user-owned: LatticeVale documents conservative
