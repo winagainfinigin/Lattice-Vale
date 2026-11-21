@@ -20,6 +20,29 @@ headers = {
 for path, prefix in headers.items():
     assert path.read_text(encoding="utf-8").startswith(prefix), path
 
+# Current-release documentation must not send users to historical release ZIPs
+# or portray superseded Tailscale checks and version identities as current.
+if version == "14.7.0":
+    current_readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    for marker in (
+        "v14.7.0 Ollama GPU-verification hotfix (same version)",
+        "## Historical v14.6.x release context",
+        "not a v14.7.0 installation requirement",
+        "without an elapsed-day gate",
+        "## Release history",
+        "Current source and same-version hotfix",
+        "current PowerShell session",
+    ):
+        assert marker in current_readme, marker
+    for stale in (
+        "GitHub main now contains v14.6.7 source",
+        "current 14.6.7 source",
+        "CURRENT INSTALL RELEASE",
+    ):
+        assert stale not in current_readme, stale
+    assert current_readme.rstrip().endswith("See [LICENSE](LICENSE).")
+    assert (ROOT / "docs/HOTFIX-14.7.0-OLLAMA-OFFLOAD.md").is_file()
+
 required = {
     ROOT / "README.md": ["v14.5.2 — cleanup / reclaim disk space maintenance release", "Option 7", "v14.5.1", "resource policy **v9**", "Changed-files source candidate" if version == "14.6.9" else ("manifest-built release archives" if version == "14.7.0" else "Current install release")],
     CORE / "README.md": ["v14.5.2 adds the install-preserving Option 7", "v14.5.1 adds resource policy v9"],

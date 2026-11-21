@@ -1,16 +1,18 @@
 # LatticeVale v14.7.0
 
-> **v14.7.0:** Adds manifest-built release archives, opt-in live qualification, and sanitized resource-controller decision history. Hosted CI still does not prove behavior on a specific Windows/WSL/GPU host. See `docs/RESOURCE-POLICY-14.7.0-REVIEW.md`.
+> **v14.7.0 current source:** Adds manifest-built release archives, opt-in live qualification, and sanitized resource-controller decision history. Hosted CI validates the packaged source but does **not** prove behavior on a specific Windows/WSL/GPU host. See [v14.7.0 review](docs/RESOURCE-POLICY-14.7.0-REVIEW.md).
+
+> **v14.7.0 Ollama GPU-verification hotfix (same version):** A temporary 60-second *request-scoped* model keep-alive prevents the normal `OLLAMA_KEEP_ALIVE=0s` DirectML coexistence policy from unloading a test model before `ollama ps` can inspect its CPU/GPU placement. The verifier checks the exact requested model, reports failed inference or processor queries, and unloads the test model afterward. Auto-selected acceleration re-budgets as CPU only when Ollama positively reports CPU execution; unknown status still fails closed. This is a source-level fix, **not** proof that Vulkan or DirectML works on the host. See [hotfix notes](docs/HOTFIX-14.7.0-OLLAMA-OFFLOAD.md).
+
+## Historical v14.6.x release context
+
+The versioned notes below document earlier fixes carried into v14.7.0. They do not make an older release, overlay ZIP, or previously required verification procedure the current installation method.
 
 **Inherited 14.6.8 hotfix context:** The RAM fixture tests simulated low/high RAM without changing the production admission guard; the read-only state audit lists stored digest evidence for managed floating `:latest` image tags. [Function/danger-zone index](docs/FUNCTION-INDEX.md) documents high-risk monolith code without moving it. Windows PowerShell 5.1/7, actual Ubuntu-D/Docker, and antivirus behavior require live validation before calling this release fully qualified.
 
 > **14.6.7 same-version budget-recovery / Element security-triage overlay (2026-11-13):** A verified Docker Compose container replacement can restore its canonical memory ceiling while other containers retain safe, previously borrowed allocations. The controller now reconciles only the proven aggregate excess using an eligible unchanged donor and measured cgroup headroom, with exclusive locking, a recovery journal and fail-closed checks; it does not reset the entire stack. The optional read-only `tools/Audit-LatticeVale-Element-Adlice.ps1` inspects Element Desktop provenance for an Adlice alert without excluding files or disabling protection. **This ZIP is a source overlay, not a live-runtime success claim.** See [Resource Policy](docs/RESOURCE-POLICY.md), [Repair](docs/REPAIR.md), [Security](docs/SECURITY.md), and [Testing](docs/TESTING.md).
 
-> **v14.6.7 source release:** GitHub main now contains v14.6.7 source.
-> The original changed-files overlay applied to commit `74050427` (14.6.6),
-> but it is not itself a complete installer. Extract a verified full release
-> as one `Lattice-Vale/` folder and launch its `installer/Install-LatticeVale.ps1`.
-> Use the preservation-first Resume / repair workflow for existing WSL stacks.
+> **Historical v14.6.7 source overlay:** The original changed-files overlay applied to commit `74050427` (v14.6.6); it was never a standalone installer. For a current installation, extract the complete, verified **v14.7.0** release source as one `Lattice-Vale/` folder, then run `installer/Install-LatticeVale.ps1` and choose preservation-first **Resume / repair** for an existing managed WSL stack.
 
 > **Downstream portable-performance resource hotfix (same 14.6.6 version):**
 > Canonical CPU quotas now prioritize Hermes and CPU/Vulkan Ollama within the
@@ -19,7 +21,7 @@
 > resource controller can be enabled alongside a *verified image-only*
 > Hermes Compose override; CPU-quota-induced stall pressure no longer blocks
 > in-envelope borrowing. This 14.6.6 hotfix is already incorporated in the
-> current 14.6.7 source; do not reapply its historical ZIP. For a live managed
+> v14.7.0 source; do not reapply its historical ZIP. For a live managed
 > stack, launch the complete current installer and choose Option 1 —
 > Resume / repair. Live Windows/WSL/Docker performance qualification remains required.
 > See [Resource Policy](docs/RESOURCE-POLICY.md) and
@@ -39,12 +41,12 @@
 
 > **v14.6.5 corrective hotfix:** Matrix ID domains, Element homeserver URLs, and Tailscale hostnames are stored separately; existing Synapse identities stay authoritative. Tailscale setup validates the local relay, Serve listener, and Matrix client API without a second-device page challenge, and keeps exact matching Serve routes in place. Installer-managed non-standalone Hermes profiles converge to the shared host gateway while explicit `gateway.standalone: true` profiles remain independent. Repair and normal start preserve an already healthy gateway instead of restarting or remigrating it, but only after exact s6 PID, fresh gateway state, complete `served_profiles`, stable-PID, and Matrix-adapter checks pass. The post-release 14.6.5 hotfix keeps speculative checkpoint probes silent, gives a just-started shared gateway a bounded settle window before migration, and treats an upstream migration timeout as recoverable only when strict live convergence subsequently proves the gateway healthy. Current resource diagnostics describe Matrix-enabled secondary profiles as shared-gateway workload rather than implying one resident gateway per profile. Existing-stack runs include backup progress and a per-run backup skip; planned Ubuntu APT refresh includes elapsed progress and a per-run skip. Schema 24 remains compatible.
 
-> **v14.6.2 Hotfix:** fixes the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Apply the hotfix and rerun the installer; no uninstall or data reset is required.
+> **Historical v14.6.2 Hotfix (included in v14.7.0):** fixed the original v14.6.2 Linux bootstrap staging typo that duplicated an `install -m 0644 ... \` command immediately before the `compatibility.conf` copy. The defect could stop Resume / repair or Update / repair with `install: target .../compatibility.conf: Not a directory`. The hotfix changes no schema, data layout, managed-update policy, database-major bounds, DirectML/PyTorch compatibility envelope, or explicit user overrides. Do not reapply the old hotfix ZIP to v14.7.0; use the complete current installer and Resume / repair.
 
 
 > For **any recognized older installer-managed LatticeVale installation**, use a complete, verified v14.7.0 installer source release and choose **Resume / repair installation**. The source-only patch ZIP does not update an installed runtime on its own. v14.6.2 changes managed software refresh from bundle-fixed application pins to **latest-supported stable upstream channels** while retaining preservation-first migration, explicit override ownership, compatible stateful database majors, and the tested PyTorch/DirectML compatibility envelope.
 
-The replacement-files/patch ZIP is **not a universal Git diff** and must not be layered over a live `~/hermes-stack`. The patch ZIP remains for source checkouts only; for an installed LatticeVale stack, use the full current release and the installer's Resume / repair path so ownership, backups, migrations, and checkpoint reconciliation remain intact.
+Changed-files ZIPs are **source-tree overlays**, not standalone installers or universal Git diffs. Apply one only over its documented matching repository revision; never extract it directly into a live `~/hermes-stack`. For an installed LatticeVale stack, use complete, manifest-verified v14.7.0 source and **Resume / repair**, preserving ownership, backups, migrations, and checkpoint reconciliation.
 
 
 ## v14.6.3 - Matrix/Tailscale and gateway hotfix
@@ -82,7 +84,7 @@ v14.6.1 fixes a false-positive health path in Windows Tailscale Matrix exposure.
 
 The hotfix remains authentication-neutral: it does not add or migrate Matrix Authentication Service (MAS). It validates the Synapse client-discovery and login path that LatticeVale already manages, without changing the immutable `server_name` or existing Matrix user IDs.
 
-**Same-version remote-access hardening:** v14.6.1 now treats host-local Tailscale Serve checks as local evidence rather than proof that another device can connect. The installer verifies Windows Tailscale client/authentication state, a valid 100.x address and MagicDNS hostname, HTTPS capability, inbound-connections policy, relay health, exact Serve listeners, and the Matrix client path. A final **PASS** requires a one-time token to be opened and confirmed from a second Tailscale device during the current run; skipped validation is **PARTIAL**, and classified DNS/transport/TLS/Serve/Matrix failures are **FAIL**. Existing Windows Tailscale DNS preference is preserved rather than rewritten, while DNS health is tested independently.
+**Historical behavior superseded in v14.6.3:** The v14.6.1 remote-access hardening treated host-local Tailscale Serve checks as local evidence rather than proof that another device could connect. The installer verifies Windows Tailscale client/authentication state, a valid 100.x address and MagicDNS hostname, HTTPS capability, inbound-connections policy, relay health, exact Serve listeners, and the Matrix client path. A final **PASS** requires a one-time token to be opened and confirmed from a second Tailscale device during the current run; skipped validation is **PARTIAL**, and classified DNS/transport/TLS/Serve/Matrix failures are **FAIL**. Existing Windows Tailscale DNS preference was preserved rather than rewritten, while DNS health was tested independently. **The second-device challenge described here was removed in v14.6.3 and is not a v14.7.0 installation requirement.**
 
 ## v14.6.0 — Canonical hardware, backend, and resource architecture
 
@@ -176,6 +178,8 @@ v14.5.1 corrects adaptive resource-policy failures found by real full-stack WSL 
 
 `state-audit.py`, `./manage.sh verify`, and the v14.5 read-only planner now treat a running selected container with Docker `OOMKilled=true` as a repairable runtime-policy problem instead of allowing recovered endpoints to produce a false `HEALTHY` result. Existing policy-v2/v3/v4/v5/v6/v7/v8 fingerprints automatically become stale and are regenerated/reconciled by normal Resume / repair or the existing start-time resource refresh. The policy fingerprint also persists each generated service ceiling, and final reconciliation compares those values with Docker's live `HostConfig.Memory`; an existing v14.5.0 container that still has the old 544 MiB Hermes cgroup cannot be accepted merely because the current YAML/state files were rewritten. LatticeVale still does not write global WSL `memory` or `autoMemoryReclaim` settings.
 
+Policy v9 also closes the last model-selection generalization gap for the public repository. Managed Ollama no longer assumes every local model has the same RAM requirement: once the selected text/embedding manifests exist, the allocator fingerprints their artifact sizes and the persisted context length, derives a larger CPU/GPU-aware floor when necessary, and performs a second bounded reconciliation after model download. The text and embedding sizes are not summed because LatticeVale constrains managed Ollama to one loaded model. If the model-aware minimum plus enabled services cannot fit, installation/repair fails with an actionable resource message. Self-hosted Honcho now receives an adaptive supported request timeout while preserving explicit user timeout values, and `./manage.sh status` distinguishes historical `memory.max` counters from new pressure by sampling deltas.
+
 ### v14.5.0 — read-only planning foundation
 
 v14.5.0 is a deliberately small architectural release. It adds a WSL-native, standard-library Python reader for existing installer selections, derived runtime environment, checkpoint state, and the presence/hash of the user-owned `compose.override.yaml` without making any of those files a new write target. `./manage.sh repair --plan` (or `./manage.sh plan`) produces a read-only repair plan by combining the existing checkpoint/revision state with the existing `state-audit.py`; applying repair still requires the Windows installer **Resume / repair** path. The existing checkpoint engine is not replaced or made dependent on the new metadata: its current hardcoded revisions are mirrored in `checkpoint-metadata.json` for read-only tooling and CI verifies that the mirror stays synchronized.
@@ -233,7 +237,7 @@ Depending on the selected installation options, LatticeVale can provide:
 - Matrix/Synapse provisioning and cross-signing persistence
 - Honcho local contextual-memory infrastructure
 - SearXNG search plus keyless public-page extraction for Hermes research
-- Hermes Local Browser / Chromium support using the runtime supplied by the pinned Hermes image
+- Hermes Local Browser / Chromium support using the runtime supplied by the selected managed Hermes image
 - QMD indexing, including optional Windows Obsidian vault access
 - LatticeVale-managed or supported Windows-native Ollama integration
 - adaptive Docker/WSL resource policy
@@ -608,7 +612,7 @@ managed runtime payload requires refresh
 
 A bundle-version change by itself no longer forces package, image, build, or source refresh.
 
-Managed refresh is instead controlled by actual runtime state, the managed-refresh policy/revision, periodic refresh conditions, required migrations, or an explicit forced update.
+Historically, v14.4.6 considered runtime state, managed-refresh policy/revision, periodic conditions, migrations, and explicit forced updates. **Current v14.7.0 Option 1 checks latest-supported managed software availability on every run without an elapsed-day gate**; only verified availability or missing managed components triggers its normal managed refresh. Option 6 remains the explicit forced refresh.
 
 This allows:
 
@@ -653,7 +657,10 @@ Intermediate v14.4.3–v14.4.6 installations are not required when upgrading fro
 | **v14.6.4** | Prior install release | Local Tailscale/Matrix route validation without a second-device challenge, backup and Ubuntu refresh progress with run-level skips, streamed cleanup, and schema-24 compatibility |
 | **v14.6.5** | Previous release | Shared-gateway idempotency, live s6/gateway-state/served-profile convergence proof, route-aware Matrix adapter verification, explicit standalone preservation, and no unnecessary healthy-gateway restart/remigration |
 | **v14.6.6** | Previous source | Update-on-availability Option 1, retired refresh age gate, verified IPv4/IPv6 HTTPS without listener-only rollback; same schema 24 |
-| **v14.6.7** | **Changed-files source candidate** | Correct installer staging, process-birth-safe gateway readiness, Matrix audit, standalone preferences, strict Docker ownership cleanup; same schema 24. Full host qualification remains pending. |
+| **v14.6.7** | Prior source | Correct installer staging, process-birth-safe gateway readiness, Matrix audit, standalone preferences, strict Docker ownership cleanup; schema 24 retained. |
+| **v14.6.8** | Prior source | Test reliability, audit transparency, function indexing, bounded resource-budget rebind recovery, and Windows relay recovery hardening. |
+| **v14.6.9** | Prior source | Canonical resource-policy consolidation and bounded CPU donation under verified memory/I/O pressure constraints; full host qualification remained separate. |
+| **v14.7.0** | **Current source and same-version hotfix** | Manifest-built release packaging, optional live qualification, resource-controller auditability, and request-scoped keep-alive for accurate Ollama GPU-verification diagnostics. Live host qualification remains separate. |
 
 ### v14.4.1
 
@@ -735,7 +742,7 @@ v14.4.83  resource/runtime repair patch + Hotfix 2 launcher correction
     ↓
 v14.4.84  WSL lifecycle transport repair + Matrix readiness Hotfix 1
     ↓
-v14.4.85  reconcile/maintenance reliability / CURRENT INSTALL RELEASE
+v14.4.85  reconcile/maintenance reliability / historical v14.4.x milestone
 ```
 
 ---
@@ -812,7 +819,7 @@ Start with:
 
 ### Install
 
-From PowerShell at the repository or release root:
+From PowerShell **with the working directory set to the complete repository/release root** (the folder containing `installer/` and `LatticeVale-Core/`). These commands use relative paths. If you instead use a `$Repo` variable in custom commands, assign it in the **current PowerShell session** first; it is not predefined. A Git checkout and a separately extracted installation-source folder do not update each other automatically:
 
 ```powershell
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\Install-LatticeVale.ps1
@@ -826,7 +833,7 @@ LatticeVale requires an existing supported Ubuntu WSL2 distribution. It does not
 powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1
 ```
 
-This verifies the release/source package and checksum manifest. It is distinct from verifying the live installed stack.
+This verifies the release/source package and checksum manifest. It is distinct from verifying the live installed stack. If PowerShell says `\installer\verify-release.ps1` does not exist, a custom command probably expanded an unset path variable; use the relative command above **from the actual release root** or an explicit absolute path to the script. Check the process exit code before treating verification as successful.
 
 ### Verify or audit an installed stack
 
@@ -860,5 +867,3 @@ For an existing installation, the installer provides state-aware verification, R
 LatticeVale is licensed under the MIT License.
 
 See [LICENSE](LICENSE).
-
-Policy v9 also closes the last model-selection generalization gap for the public repository. Managed Ollama no longer assumes every local model has the same RAM requirement: once the selected text/embedding manifests exist, the allocator fingerprints their artifact sizes and the persisted context length, derives a larger CPU/GPU-aware floor when necessary, and performs a second bounded reconciliation after model download. The text and embedding sizes are not summed because LatticeVale constrains managed Ollama to one loaded model. If the model-aware minimum plus enabled services cannot fit, installation/repair fails with an actionable resource message. Self-hosted Honcho now receives an adaptive supported request timeout while preserving explicit user timeout values, and `./manage.sh status` distinguishes historical `memory.max` counters from new pressure by sampling deltas.
