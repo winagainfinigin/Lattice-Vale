@@ -1,3 +1,7 @@
+# LatticeVale 14.6.9 consolidated resource policy (canonical schema 13, bounded runtime scheduler 14)
+
+See [14.6.9 review](RESOURCE-POLICY-14.6.9-REVIEW.md) for each version and authoritative source. The dynamic controller retains all prior identity, memory-charge, journal, rollback, and DirectML safety guards; under host memory/I/O PSI it may still lend *conserved* CPU to measured throttled services. Fresh cgroup memory.max events prevent designation as an idle donor. This policy does not prove a gateway watchdog fix.
+
 # LatticeVale 14.6.7 Resource Scheduler v14 (Canonical Schema v13; 14.6.6 lineage)
 
 ## 14.6.8 second recurrence: replacement CPU quota, not just memory (2026-11-16)

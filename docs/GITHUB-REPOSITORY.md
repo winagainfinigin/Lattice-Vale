@@ -6,7 +6,7 @@
 > **v14.6.6 current-release update policy:** installer-managed application software now uses latest-supported stable upstream resolution when a managed refresh is due; Option 6 forces that refresh after the per-run pre-install backup choice. Mutating existing-stack modes (Options 1, 2, 4, 5, and 6) offer the backup skip choice with live progress. A per-run Ubuntu APT refresh choice appears when refresh is planned or its need cannot be determined; targeted package installs still run when skipped. Explicit overrides remain preserved, stateful database/cache majors stay compatibility-bounded, and PyTorch/DirectML remains a qualified ABI envelope. Exact resolved artifacts are recorded in `data/latticevale/managed-upstreams.json`.
 
 
-This document describes the LatticeVale **v14.6.8** repository/release contract for GitHub.
+This document describes the LatticeVale **v14.6.9** repository/release contract for GitHub.
 
 ## Repository structure
 

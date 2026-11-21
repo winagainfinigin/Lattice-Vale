@@ -1,4 +1,6 @@
-# LatticeVale v14.6.8 — Stable
+# LatticeVale v14.6.9 — Stable
+
+> **14.6.9 source candidate:** Resource policy consolidation only; live Windows/WSL/Docker qualification outstanding.
 
 > **14.6.7 same-version budget-aware repair and Element/Adlice triage (2026-11-13):** If a verified Compose replacement restores a previously lent memory ceiling, the bounded-burst controller can recover the small resulting overage from unchanged, safely measured donors. It preserves valid leases and fails closed when reclaimable cgroup headroom is insufficient. An optional read-only Element Desktop file/signature/hash audit assists Adlice detection triage but cannot declare an alert false or modify antivirus exclusions. See [Resource Policy](RESOURCE-POLICY.md), [Repair](REPAIR.md), [Diagnostics](DIAGNOSTICS.md), [Security](SECURITY.md), and [Testing](TESTING.md). Live Windows/WSL and a new CI run remain separate verification gates.
 

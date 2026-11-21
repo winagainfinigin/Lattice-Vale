@@ -1,3 +1,7 @@
+## v14.6.9 current release (source candidate; live validation outstanding)
+
+Release archive preserves v14.6.8 canonical schema 13 and validated resource state, with safeguarded live-policy improvements. See `RESOURCE-POLICY-14.6.9-REVIEW.md`. Do not deploy without backup and Windows/WSL validation.
+
 ## 14.6.7 cumulative budget-recovery + Element/Adlice documentation overlay (2026-11-13)
 
 - **Distribution:** changed-files-only overwrite, not a standalone release or a direct WSL runtime patch. Apply over the complete *matching* 14.6.7 repository tree. Preserve `LatticeVale-Core/VERSION.txt` and all unchanged files; re-run `powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File .\installer\verify-release.ps1` from that root.
@@ -26,7 +30,7 @@
 > rollback, DirectML re-admission, repair restoration, and user overrides.
 > Windows/WSL live load testing remains separately required.
 
-> **v14.6.8 current release:** `VERSION.txt` must be 14.6.7. Canonical installer-options schema is **24**, runtime-policy schema remains **13**, and managed-refresh revision remains **5**. Schema-23 install options must remain readable and migrate to schema 24 without introducing a user-facing Matrix relay-limit setting; interim schema-24 relay-limit data is tolerated but ignored.
+> **v14.6.9 current release:** `VERSION.txt` must be 14.6.7. Canonical installer-options schema is **24**, runtime-policy schema remains **13**, and managed-refresh revision remains **5**. Schema-23 install options must remain readable and migrate to schema 24 without introducing a user-facing Matrix relay-limit setting; interim schema-24 relay-limit data is tolerated but ignored.
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 

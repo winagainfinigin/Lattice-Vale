@@ -1,4 +1,6 @@
-# LatticeVale v14.6.8 — Technical README
+# LatticeVale v14.6.9 — Technical README
+
+> **14.6.9 source candidate:** Resource policy consolidation only; live Windows/WSL/Docker qualification outstanding.
 
 > **Same-version 14.6.7 resource repair note (2026-11-13):** The latest changed-files overlay adds budget-aware recovery when verified Docker container replacements restore canonical resource ceilings and briefly overcommit the aggregate memory budget. Authenticated snapshots and untouched leases are preserved, cgroup-safe donor limits and a locked recovery journal are required, and unsafe reductions fail closed. The optional repository-side Element/Adlice PowerShell diagnostic is read-only, not a scanner exception or malware verdict. See [Resource Policy](../docs/RESOURCE-POLICY.md), [Repair](../docs/REPAIR.md), and [Testing](../docs/TESTING.md); source tests are not live deployment proof.
 

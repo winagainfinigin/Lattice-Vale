@@ -2,6 +2,14 @@
 
 - **v14.6.8 same-version Option 1 recurrence correction (2026-11-16):** verified replacement rebind now reconciles **both** CPU and RAM envelopes atomically (including restored 50m QMD-indexer CPU quota) without undoing Ollama's verified burst; failed repairs preserve healthy exact-owned relay listeners and can rebuild only malformed installer-owned relay JSON from persisted ports. Adds mixed CPU/RAM rollback and interruption regressions; live Windows end-to-end verification remains required.
 
+## 14.6.9 (resource policy consolidation candidate)
+
+- Preserve the v14.6.0 canonical schema-13 hardware/backend admission, the v14.6.5 topology and repair safeguards, the v14.6.6 bounded burst/priority logic, and the v14.6.7/8 verified replacement/rollback transaction machinery.
+- Under memory or I/O pressure, continue *bounded within-envelope CPU donation* to proven recently throttled receivers instead of disabling all CPU redistribution. Fresh OOM still suppresses borrowing.
+- Read cgroup `memory.events:max` deltas, use fresh limit hits as demand evidence, and never classify a recent memory-limit-hit service as an idle memory donor. Missing counters are not evidence of safety.
+- Retain cgroup `memory.current` charge headroom and fail-closed donor/rebind gates; do not silently increase aggregate CPU/RAM limits or change the host WSL configuration.
+- This is source/fixture validated only; live WSL/Docker/Windows performance and end-to-end install checks are required before release qualification.
+
 ## 14.6.8 (test reliability, audit transparency, function index)
 
 - **2026-11-16 recurrence hotfix:** repaired safe 32-MiB container-replacement budget rebind; a failed Option 1 now attempts to restart only its previously authenticated Windows Tailscale relay. Added focused regression coverage; live Windows functionality must be separately verified.

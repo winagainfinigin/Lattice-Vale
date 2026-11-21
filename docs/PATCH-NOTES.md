@@ -1,3 +1,9 @@
+# Current v14.6.9 patch notes
+
+## v14.6.9 resource-consolidation candidate (2026-11-20)
+
+The verified 14.6.8 policy-v13 static planner and bounded-v14 scheduler are retained with additional memory.max accounting and CPU-pressure isolation. See docs/RESOURCE-POLICY-14.6.9-REVIEW.md. Live rollout is not qualified.
+
 ## v14.6.8 source candidate (2026-11-13)
 
 - Cumulative 14.6.7 budget-rebalance/verified-container-replacement and Element/Adlice diagnostic changes retained without modifications.

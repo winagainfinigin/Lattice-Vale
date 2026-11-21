@@ -1127,3 +1127,21 @@ assert module._replacement_cpu_envelope(directml_state,
 assert module._replacement_cpu_envelope(directml_state,
     {'lastSample':now,'directmlCpuTelemetry':{'busy':True}})==2800
 print('VERIFIED DIRECTML IDLE CPU RESERVE COMPATIBILITY: PASS')
+
+# v14.6.9 consolidation: CPU CFS quota pressure must not be suppressed by
+# unrelated memory/IO PSI; actual OOM still blocks new lending.
+load_usage = {k: dict(v) for k, v in usage.items()}
+load_usage['hermes']['throttled'] = True
+under_ram_psi, _ = decide(work=load_usage, mpsi=5, iopsi=15)
+assert under_ram_psi['hermes']['cpu'] > base['hermes']['cpu']
+assert sum(v['cpu'] for v in under_ram_psi.values()) <= 4200
+assert sum(v['mem'] for v in under_ram_psi.values()) <= 5120
+no_lending_after_oom, _ = decide(work=load_usage, mpsi=5, fresh=True)
+assert no_lending_after_oom['hermes']['cpu'] == base['hermes']['cpu']
+# Fresh memory.max is not an idle donor signal even when Docker stats is low.
+limit_hit_usage = {k: dict(v) for k, v in usage.items()}
+limit_hit_usage['qmd-indexer']['memory_limit_hit'] = True
+limit_hit_goal, limit_hit_count = decide(work=limit_hit_usage)
+assert limit_hit_count['qmd-indexer']['idle'] == 0
+assert limit_hit_goal['qmd-indexer']['mem'] >= base['qmd-indexer']['mem']
+print('v14.6.9 memory.max and PSI-independent bounded CPU borrowing: PASS')

@@ -305,14 +305,14 @@ def cgroup_event_counters(pid):
             return {}
         output = {}
         for filename, fields in (('cpu.stat', ('nr_throttled', 'nr_periods')),
-                                 ('memory.events', ('oom_kill',))):
+                                 ('memory.events', ('oom_kill', 'max'))):
             try:
                 data = dict(line.split()[:2] for line in (group / filename).read_text().splitlines())
             except (OSError, ValueError):
                 continue
             for field in fields:
                 if field in data:
-                    output[field] = int(data[field])
+                    output['memory_max_events' if field == 'max' else field] = int(data[field])
         try:
             charged = int((group / 'memory.current').read_text().strip())
             if charged >= 0:
@@ -427,9 +427,11 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
                      available_mib < max(512, int(budget * 0.10)))
     for k in expected:
         cap_m, cap_c, u = current[k]['mem'], current[k]['cpu'], usage[k]
-        saturated = (u['mem'] >= max(1, int(cap_m * 0.82)) or
+        saturated = (u.get('memory_limit_hit', False) or
+                     u['mem'] >= max(1, int(cap_m * 0.82)) or
                      u['cpu_pct'] >= (cap_c / 10) * 0.82 or u.get('throttled', False))
-        idle = (u['mem'] < cap_m * 0.50 and u['cpu_pct'] < (cap_c / 10) * 0.35)
+        idle = (not u.get('memory_limit_hit', False) and
+                u['mem'] < cap_m * 0.50 and u['cpu_pct'] < (cap_c / 10) * 0.35)
         prev = record['services'][k]
         counters[k] = {
             'up': min(5, int(prev.get('up', 0)) + 1) if saturated else 0,
@@ -498,6 +500,31 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
             spare += take
         goal[awakened]['mem'] += min(missing, spare)
 
+    def transfer_cpu_to_throttled_receivers():
+        # Within-envelope CPU-time transfers remain safe during memory/I/O PSI.
+        # Do not shrink a busy receiver's CPU quota just because RAM is pressured.
+        donors = [k for k in expected if counters[k]['idle'] >= 3 and
+                  not usage[k].get('throttled', False)]
+        donors.sort(key=lambda k: (PRIORITY[k], k))
+        receivers = [k for k in expected if usage[k].get('throttled', False)]
+        receivers.sort(key=lambda k: (-PRIORITY[k], k))
+        spare = max(0, usable_cpu - sum(x['cpu'] for x in goal.values()))
+        for receiver in receivers:
+            base, cur = expected[receiver]['cpu'], goal[receiver]['cpu']
+            ceiling = min(int(cpus * 1000 * .75), max(base * 3, base + 500))
+            request = (min(400, max(0, ceiling - cur)) // CPU_QUANTUM_MILLI) * CPU_QUANTUM_MILLI
+            for donor in donors:
+                if spare >= request:
+                    break
+                floor = cpu_donor_floor(donor, expected[donor]['cpu'])
+                reclaim = (min(200, request - spare, max(0, goal[donor]['cpu'] - floor))
+                           // CPU_QUANTUM_MILLI) * CPU_QUANTUM_MILLI
+                goal[donor]['cpu'] -= reclaim
+                spare += reclaim
+            given = min(request, spare)
+            goal[receiver]['cpu'] += given
+            spare -= given
+
     if high_pressure or fresh_oom:
         # When memory pressure or prior OOM is indicated, give resources back to
         # the canonical safe profile gradually, leaving busy memory untouched.
@@ -508,8 +535,10 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
                     candidate >= math.ceil(charged * 1.20) + 64 and
                     usage[k]['mem'] < e['mem'] * .8):
                 goal[k]['mem'] = candidate
-            if current[k]['cpu'] > e['cpu']:
+            if current[k]['cpu'] > e['cpu'] and (fresh_oom or not usage[k].get('throttled', False)):
                 goal[k]['cpu'] = max(e['cpu'], current[k]['cpu'] - 100)
+        if not fresh_oom:
+            transfer_cpu_to_throttled_receivers()
         ensure_cpu_envelope()
         return goal, counters
     # A measured, fresh quota-throttling signal can bypass cooldown for CPU
@@ -575,11 +604,13 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     # Redistribute caps only by taking safely unused headroom from idle donors.
     # The sum of all hard limits stays <= the original container budget.
     memory_receivers = [k for k in expected if counters[k]['up'] >= 2 and
-                        usage[k]['mem'] >= current[k]['mem'] * .82]
+                        (usage[k]['mem'] >= current[k]['mem'] * .82 or
+                         usage[k].get('memory_limit_hit', False))]
     memory_receivers.sort(key=lambda k: (-PRIORITY[k], -usage[k]['mem'], k))
     # The cgroup charge (memory.current), including file cache, is required
     # before reducing anyone's hard memory limit. Docker stats alone is not.
     memory_donors = [k for k in expected if counters[k]['idle'] >= 3 and
+                     not usage[k].get('memory_limit_hit', False) and
                      isinstance(usage[k].get('charged_mem'), (int, float)) and
                      usage[k]['charged_mem'] >= 0 and k not in memory_receivers]
     memory_donors.sort(key=lambda k: (PRIORITY[k], k))
@@ -1078,6 +1109,11 @@ def run_once(root, restore=False):
                 now_oom = actual[k].get('oom_kill')
                 prior_oom = previous.get('oom_kill')
                 fresh_oom |= (now_oom is not None and prior_oom is not None and now_oom > prior_oom)
+                current_max = actual[k].get('memory_max_events')
+                previous_max = previous.get('memory_max_events')
+                usage[k]['memory_limit_hit'] = (
+                    isinstance(current_max, int) and isinstance(previous_max, int)
+                    and current_max > previous_max)
                 periods = actual[k].get('nr_periods')
                 throttle = actual[k].get('nr_throttled')
                 if periods is not None and throttle is not None:
