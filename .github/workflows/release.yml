@@ -1,0 +1,56 @@
+name: Package LatticeVale release
+
+on:
+  push:
+    tags:
+      - '14.7.0'
+  workflow_dispatch:
+    inputs:
+      publish_release:
+        description: Publish the package to the release matching this ref
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+      - name: Verify source manifest
+        shell: pwsh
+        run: .\installer\verify-release.ps1
+      - name: Build verified release archive
+        shell: pwsh
+        run: .\tools\Build-LatticeVale-Release.ps1 -OutputDirectory "$env:RUNNER_TEMP\latticevale-release"
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: LatticeVale-${{ github.ref_name }}-release
+          path: |
+            ${{ runner.temp }}/latticevale-release/*.zip
+            ${{ runner.temp }}/latticevale-release/*.sha256
+            ${{ runner.temp }}/latticevale-release/*.provenance.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Publish versioned release asset
+        if: github.event_name == 'push' || inputs.publish_release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = (Get-Content -LiteralPath '.\LatticeVale-Core\VERSION.txt' -Raw).Trim()
+          if ($env:GITHUB_REF_NAME -ne $version) { throw "Release tag $env:GITHUB_REF_NAME does not match VERSION.txt $version" }
+          $zip = Get-ChildItem -LiteralPath "$env:RUNNER_TEMP\latticevale-release" -Filter '*.zip' | Select-Object -First 1
+          if ($null -eq $zip) { throw 'Release ZIP was not built.' }
+          gh release view $version *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $version --title "$version Release" --notes-file '.\docs\RELEASE.md'
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create GitHub release.' }
+          }
+          gh release upload $version $zip.FullName "$($zip.FullName).sha256" (Join-Path $zip.DirectoryName "LatticeVale-v$version-release.provenance.json") --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Could not upload all release assets.' }

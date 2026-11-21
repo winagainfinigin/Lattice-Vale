@@ -4,7 +4,7 @@ import ast,sys
 ROOT=Path(__file__).resolve().parents[1]; REPO=ROOT.parent
 sys.path.insert(0,str(ROOT/'stack'))
 from latticevale_arch import host_memory_budget  # noqa:E402
-assert (ROOT/'VERSION.txt').read_text().strip() in {'14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7','14.6.9'}
+assert (ROOT/'VERSION.txt').read_text().strip() in {'14.5.3','14.5.4','14.5.42','14.5.43','14.5.44','14.5.45','14.5.46','14.5.47','14.6.0','14.6.1','14.6.2','14.6.3','14.6.4','14.6.5','14.6.6','14.6.7','14.6.9','14.7.0'}
 ps=(ROOT/'Install-LatticeVale.ps1').read_text(); boot=(ROOT/'linux/bootstrap.sh').read_text(); cfg=(ROOT/'stack/configure-stack.sh').read_text(); manage=(ROOT/'stack/manage.sh').read_text(); compose=(ROOT/'stack/compose.yaml').read_text(); audit=(ROOT/'stack/state-audit.py').read_text(); free=(ROOT/'stack/audit-free.py').read_text(); un=(ROOT/'Uninstall-LatticeVale.ps1').read_text(); req=(ROOT/'stack/directml-requirements.txt').read_text(); py=(ROOT/'stack/directml-gateway.py').read_text(); sh=(ROOT/'stack/directml-gateway.sh').read_text()
 ast.parse(py); ast.parse(audit); ast.parse(free)
 for f in ('directml-gateway.py','directml-gateway.sh','directml-requirements.txt'): assert (ROOT/'stack'/f).is_file()

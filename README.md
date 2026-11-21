@@ -1,6 +1,6 @@
-# LatticeVale v14.6.9
+# LatticeVale v14.7.0
 
-> **14.6.9 source candidate (not production-qualified):** Canonical v13 resource admission is retained; live bounded CPU borrowing under memory/I/O pressure and cgroup memory-limit-event admission were tightened. See `docs/RESOURCE-POLICY-14.6.9-REVIEW.md`. Do not assume this alone resolves Hermes watchdog stalls.
+> **v14.7.0:** Adds manifest-built release archives, opt-in live qualification, and sanitized resource-controller decision history. Hosted CI still does not prove behavior on a specific Windows/WSL/GPU host. See `docs/RESOURCE-POLICY-14.7.0-REVIEW.md`.
 
 **14.6.8 source candidate:** Builds on the complete 14.6.7 budget-rebalance and Element/Adlice diagnostic hotfix. The RAM fixture now tests simulated low/high RAM without changing the production admission guard; the read-only state audit lists stored digest evidence for managed floating `:latest` image tags. [Function/danger-zone index](docs/FUNCTION-INDEX.md) documents high-risk monolith code without moving it. Windows PowerShell 5.1/7, actual Ubuntu-D/Docker, and antivirus behavior require live validation before calling this release fully qualified.
 

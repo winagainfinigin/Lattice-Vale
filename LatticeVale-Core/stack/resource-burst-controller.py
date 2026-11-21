@@ -731,6 +731,58 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     return goal, counters
 
 
+def decision_report(expected, actual, usage, target, *, policy_fingerprint,
+                    sampled_at, host_metrics):
+    """Build a credential-free, bounded explanation of one scheduler sample."""
+    services = {}
+    for name in expected:
+        old = actual[name]
+        new = target[name]
+        sample = usage[name]
+        cpu_delta = int(new['cpu']) - int(old['cpu'])
+        mem_delta = int(new['mem']) - int(old['mem'])
+        if cpu_delta > 0:
+            cpu_reason = ('measured-quota-throttling' if sample.get('throttled') else
+                          'priority-envelope-rebalance')
+        elif cpu_delta < 0:
+            cpu_reason = 'conserved-envelope-rebalance'
+        else:
+            cpu_reason = 'no-change'
+        if mem_delta > 0:
+            mem_reason = ('recent-memory-limit-event' if sample.get('memory_limit_hit') else
+                          'bounded-memory-demand')
+        elif mem_delta < 0:
+            mem_reason = 'verified-idle-donor-or-ceiling-convergence'
+        else:
+            mem_reason = 'no-change'
+        services[name] = {
+            'cpuMilli': {'before': int(old['cpu']), 'after': int(new['cpu']), 'reason': cpu_reason},
+            'memoryMiB': {'before': int(old['mem']), 'after': int(new['mem']), 'reason': mem_reason},
+            'usage': {
+                'cpuPercent': round(float(sample.get('cpu_pct', 0.0)), 2),
+                'dockerMemoryMiB': int(sample.get('mem', 0)),
+                'chargedMemoryMiB': (int(sample['charged_mem'])
+                                     if isinstance(sample.get('charged_mem'), (int, float)) else None),
+                'quotaThrottled': bool(sample.get('throttled', False)),
+                'memoryLimitEvent': bool(sample.get('memory_limit_hit', False)),
+            },
+        }
+    metrics = {}
+    for key in ('availableMiB', 'memoryPsiSomeAvg10', 'cpuPsiSomeAvg10',
+                'ioPsiSomeAvg10', 'hostLoad1', 'directmlBusy', 'freshOom'):
+        value = host_metrics.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            metrics[key] = round(float(value), 3)
+        elif isinstance(value, (bool, str)) or value is None:
+            metrics[key] = value
+    return {
+        'sampledAt': int(sampled_at),
+        'policyFingerprint': str(policy_fingerprint)[:64],
+        'host': metrics,
+        'services': services,
+    }
+
+
 def perform(root, expected, before, target):
     # Decreases first, increases second: aggregate caps never transiently exceed
     # the conserved envelope. Save a rollback journal in the caller afterward.
@@ -1201,6 +1253,24 @@ def run_once(root, restore=False):
                                     directml_reserve=int(state['CPU_DIRECTML_RESERVE_MILLI']),
                                     budget=int(state['BUDGET_MIB']),
                                     host_memory_mib=int(state.get('MEM_MIB', state['BUDGET_MIB'])))
+            sample_report = decision_report(
+                expected, actual, usage, target,
+                policy_fingerprint=state['POLICY_FINGERPRINT'],
+                sampled_at=sampled_at,
+                host_metrics={
+                    'availableMiB': available,
+                    'memoryPsiSomeAvg10': psi_m,
+                    'cpuPsiSomeAvg10': psi_c,
+                    'ioPsiSomeAvg10': psi_io,
+                    'hostLoad1': host_load1,
+                    'directmlBusy': directml_busy,
+                    'freshOom': fresh_oom,
+                })
+            history = snapshot.get('decisionHistory')
+            if not isinstance(history, list):
+                history = []
+            history.append(sample_report)
+            snapshot['decisionHistory'] = history[-24:]
             snapshot['pending'] = target
             write_json(root / 'data/latticevale/resource-burst-state.json', snapshot)
             changes = perform(root, expected, actual, target)
@@ -1209,8 +1279,14 @@ def run_once(root, restore=False):
             if changes:
                 snapshot['lastUpdate'] = time.time()
                 print(f'Adjusted bounded resource pool; RAM={sum(x["mem"] for x in target.values())}MiB; CPU={sum(x["cpu"] for x in target.values())}m')
+                for name, item in sample_report['services'].items():
+                    cpu = item['cpuMilli']
+                    mem = item['memoryMiB']
+                    if cpu['before'] != cpu['after'] or mem['before'] != mem['after']:
+                        print(f"  {name}: CPU {cpu['before']}->{cpu['after']}m ({cpu['reason']}); "
+                              f"RAM {mem['before']}->{mem['after']}MiB ({mem['reason']})")
             else:
-                print('Resource burst envelope stable')
+                print('Resource burst envelope stable; measured decision recorded')
         snapshot['lastSample'] = time.time()
         write_json(root / 'data/latticevale/resource-burst-state.json', snapshot)
         return 0

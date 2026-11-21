@@ -1,6 +1,8 @@
-## v14.6.9 current release (source candidate; live validation outstanding)
+## v14.7.0 release
 
-Release archive preserves v14.6.8 canonical schema 13 and validated resource state, with safeguarded live-policy improvements. See `RESOURCE-POLICY-14.6.9-REVIEW.md`. Do not deploy without backup and Windows/WSL validation.
+Release ZIPs are built from the exact version tag using `tools/Build-LatticeVale-Release.ps1`. The builder stages only files listed in `installer/SOURCE-SHA256SUMS.txt`, verifies the staged source, enforces the single `Lattice-Vale/` archive root, and rejects `.git`, bytecode, path escapes, and unmanifested files. It emits the ZIP, a SHA-256 sidecar, and a provenance record containing the source commit and archive hash. The release workflow uploads those artifacts for tag `14.7.0`.
+
+Install-options schema 24 and runtime-policy schema 13 remain compatible. Hosted CI and the release package do not qualify the user's live Windows/WSL installation or GPU; use the opt-in [live qualification workflow](WINDOWS-INTEGRATION-TEST-MATRIX.md) only on a disposable marked stack. Keep the existing backup-first repair path for real installations.
 
 ## 14.6.7 cumulative budget-recovery + Element/Adlice documentation overlay (2026-11-13)
 
@@ -30,7 +32,7 @@ Release archive preserves v14.6.8 canonical schema 13 and validated resource sta
 > rollback, DirectML re-admission, repair restoration, and user overrides.
 > Windows/WSL live load testing remains separately required.
 
-> **v14.6.9 current release:** `VERSION.txt` must be 14.6.7. Canonical installer-options schema is **24**, runtime-policy schema remains **13**, and managed-refresh revision remains **5**. Schema-23 install options must remain readable and migrate to schema 24 without introducing a user-facing Matrix relay-limit setting; interim schema-24 relay-limit data is tolerated but ignored.
+> **v14.7.0 current release:** `VERSION.txt` is 14.7.0. Canonical installer-options schema is **24**, runtime-policy schema remains **13**, and managed-refresh revision remains **5**. Schema-23 install options remain readable and migrate to schema 24 without introducing a user-facing Matrix relay-limit setting; interim schema-24 relay-limit data is tolerated but ignored.
 
 > **v14.6.6 update policy:** Existing-install Option 1 checks current supported Ubuntu/Docker package candidates, installer-owned Docker image registry digests, the QMD npm release, and the official Honcho stable tag on every run, without a 30-day delay. It performs the existing compatibility-bounded managed refresh only when an update/missing managed component is established; otherwise it uses the local-first recovery path. Remote errors are reported as unverified and do not trigger a speculative refresh. Option 6 remains the explicit forced refresh. Selected user overrides, database major limits, native Windows Ollama ownership, and persistent state remain preserved. The deprecated `MANAGED_REPAIR_REFRESH_DAYS` value is retained for older metadata compatibility but is not a refresh trigger.
 

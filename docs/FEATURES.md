@@ -1,4 +1,4 @@
-# LatticeVale v14.6.9 — Complete Features and Install Options Reference
+# LatticeVale v14.7.0 — Complete Features and Install Options Reference
 
 > **14.6.7 same-version maintenance note (2026-11-13):** Bounded-burst resource management now includes strict budget-aware recovery for independently verified canonical Docker container replacements while preserving valid dynamic leases. An optional read-only Element/Adlice diagnostic reports Windows executable provenance; it neither modifies malware protection nor guarantees a false-positive result. No new user-selected install component, version/schema change, antivirus integration, or persistent-data migration is introduced. See [Resource Policy](RESOURCE-POLICY.md), [Security](SECURITY.md), and [Testing](TESTING.md).
 
@@ -39,7 +39,7 @@ Resume/repair and normal stack start first give a just-started shared gateway a 
 - Conserved automatic CPU allocation: system/DirectML reservations are removed before enabled Docker services share one aggregate envelope.
 - DirectML generation uses `torch.no_grad()`; no-fallback mode cannot create or retain forced-Ollama fallback markers.
 
-> **Current managed software/source policy (v14.6.9):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
+> **Current managed software/source policy (v14.7.0):** installer-owned application references resolve to latest-supported stable upstream channels during a due/forced refresh. Stateful majors and the DirectML ABI remain compatibility-bounded; explicit overrides remain user-owned.
 
 > **v14.6.0 architecture:** canonical hardware/backend/resource state separates durable user intent from machine-derived capability. Current task docs: `QUICKSTART.md`, `INSTALLATION.md`, `REPAIR.md`, `GPU-BACKENDS.md`, `DIAGNOSTICS.md`, `RESOURCE-POLICY.md`, and `ARCHITECTURE.md`.
 

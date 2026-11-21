@@ -1,5 +1,23 @@
 # Windows integration test matrix
 
+## v14.7.0 manual qualification workflow
+
+`live-qualification.yml` is manually dispatched and restricted to a self-hosted Windows runner labeled `latticevale-qualification`. It requires a WSL distro and stack path, plus a marker file named `.latticevale-qualification-stack` containing exactly `DISPOSABLE LATTICEVALE QUALIFICATION STACK`. Do not place this marker in a production stack.
+
+The WSL probe runs `manage.sh verify` before and after a five-minute bounded synthetic CPU container (0.50 CPU, 256 MiB RAM). It preflights the Alpine image without pulling it, does not restart or recreate LatticeVale services, records only counts, aggregate pressure, maximum container CPU, and watchdog keyword counts, and stops the probe container on exit. The JSON artifact intentionally omits container IDs, raw logs, paths, prompts, and environment values.
+
+The optional DirectML check verifies the gateway reports a ready DirectML runtime with no forced fallback, sends one small non-streaming completion to the model already configured in the gateway, and records only pass/fail, latency, and whether adapter identity was reported. It does not save the prompt or completion. Run it only on a dedicated machine with the intended WSL DirectML adapter configured. This is a useful smoke check, not a long-duration GPU qualification.
+
+Before dispatching, confirm Docker is running in that WSL distro, the selected stack is disposable and independently backed up, and `alpine:3.21` is already present. The workflow does not install components, resolve updates, alter user options, or change persistent application data. The new self-hosted workflow was not run as part of source patch creation.
+
+## v14.7.0 acceptance cases
+
+- Run the complete 153-fixture suite, both PowerShell parsers, source-manifest verification, and package construction on Windows PowerShell 5.1.
+- Build from a clean `14.7.0` tag and verify source commit, manifest, one `Lattice-Vale/` root, absence of `.git` and bytecode, ZIP SHA-256, and provenance sidecar.
+- On a marked disposable four-vCPU / low-RAM WSL stack, complete the manual health/pressure probe and confirm the resource decision history stays within the existing CPU/RAM envelope.
+- On the intended DirectML host, verify adapter identity and complete one short model inference with forced fallback disabled. Record actual Windows build, WSL version, GPU driver, model identifier, and inference result outside the sanitized workflow artifact.
+- Verify an existing non-disposable installation only through its normal backup-first installer path; do not add the qualification marker to it.
+
 ## Same-version 14.6.7 budget-rebind and Adlice live-qualification cases (2026-11-13)
 
 - On the actual WSL host, reproduce or replay verified recreated `synapse-db`, `searxng`, and `honcho-db` with canonical limits and safe unaffected leases, including a 16-MiB excess over a 10,512-MiB budget. Confirm controller ownership/fingerprint, donor headroom and journaling, final no-overage state, 12 expected running services, healthy gateways, and no data/model loss.

@@ -1,8 +1,10 @@
-# LatticeVale 14.6.9 consolidated resource policy (canonical schema 13, bounded runtime scheduler 14)
-## v14.6.9 hotfix — hardware-scaled per-service CPU and RAM burst ceilings
+# LatticeVale 14.7.0 consolidated resource policy (canonical schema 13, bounded runtime scheduler 14)
+## v14.7.0 — release qualification and auditable bounded resource decisions
 
-The installed version remains **14.6.9** (not 14.7.0 or 14.6.9.1). The
-canonical installer policy is unchanged (schema 13). The dynamic controller
+The release version is **14.7.0**. Install-options schema 24 and runtime-policy
+schema 13 remain unchanged. The canonical installer policy is unchanged. The
+dynamic controller now keeps a bounded, credential-free history of host
+pressure, measured cgroup use, and per-service before/after limits. It still
 limits each service's optional CPU quota borrowing relative to WSL-visible
 logical CPUs: Ollama up to 60%, Hermes up to 45%, other services up to 30%
 (with 50-millicore scheduling granularity). The total Docker CPU envelope,
@@ -24,7 +26,7 @@ These caps do **not** guarantee an absence of crashes, repair Hermes event-loop
 watchdog bugs, or directly restrict individual subprocesses inside a container.
 
 
-See [14.6.9 review](RESOURCE-POLICY-14.6.9-REVIEW.md) for each version and authoritative source. The dynamic controller retains all prior identity, memory-charge, journal, rollback, and DirectML safety guards; under host memory/I/O PSI it may still lend *conserved* CPU to measured throttled services. Fresh cgroup memory.max events prevent designation as an idle donor. This policy does not prove a gateway watchdog fix.
+See [14.7.0 review](RESOURCE-POLICY-14.7.0-REVIEW.md) for the release qualification boundaries and [the archived 14.6.9 review](RESOURCE-POLICY-14.6.9-REVIEW.md) for the prior hotfix details. The dynamic controller retains all prior identity, memory-charge, journal, rollback, and DirectML safety guards; under host memory/I/O PSI it may still lend *conserved* CPU to measured throttled services. Fresh cgroup memory.max events prevent designation as an idle donor. This policy does not prove a gateway watchdog fix.
 
 # LatticeVale 14.6.7 Resource Scheduler v14 (Canonical Schema v13; 14.6.6 lineage)
 

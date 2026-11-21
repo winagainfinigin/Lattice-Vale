@@ -1,6 +1,8 @@
-# LatticeVale v14.6.9 — Stable
+# LatticeVale v14.7.0 — Release
 
-> **14.6.9 source candidate:** Resource policy consolidation only; live Windows/WSL/Docker qualification outstanding.
+> **v14.7.0:** Manifest-built release artifacts and opt-in live Windows/WSL qualification are available; target hardware qualification remains separate.
+
+See [the 14.7.0 release review](RESOURCE-POLICY-14.7.0-REVIEW.md), [optional audit tools](TOOLS.md), and [Windows/WSL qualification matrix](WINDOWS-INTEGRATION-TEST-MATRIX.md).
 
 > **14.6.7 same-version budget-aware repair and Element/Adlice triage (2026-11-13):** If a verified Compose replacement restores a previously lent memory ceiling, the bounded-burst controller can recover the small resulting overage from unchanged, safely measured donors. It preserves valid leases and fails closed when reclaimable cgroup headroom is insufficient. An optional read-only Element Desktop file/signature/hash audit assists Adlice detection triage but cannot declare an alert false or modify antivirus exclusions. See [Resource Policy](RESOURCE-POLICY.md), [Repair](REPAIR.md), [Diagnostics](DIAGNOSTICS.md), [Security](SECURITY.md), and [Testing](TESTING.md). Live Windows/WSL and a new CI run remain separate verification gates.
 

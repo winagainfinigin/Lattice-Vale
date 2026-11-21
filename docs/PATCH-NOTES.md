@@ -1,3 +1,13 @@
+## v14.7.0 — reproducible package and qualification tooling
+
+- Builds the release ZIP solely from the verified source manifest, checks the exact archive root and forbidden metadata, and emits SHA-256 plus source-commit provenance.
+- Pins GitHub Actions by commit and enables reviewed Dependabot updates.
+- Adds a manual, disposable-stack-only Windows/WSL health and bounded load qualification; DirectML inference is checked separately without recording prompts or completions.
+- Records bounded sanitized resource decisions. The canonical allocation formula, service floors, aggregate budget, user overrides, and persisted application data are unchanged.
+- Adds opt-in, redacting Hermes/Kanban audit utilities.
+
+# Archived v14.6.9 patch notes
+
 ## v14.6.9 Hotfix — DirectML GPU topology/admission correction (2026-11-21)
 
 - **Scope:** same-version v14.6.9 corrective overlay over the existing CPU/RAM-bounds hotfix; no schema or user-option migration.
@@ -7,7 +17,7 @@
 - **Preservation:** no changes to selected GPUs/models, DirectML startup dependencies, verified Ollama fallback behavior, dynamic per-service CPU/RAM borrowing ceilings, QMD floors, user Compose overrides, Docker volumes, or Matrix/Hermes identity state. `HOST_BUDGET_ADMISSION_MIB` and `DIRECTML_MEMORY_KIND` make the new generated resource decisions auditable and verifiable against the canonical backend snapshot.
 - **Qualification:** local static, GPU admission, controller and regression checks are required; Windows PowerShell parsing, GitHub Actions, and a live DirectML model-load/inference test remain separate deployment gates. Apply to a complete matching v14.6.9 source tree then run Resume / repair; never copy a source-only overlay directly into `~/hermes-stack`.
 
-# Current v14.6.9 patch notes
+# Historical v14.6.9 patch notes
 
 ## v14.6.9 resource-consolidation candidate (2026-11-20)
 

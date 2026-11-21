@@ -3,7 +3,7 @@
 from pathlib import Path
 import json,re
 ROOT=Path(__file__).resolve().parents[2]
-assert (ROOT/'LatticeVale-Core/VERSION.txt').read_text().strip()=='14.6.9'
+assert (ROOT/'LatticeVale-Core/VERSION.txt').read_text().strip()=='14.7.0'
 for name in ('QUICKSTART.md','INSTALLATION.md','REPAIR.md','GPU-BACKENDS.md','TROUBLESHOOTING.md','DIAGNOSTICS.md','RESOURCE-POLICY.md','ARCHITECTURE.md','TESTING.md'):
     p=ROOT/'docs'/name
     assert p.is_file() and len(p.read_text())>250, name

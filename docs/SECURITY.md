@@ -281,3 +281,12 @@ container. It validates Compose project/service labels, container IDs,
 canonical policy identity and user override ownership before `docker update`.
 Controller state is stored mode 0600. Failure or missing telemetry retains the
 static resource policy. The timer is removed by the LatticeVale uninstaller.
+## v14.7.0 release and diagnostic evidence
+
+GitHub Actions in the validation and release workflows are pinned to verified commit SHAs; Dependabot raises reviewable action updates. The release ZIP is assembled from the SHA-256 source manifest rather than recursively archiving the checkout. The builder rejects unsafe paths, unmanifested source, `.git`, Python bytecode, and an unexpected archive root. A SHA-256 sidecar and provenance record identify the archive and source commit.
+
+Managed application images still follow the documented latest-supported channels so the existing due/forced update behavior remains intact. After a successful pull/build, the stack records the local image ID and registry digests in `data/latticevale/managed-upstreams.json`; this records what ran but does not claim upstream tags are immutable. Explicit user image/source overrides remain preserved.
+
+The optional Kanban export omits comment bodies, worker errors, and file paths by default and redacts common credential forms from included text. The structure audit limits profile search to the current user unless explicitly asked to search all profiles and redacts host paths/names in the saved report by default. Both remain read-only with respect to the stack and write reports only to an explicitly selected output location or their documented default.
+
+The live qualification workflow is a manually dispatched self-hosted runner path. It requires an explicit disposable-stack marker and records sanitized summary metrics only. Never place the marker on a production stack; the synthetic load is bounded but still consumes resources while it runs.

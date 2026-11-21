@@ -1,5 +1,15 @@
 # Changelog
 
+## 14.7.0 — reproducible releases, runtime qualification, and auditability
+
+- Build the release archive from the SHA-256 source manifest, verify the exact `Lattice-Vale/` root, and reject Git metadata, bytecode, unlisted files, and path escapes. Record source commit and archive SHA-256 beside the ZIP; publish those artifacts from the exact matching release tag.
+- Pin GitHub Actions to commit SHAs and add Dependabot for reviewed action updates.
+- Add an opt-in, manually dispatched Windows/WSL qualification path for a disposable marked stack, with read-only repair/health checks and a bounded synthetic load probe. Live qualification is not run on ordinary CI or production installations.
+- Record sanitized, bounded resource-controller decision history without changing the canonical planner, service floors, aggregate envelope, Compose overrides, or user data.
+- Include scoped, redacting Hermes/Kanban audit helpers so card comments, paths, and worker errors are not emitted by default.
+- Keep installer-options schema 24 and runtime-policy schema 13; no persistent-data migration or feature removal.
+- Hosted regressions and source packaging do not substitute for target Windows/WSL, Tailscale, or DirectML inference qualification.
+
 - **v14.6.8 same-version Option 1 recurrence correction (2026-11-16):** verified replacement rebind now reconciles **both** CPU and RAM envelopes atomically (including restored 50m QMD-indexer CPU quota) without undoing Ollama's verified burst; failed repairs preserve healthy exact-owned relay listeners and can rebuild only malformed installer-owned relay JSON from persisted ports. Adds mixed CPU/RAM rollback and interruption regressions; live Windows end-to-end verification remains required.
 
 ## 14.6.9 (resource policy consolidation candidate)

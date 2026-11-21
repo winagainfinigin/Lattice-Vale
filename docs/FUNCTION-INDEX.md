@@ -1,4 +1,4 @@
-# LatticeVale 14.6.9 function and danger-zone index
+# LatticeVale 14.7.0 function and danger-zone index
 
 Generated from the unchanged monolith source; **documentation only**. Line numbers are references, not API contracts. No code was moved.
 
