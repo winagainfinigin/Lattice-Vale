@@ -61,13 +61,14 @@ for text in (
 assert './manage.sh' not in '\n'.join(line for line in backup_text.splitlines() if not line.lstrip().startswith('#'))
 
 
-def make_fake_docker(bin_dir: Path, fail_dump=False):
+def make_fake_docker(bin_dir: Path, fail_dump=False, services=('synapse-db','honcho-db','hermes')):
     # The production installer invokes this helper as WSL root. Fixture PATH supplies
     # a minimal id shim so the bundle-owned root-only contract can be tested without
     # requiring privileged GitHub runners.
     idshim=bin_dir/'id'
     idshim.write_text('#!/usr/bin/env bash\nif [[ "${1:-}" == "-u" ]]; then echo 0; else /usr/bin/id "$@"; fi\n')
     idshim.chmod(0o755)
+    service_output='\\n'.join(services)+'\\n'
     script=bin_dir/'docker'
     script.write_text(textwrap.dedent(f'''\
         #!/usr/bin/env bash
@@ -76,7 +77,7 @@ def make_fake_docker(bin_dir: Path, fail_dump=False):
         if [[ "${{1:-}}" == compose && "${{2:-}}" == version ]]; then exit 0; fi
         if [[ "${{1:-}}" == compose && "${{2:-}}" == config ]]; then exit 0; fi
         if [[ "${{1:-}}" == compose && "${{2:-}}" == ps && "${{3:-}}" == --services ]]; then
-          printf 'synapse-db\\nhoncho-db\\nhermes\\n'
+          printf '{service_output}'
           exit 0
         fi
         if [[ "${{1:-}}" == compose && "${{2:-}}" == exec ]]; then
@@ -145,13 +146,18 @@ with tempfile.TemporaryDirectory(prefix='lv-preflight-space-') as td:
     stack.mkdir()
     bindir = td/'bin'
     bindir.mkdir()
-    make_fake_docker(bindir)
+    make_fake_docker(bindir, services=('hermes',))
     (stack/'compose.yaml').write_text('services: {}\n')
     (stack/'install-options.json').write_text('{}\n')
     big = stack/'data/hermes/cache-large.bin'
     big.parent.mkdir(parents=True)
+    # Runner free space differs (GitHub-hosted runners may have over 50 GiB).
+    # Size the sparse fixture relative to this destination's actual free space,
+    # ensuring preflight always rejects it instead of archiving a huge sparse file.
+    fs = os.statvfs(stack)
+    free_bytes = fs.f_bavail * fs.f_frsize
     with big.open('wb') as file:
-        file.truncate(40 * 1024 ** 3)
+        file.truncate(free_bytes + 1024 ** 3)
     log = td/'docker.log'
     env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", FAKE_DOCKER_LOG=str(log))
     failed = subprocess.run(['bash', str(backup), str(stack)], capture_output=True,

@@ -1,6 +1,6 @@
 # LatticeVale v14.7.0 review: conservative source improvements
 
-Baseline GitHub `main`: `71ca6d940ad990b1a0e89cf7e3436bed370c14e3` (`14.7.0 Release`, 2026-11-21). Source was obtained from a temporary GitHub Actions source snapshot at `2563795392082021d1b5e1b51ad8dc4a867ed980`; GitHub commit comparison shows that snapshot differs from baseline only by a temporary `.github/workflows/source-snapshot-review.yml`, which is **excluded** from this change set. All edits were performed offline. **No repository write was made via GitHub**.
+Baseline GitHub `main`: `71ca6d940ad990b1a0e89cf7e3436bed370c14e3` (`14.7.0 Release`, 2026-11-21). Review changes are based on the recorded `main` release source. All edits were performed offline; no temporary review workflows or review branches are part of this patch.
 
 ## Implemented changes and changed behavior
 
