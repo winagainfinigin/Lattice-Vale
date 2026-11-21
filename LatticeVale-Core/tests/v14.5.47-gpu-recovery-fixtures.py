@@ -97,3 +97,67 @@ for token in ('READ-ONLY','directml-gateway.sh diagnose','/dev/dri/renderD','/de
     assert token in tool.read_text(encoding='utf-8'), token
 assert (REPO/'README.md').read_text(encoding='utf-8').startswith(f'# LatticeVale v{version}')
 print(f'PASS: v14.5.47 GPU recovery regressions preserved by v{version}')
+
+# v14.7.0 GPU hotfix: probe the real shell function without touching Docker.
+import os
+import re
+import subprocess
+
+CORE = Path(__file__).resolve().parents[1]
+src = (CORE / 'stack/configure-stack.sh').read_text(encoding='utf-8')
+match = re.search(r'(?ms)^managed_ollama_processor_class\(\) \{\n.*?^\}\n', src)
+assert match, 'managed_ollama_processor_class is missing'
+fn = match.group(0)
+
+with tempfile.TemporaryDirectory(prefix='lv-ollama-offload-') as temp:
+    root = Path(temp)
+    docker = root / 'docker'
+    docker.write_text("""#!/usr/bin/env bash
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_CALLS"
+if [[ "$*" == *" ollama run "* ]]; then
+  [[ "$*" == *" --keepalive 60s "* ]] || exit 65
+  [[ "${FAKE_RUN_STATUS:-ok}" == ok ]] || { echo 'synthetic load failure' >&2; exit 42; }
+  exit 0
+fi
+if [[ "$*" == *" ollama ps" ]]; then
+  [[ "${FAKE_PS_STATUS:-ok}" == ok ]] || exit 43
+  cat "$FAKE_DOCKER_PS"
+  exit 0
+fi
+exit 44
+""", encoding='utf-8')
+    docker.chmod(0o755)
+    cases = [
+        ('gpu', 'ok', 'ok', 'qwen3.5:4b abc 4GB 100% GPU 1 minute from now\n', 'gpu', ''),
+        ('mixed', 'ok', 'ok', 'qwen3.5:4b abc 4GB 40%/60% CPU/GPU 1 minute from now\n', 'gpu', ''),
+        ('cpu', 'ok', 'ok', 'qwen3.5:4b abc 4GB 100% CPU 1 minute from now\n', 'cpu', ''),
+        ('other', 'ok', 'ok', 'some-other:1b abc 4GB 100% GPU 1 minute from now\n', 'unknown', 'was absent'),
+        ('no-model', 'ok', 'ok', '', 'unknown', 'was absent'),
+        ('generation-error', 'failed', 'ok', '', 'unknown', 'model inference failed'),
+        ('ps-error', 'ok', 'failed', '', 'unknown', "'ollama ps' failed"),
+    ]
+    for name, run_status, ps_status, rows, expected, msg in cases:
+        ps_file = root / (name + '.ps')
+        ps_file.write_text('NAME ID SIZE PROCESSOR UNTIL\n' + rows, encoding='utf-8')
+        calls = root / (name + '.calls')
+        env = dict(os.environ)
+        env.update(PATH=str(root) + os.pathsep + env['PATH'],
+                   FAKE_DOCKER_PS=str(ps_file), FAKE_DOCKER_CALLS=str(calls),
+                   FAKE_RUN_STATUS=run_status, FAKE_PS_STATUS=ps_status)
+        script = """set -o pipefail
+managed_ollama_enabled() { return 0; }
+unload_ollama_model() { printf 'unload:%s\\n' "$1" >> "$FAKE_DOCKER_CALLS"; }
+""" + fn + '\nmanaged_ollama_processor_class qwen3.5:4b\n'
+        done = subprocess.run(['bash', '-c', script], text=True, capture_output=True, env=env, timeout=25)
+        assert done.returncode == 0, (name, done.stderr)
+        assert done.stdout.strip() == expected, (name, done.stdout, done.stderr)
+        assert msg.lower() in done.stderr.lower(), (name, done.stderr)
+        history = calls.read_text(encoding='utf-8')
+        assert '--keepalive 60s' in history, name
+        if run_status == 'ok':
+            assert history.count('ollama ps') == 1, name
+            assert 'unload:qwen3.5:4b' in history, name
+        else:
+            assert 'ollama ps' not in history, name
+    assert 'OLLAMA_KEEP_ALIVE' in fn and '--keepalive 60s' in fn
+print('PASS: request-scoped Ollama keep-alive, exact-model offload, and diagnostics (7 cases)')
