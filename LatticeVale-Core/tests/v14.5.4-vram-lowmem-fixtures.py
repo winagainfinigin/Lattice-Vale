@@ -92,6 +92,6 @@ except RuntimeError as exc: assert 'admission refused' in str(exc)
 else: raise AssertionError('oversized model was admitted to a 4 GiB adapter')
 
 readme=(REPO/'README.md').read_text(encoding='utf-8'); release=(REPO/'docs/RELEASE.md').read_text(encoding='utf-8'); changelog=(REPO/'docs/CHANGELOG.md').read_text(encoding='utf-8')
-assert readme.startswith('# LatticeVale v14.6.9') and 'VRAM' in readme
-assert 'v14.6.9 current release' in release and '14.5.4' in changelog
+assert readme.startswith('# LatticeVale v14.7.0') and 'VRAM' in readme
+assert 'v14.7.0 current release' in release and '14.5.4' in changelog
 print('v14.5.4 VRAM / ADAPTIVE SMALL-RESOURCE FIXTURES: PASS')

@@ -1,4 +1,4 @@
-# LatticeVale v14.7.0 — Release
+# LatticeVale v14.7.0 — Stable
 
 > **v14.7.0:** Manifest-built release artifacts and opt-in live Windows/WSL qualification are available; target hardware qualification remains separate.
 

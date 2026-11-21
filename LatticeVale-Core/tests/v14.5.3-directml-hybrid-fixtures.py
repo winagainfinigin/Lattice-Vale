@@ -46,6 +46,6 @@ assert 'control_directml_gateway start' in manage and 'control_directml_gateway 
 assert 'c["directml"]' in audit and 'fail-closed no-Ollama fallback' in audit and 'directml_fallback_policy' in audit
 assert 'directml' in free.lower()
 assert 'latticevale-directml-gateway.service' in un and 'directml-gateway.sh stop' in un
-assert '# LatticeVale v14.6.9' in (REPO/'README.md').read_text(encoding='utf-8')
+assert '# LatticeVale v14.7.0' in (REPO/'README.md').read_text(encoding='utf-8')
 assert '## 14.5.3 - 2026-09-02' in (REPO/'docs/CHANGELOG.md').read_text(encoding='utf-8')
 print('v14.5.3 DIRECTML HYBRID FIXTURES: PASS')

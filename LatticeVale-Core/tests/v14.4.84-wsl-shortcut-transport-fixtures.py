@@ -76,6 +76,7 @@ elif version in {'14.5.2','14.5.3','14.5.4','14.5.42'}:
     assert 'choose **Resume / repair installation** first' in root_readme
     assert 'The separate patch ZIP is for overwriting a source checkout, not for layering files over a live installed stack.' in root_readme
 else:
-    assert 'For an existing LatticeVale installation, launch the **full v14.5.1 release**' in root_readme
+    assert f'For **any recognized older installer-managed LatticeVale installation**, use a complete, verified v{version} installer source release' in root_readme
+    assert 'choose **Resume / repair installation**' in root_readme
 
 print('v14.4.84 WSL shortcut/transport fixtures: PASS')

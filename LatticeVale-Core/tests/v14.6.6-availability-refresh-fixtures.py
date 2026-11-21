@@ -102,7 +102,7 @@ assert 'repair_refresh_pending=true' in boot
 assert '.repair-package-refresh-pending' in boot
 assert 'force_managed_update' in boot
 assert 'MANAGED_REPAIR_REFRESH_DAYS=30' in (ROOT/'compatibility.conf').read_text(encoding='utf-8')
-assert (ROOT/'VERSION.txt').read_text().strip()=='14.6.9'
+assert (ROOT/'VERSION.txt').read_text().strip()=='14.7.0'
 # The existing read-only state audit surfaces recorded (not fetched) latest-tag
 # digests and must never print user-owned image refs containing credentials.
 import importlib.util
