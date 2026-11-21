@@ -1179,7 +1179,11 @@ def host_memory_budget(mem_mib: int, accel: str, managed_ollama: bool, directml_
         directml = reserve
 
     budget = mem_mib - reserve
-    if minimum_container_mib and budget < minimum_container_mib:
+    # Only a selected DirectML host needs GPU-specific admission diagnostics.
+    # CPU and containerized Ollama paths are checked by service_memory_plan(),
+    # which reports the full list of services without mislabeling CPU-only
+    # failures as GPU topology failures.
+    if directml_selected and minimum_container_mib and budget < minimum_container_mib:
         raise ValueError(
             f"GPU/DirectML selected service topology cannot fit its protected "
             f"memory floors: budget={budget}MiB, minimum={minimum_container_mib}MiB, "
