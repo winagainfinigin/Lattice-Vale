@@ -276,8 +276,13 @@ assert "secondary Matrix gateway(s)" not in CONFIGURE
 import os
 import re
 import subprocess
-for shell_source in (CONFIGURE, MANAGE):
-    bodies = re.findall(r"docker exec -u hermes hermes-agent python -c '\n(.*?)\n' \"\$name\" >/dev/null; then", shell_source, re.S)
+for shell_source, func_name in ((CONFIGURE, "register_missing_gateway_slot_exact"),
+                                (MANAGE, "register_missing_gateway_slot_exact_manage")):
+    # Limit the extraction to the intended function. New unrelated Python -c
+    # probes in configure-stack.sh must not be captured as registration code.
+    function_start = shell_source.index(f"{func_name}() {{")
+    registration = shell_source[function_start:].split("\n}\n", 1)[0]
+    bodies = re.findall(r"docker exec -u hermes hermes-agent python -c '\n(.*?)\n' \"\$name\" >/dev/null; then", registration, re.S)
     assert len(bodies) == 1, len(bodies)
     body = bodies[0]
     with tempfile.TemporaryDirectory() as td:

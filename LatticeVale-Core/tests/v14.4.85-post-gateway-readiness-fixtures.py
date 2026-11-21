@@ -24,7 +24,12 @@ kanban=cfg[cfg.index('stage_kanban_gateway()'):cfg.index('stage_finalize()')]
 assert 'start_or_restart_default_gateway_exact' in kanban
 assert kanban.index('start_or_restart_default_gateway_exact') < kanban.index("wait_hermes_gateway_surfaces 'Kanban/final gateway reload' 60")
 verify=cfg[cfg.index('verify_kanban_gateway()'):cfg.index('verify_finalize()')]
-assert 'HERMES_API_HOST_PORT' in verify
+# The canonical API verifier owns host-port lookup and validates Hermes' JSON
+# identity; a generic HTTP 200 must not satisfy installation readiness.
+api_helper=cfg[cfg.index('hermes_api_health_ok() {'):cfg.index('hermes_api_container_health_ok() {')]
+assert 'HERMES_API_HOST_PORT' in api_helper
+assert '.status == "ok"' in api_helper and '.platform == "hermes-agent"' in api_helper
+assert 'hermes_api_health_ok' in verify
 assert 'DASHBOARD_HOST_PORT' in verify
 assert 'matrix_backend_ready_from_hermes' in verify
 
@@ -48,16 +53,13 @@ mock = r'''set -e
 countfile=$(mktemp)
 echo 0 > "$countfile"
 opt_bool() { [ "$1" = dashboard ] && echo true || echo false; }
-http_status_ok() {
-  case "$1" in
-    *:8642/health)
-      n=$(cat "$countfile"); n=$((n+1)); echo "$n" > "$countfile"
-      [ "$n" -ge 3 ]
-      ;;
-    *:9119/) return 0 ;;
-    *) return 0 ;;
-  esac
+# Exercise the canonical Hermes-only health gate independently from the
+# generic dashboard HTTP health checker. Fail two times then succeed.
+hermes_api_health_ok() {
+  n=$(cat "$countfile"); n=$((n+1)); echo "$n" > "$countfile"
+  [ "$n" -ge 3 ]
 }
+http_status_ok() { return 0; }
 docker() { return 0; }
 timeout() {
   while [ $# -gt 0 ]; do
@@ -73,6 +75,7 @@ timeout() {
 sleep() { :; }
 ''' + func + r'''
 wait_hermes_gateway_surfaces test 5
+[ "$(cat "$countfile")" -eq 3 ]
 rm -f "$countfile"
 '''
 r=subprocess.run(['bash','-c',mock],capture_output=True,text=True)

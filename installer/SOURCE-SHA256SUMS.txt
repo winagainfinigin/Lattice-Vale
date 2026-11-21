@@ -88,7 +88,7 @@ d151d9bc9e8fb615c1bfc2813066b4584ee5ab0d2112e1ffffa712f1bdf4ab09  LatticeVale-Co
 8a4f0e6c32f4ca7e905ce8f803012e199f290982c597591fb1d7a1f169f78f4c  LatticeVale-Core/tests/interactive-tty-fixtures.py
 37a3e55dc97313c6b50716226e03f8d8e118a721cf42343ed03ec637c8505846  LatticeVale-Core/tests/interruption-resume-simulation.py
 4632f87418f5aca43a78de628749a509be4ff76408a81f99636e6a690385e109  LatticeVale-Core/tests/live-qualification.py
-7da673151d4753c0cf0a04ddf08267136edeec1800b63f81a1cde9809168873e  LatticeVale-Core/tests/minimal-resume-simulation.py
+580bed54f893085a275a7ca3e59c867ec3ee4ad8a0a4658aaffce1bcdd7dda41  LatticeVale-Core/tests/minimal-resume-simulation.py
 adff1a62de88e678aefd6d82c819eff96526ae19034b20cf5b8e6875be8ecc6c  LatticeVale-Core/tests/ollama-memory-policy-fixtures.py
 1a9692c6effc770b2e739984a7e546db731413b1d719f5b98b2b9ab298ce0b3d  LatticeVale-Core/tests/os-release-fixtures.py
 9b0343a9c898f931379ce5b4d406d1bac9fb1383cec6ccfa1a540dcfb7a9fb11  LatticeVale-Core/tests/permission-mode-policy-fixtures.py
@@ -194,7 +194,7 @@ b4b19a4e133ec7363ce45da153d0b0e3863db3c88c17cec74523f1537761531b  LatticeVale-Co
 c46a00a3b043b5e86e65f8335cddf7d54c9ae6c3134f993d07e99fcc7ab920ff  LatticeVale-Core/tests/v14.4.84-wsl-shortcut-transport-fixtures.py
 165e18c7a9fd591faef4537b720ba98ae520b8b3cbb7d8a7d62c89619ff7d922  LatticeVale-Core/tests/v14.4.85-existing-menu-options-fixtures.py
 cda326394d6e4a27666d01fa824d7f7cc50d0087ac41f4baf0dd4eeed4f58f7a  LatticeVale-Core/tests/v14.4.85-overwrite-patch-cleanup-fixtures.py
-7e601e7efd52ff99478e30473d7355fe170d57155fd7f3a30dea9c86a9b99d69  LatticeVale-Core/tests/v14.4.85-post-gateway-readiness-fixtures.py
+e5e2a90395b14e5e92228ba3912334ab31aa2a43809792861e896b8fc673b814  LatticeVale-Core/tests/v14.4.85-post-gateway-readiness-fixtures.py
 6c9300310e02057810c38761f3bd01d0e965ad37ec17a47170dad33de77f429b  LatticeVale-Core/tests/v14.4.85-reconcile-startup-fixtures.py
 689d1d9e8f3c243abb7a004538630b1d143bbb5fefa86262926000650ef48e94  LatticeVale-Core/tests/v14.4.85-release-identity-fixtures.py
 9f3612484c5f6467d6c1884d0adceb0f9ee9fd87bc8824566d0ff222c73183b7  LatticeVale-Core/tests/v14.4.85-update-backup-audit-fixtures.py
@@ -225,7 +225,7 @@ df423fed7ff70e2bf05680986758f75bc90a93d0c2b99ba3d3d2ab9ad13060b9  LatticeVale-Co
 2c50c5e9a5df0593c37d5001529079e5cc33b34d41afc8f1ec9a50c2c5b830d8  LatticeVale-Core/tests/v14.6.2-hotfix-bootstrap-staging-fixtures.py
 bc1a5739f294e1b9af4b2ba5f44886af629a5f983af9b29b00ead22176e4cd6e  LatticeVale-Core/tests/v14.6.2-latest-supported-upstream-fixtures.py
 17d8ebcc51fc5b68036cb2f6fdf59ec31fa7f88292694c7b000c94846183d482  LatticeVale-Core/tests/v14.6.3-matrix-identity-gateway-hotfix-fixtures.py
-044f5142cdf2aa3985b04052c5322c3ffdfac0772dc9888feaddbeaade2e0b4e  LatticeVale-Core/tests/v14.6.4-gateway-live-convergence-fixtures.py
+eb8e8d5925444fe9da52488478c9325f11bf049f0a07eacb4a359410920eafaa  LatticeVale-Core/tests/v14.6.4-gateway-live-convergence-fixtures.py
 2fcbe09fbca5d6dceb2f3031788e7617ff11030809ac89ed8d1db5bed3a57df2  LatticeVale-Core/tests/v14.6.5-preservation-hotfix-fixtures.py
 8a0e1590241aaf156e0335a24d199254b0fd881bb3fdf916e8a500c49e4cf7f4  LatticeVale-Core/tests/v14.6.6-availability-refresh-fixtures.py
 e2f6b9a98eecf997874946d8af8f90e24d14497ac839478dd76426aca3b75781  LatticeVale-Core/tests/v14.6.6-burst-resource-fixtures.py
