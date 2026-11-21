@@ -1145,3 +1145,84 @@ limit_hit_goal, limit_hit_count = decide(work=limit_hit_usage)
 assert limit_hit_count['qmd-indexer']['idle'] == 0
 assert limit_hit_goal['qmd-indexer']['mem'] >= base['qmd-indexer']['mem']
 print('v14.6.9 memory.max and PSI-independent bounded CPU borrowing: PASS')
+
+# v14.6.9 follow-up: detected-core-scaled independent CPU ceilings.
+# Container quota caps CPU time for the entire service, not per-thread affinity.
+for visible in (1, 2, 4, 8, 16):
+    for service, fraction in (('hermes', .45), ('ollama', .60),
+                              ('honcho-api', .30), ('qmd-indexer', .30)):
+        baseline = 50
+        ceiling = module.cpu_service_ceiling(service, baseline, visible)
+        assert ceiling % 50 == 0
+        assert 50 <= ceiling <= visible * 900
+        assert ceiling <= max(50, int(visible * 1000 * fraction // 50) * 50)
+assert module.cpu_service_ceiling('hermes', 900, 2) == 900
+assert module.cpu_service_ceiling('ollama', 1350, 4) == 2400
+assert module.cpu_service_ceiling('hermes', 900, 4) == 1800
+
+# Legacy v14 leases above the new cap converge before any fresh borrowing.
+bounded_roles = {
+    'hermes': {'cpu': 900, 'mem': 1800, 'floor': 1024},
+    'ollama': {'cpu': 1350, 'mem': 6200, 'floor': 5632},
+    'qmd': {'cpu': 150, 'mem': 1040, 'floor': 1024},
+}
+bounded_live = {
+    'hermes': {'cpu': 900, 'mem': 1800},
+    'ollama': {'cpu': 2550, 'mem': 6200},
+    'qmd': {'cpu': 150, 'mem': 1040},
+}
+bounded_usage = {k: {'cpu_pct': 0.0, 'mem': 50, 'charged_mem': 50,
+                     'throttled': False} for k in bounded_roles}
+bounded_record = {'lastUpdate': 500, 'services': {
+    k: {'up': 0, 'idle': 0} for k in bounded_roles}}
+bounded_goal, _ = module.plan(
+    bounded_roles, bounded_live, bounded_usage, bounded_record,
+    available_mib=4096, memory_psi=0.1, cpu_psi=0.1,
+    cpu_load1=0.3, io_psi=0.1, cpus=4, cpu_envelope=3600,
+    budget=10512, now=510)
+assert bounded_goal['hermes']['cpu'] == 900
+assert bounded_goal['ollama']['cpu'] == 2400
+assert bounded_goal['qmd']['cpu'] == 150
+assert all(bounded_goal[k]['cpu'] >= bounded_roles[k]['cpu'] for k in bounded_roles)
+assert all(bounded_goal[k]['mem'] == bounded_live[k]['mem'] for k in bounded_roles)
+print('v14.6.9 detected-core CPU service ceiling + legacy lease convergence: PASS')
+
+# v14.6.9 follow-up: detected WSL RAM bounds individual Docker containers.
+# These are optional burst ceilings, never reductions of model-aware baselines.
+for wsl_mem in (4096, 8192, 11680, 32768):
+    budget_mib = int(wsl_mem * .9)
+    for role, fraction in (('ollama', .55), ('hermes', .15),
+                           ('qmd', .12), ('honcho-api', .12)):
+        ceiling = module.memory_service_ceiling(role, 256, wsl_mem, budget_mib)
+        assert 256 <= ceiling <= budget_mib
+        assert ceiling <= max(256, int(wsl_mem * fraction / 16) * 16)
+assert module.memory_service_ceiling('ollama', 5632, 11680, 10512) >= 5632
+assert module.memory_service_ceiling('ollama', 8000, 11680, 10512) == 8000
+
+ram_roles = {'ollama': {'cpu': 1350, 'mem': 5632, 'floor': 5632},
+             'hermes': {'cpu': 900, 'mem': 1040, 'floor': 1024},
+             'qmd': {'cpu': 150, 'mem': 1040, 'floor': 1024}}
+ram_live = {'ollama': {'cpu': 1350, 'mem': 7000},
+            'hermes': {'cpu': 900, 'mem': 2000},
+            'qmd': {'cpu': 150, 'mem': 1040}}
+ram_usage = {k: {'cpu_pct': 0, 'mem': 100, 'charged_mem': 100,
+                 'throttled': False} for k in ram_roles}
+ram_record = {'lastUpdate': 500, 'services': {k: {'up': 0, 'idle': 0}
+                                            for k in ram_roles}}
+ram_goal, _ = module.plan(ram_roles, ram_live, ram_usage, ram_record,
+                          available_mib=4000, memory_psi=.1, cpu_psi=.1,
+                          cpu_load1=.2, io_psi=.1, cpus=4, cpu_envelope=3600,
+                          budget=10512, host_memory_mib=11680, now=510)
+assert ram_goal['ollama']['mem'] == module.memory_service_ceiling('ollama', 5632, 11680, 10512)
+assert ram_goal['hermes']['mem'] == module.memory_service_ceiling('hermes', 1040, 11680, 10512)
+assert ram_goal['qmd']['mem'] == 1040
+# Don't shrink a cgroup near its hard ceiling or with a fresh limit event.
+ram_loaded = {k: dict(v) for k, v in ram_usage.items()}
+ram_loaded['ollama']['charged_mem'] = 6500
+ram_loaded['ollama']['memory_limit_hit'] = True
+loaded_goal, _ = module.plan(ram_roles, ram_live, ram_loaded, ram_record,
+                              available_mib=4000, memory_psi=.1, cpu_psi=.1,
+                              cpu_load1=.2, io_psi=.1, cpus=4, cpu_envelope=3600,
+                              budget=10512, host_memory_mib=11680, now=510)
+assert loaded_goal['ollama']['mem'] == 7000
+print('v14.6.9 WSL-RAM-scaled per-container ceilings + safe legacy lease recovery: PASS')

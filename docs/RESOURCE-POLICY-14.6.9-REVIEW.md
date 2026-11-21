@@ -66,3 +66,18 @@ The user's Nov 20 WSL audit showed Hermes at ~97% of its own 1120 MiB cgroup cap
 - Under memory/IO PSI, CPU borrowing requires measured recent throttling and verified multi-sample idle donors. It conserves the Docker envelope. Under a fresh OOM kill it borrows nothing.
 - A fresh `memory.max` delta is a signal of memory reclaim and is *not* equivalent to OOM kill. It prevents use as an idle memory donor and can qualify receiver demand once the high-pressure gate permits redistribution.
 - Release qualification requires 151 deterministic regressions, static audit, manifest verification, both Windows PowerShell parsers, and an actual current-install resume/repair/soak test. Do not infer any of those from a single focused fixture.
+
+## v14.6.9 hotfix: per-container dynamic ceilings
+
+The bounded scheduler now limits optional CPU and RAM expansion for each
+service based on the installer-recorded WSL-visible CPU count and RAM.
+Ratios are tiered by role (Ollama 60% CPU/55% RAM, Hermes 45% CPU/15% RAM,
+other services 30% CPU/12% RAM), subject to static baselines and aggregate
+budgets. Existing above-ceiling CPU leases converge automatically; RAM leases
+converge only with measured safe cgroup headroom. This changes the dynamic
+loan ceiling, **not** the canonical allocations, process CPU affinity, or
+individual subprocess rlimits. On machines where model-aware Ollama RAM
+minimum exceeds the percentage cap, the model floor takes precedence.
+
+This source-only change requires live WSL/Docker/agent load verification
+before claiming reduced hangs.

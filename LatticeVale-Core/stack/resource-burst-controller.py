@@ -60,6 +60,46 @@ def cpu_donor_floor(service, baseline):
                math.ceil(baseline * ratio / CPU_QUANTUM_MILLI) * CPU_QUANTUM_MILLI)
 
 
+def cpu_service_ceiling(service, baseline_milli, visible_cpus):
+    """Bound a *container's aggregate* CPU quota below detected WSL capacity.
+
+    Interactive Hermes and CPU-heavy inference receive larger independent
+    ceilings than background services. Preserve a validated canonical floor,
+    since this overlay is not authorized to rewrite the static installer plan.
+    The canonical planner distributes the Docker envelope across active roles;
+    this cap prevents the dynamic lender from concentrating most cores into a
+    single process group. This is CPU-time quota, not pinned CPU affinity.
+    """
+    if visible_cpus < 1 or baseline_milli < CPU_QUANTUM_MILLI:
+        raise ValueError('invalid canonical CPU baseline or visible CPU count')
+    ratio = (0.60 if service == 'ollama' else
+             0.45 if service == 'hermes' else 0.30)
+    # Leave at least 10% CPU for the host regardless of backend/role.
+    host_max = int(visible_cpus * 1000 * 0.90)
+    bounded = int(visible_cpus * 1000 * ratio)
+    bounded = max(CPU_QUANTUM_MILLI, (bounded // CPU_QUANTUM_MILLI) * CPU_QUANTUM_MILLI)
+    return max(baseline_milli, min(host_max, bounded))
+
+
+def memory_service_ceiling(service, baseline_mib, host_memory_mib, budget_mib):
+    """Bound dynamic *container* memory by detected WSL RAM and service role.
+
+    No arbitrary percentage may invalidate the model/context-aware canonical
+    baseline. Hard ceilings are admission limits, not forced memory usage.
+    This only limits optional burst *above* that baseline; active cgroup pages
+    are never reclaimed to enforce it. Docker memory.max applies to an entire
+    container including its child processes and charged file cache.
+    """
+    if min(baseline_mib, host_memory_mib, budget_mib) <= 0:
+        raise ValueError('invalid memory baseline, detected host RAM or budget')
+    # Keep non-inference roles from accumulating a dominant portion of RAM.
+    ratio = (0.55 if service == 'ollama' else
+             0.15 if service == 'hermes' else 0.12)
+    by_host = (int(host_memory_mib * ratio) // MEM_QUANTUM_MIB) * MEM_QUANTUM_MIB
+    # Never increase a service above the independently conserved Docker pool.
+    return max(baseline_mib, min(budget_mib, by_host))
+
+
 def memory_donor_floor(service, baseline, configured_floor, charged_mib):
     """Preserve cgroup-charged pages, hard model floors, and burst headroom."""
     if charged_mib is None:
@@ -404,11 +444,18 @@ def safe_state(root, expected, state, actual):
 def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi,
          cpu_load1=None, io_psi=None, fresh_oom=False,
          directml_selected=False, directml_active=True, cpus=1, cpu_envelope=0,
-         directml_reserve=0, budget=0, now=None):
+         directml_reserve=0, budget=0, host_memory_mib=None, now=None):
     """Pure, reproducible planner; never raises per-service cap outside group budget."""
     now = time.time() if now is None else now
     old = {k: {'mem': current[k]['mem'], 'cpu': current[k]['cpu']} for k in expected}
     goal = {k: v.copy() for k, v in old.items()}
+    # Canonical installer state supplies the WSL-visible RAM total; tests and
+    # older call sites without that optional field retain the Docker budget.
+    bound_ram = host_memory_mib is not None
+    if host_memory_mib is None:
+        host_memory_mib = budget
+    if host_memory_mib < budget:
+        raise ValueError('WSL memory must cover Docker budget')
     counters = {}
     # WSL-wide CPU PSI includes time that *cgroup-quota-throttled* tasks
     # cannot run. A high PSI number alone therefore does not prove physical
@@ -445,6 +492,27 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     usable_cpu = cpu_envelope + extra
     if usable_cpu > cpus * 1000 - max(50, int(cpus * 100)):
         usable_cpu = cpus * 1000 - max(50, int(cpus * 100))
+    # Converge legacy leases that exceed the new independently bounded
+    # per-service ceilings, even during cooldown or memory pressure. No
+    # canonical baseline is reduced and no container memory cap is touched.
+    for service in expected:
+        ceiling = cpu_service_ceiling(service, expected[service]['cpu'], cpus)
+        if goal[service]['cpu'] > ceiling:
+            goal[service]['cpu'] = ceiling
+
+    # Reclaim excess legacy *burst* memory only when safely possible. A cap
+    # change never shrinks the canonical baseline, and missing cgroup charge
+    # telemetry leaves the current ceiling untouched until it is safe.
+    for service in expected if bound_ram else ():
+        ceiling = memory_service_ceiling(
+            service, expected[service]['mem'], host_memory_mib, budget)
+        if goal[service]['mem'] > ceiling:
+            charged = usage[service].get('charged_mem')
+            if isinstance(charged, (int, float)) and charged >= 0 and not usage[service].get('memory_limit_hit', False):
+                safe_floor = math.ceil(charged * 1.20) + 64
+                if ceiling >= safe_floor:
+                    goal[service]['mem'] = ceiling
+
     def ensure_cpu_envelope():
         # An inactive DirectML worker can become active between timer ticks.
         # Return the borrowed portion of its reservation immediately instead
@@ -511,7 +579,7 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
         spare = max(0, usable_cpu - sum(x['cpu'] for x in goal.values()))
         for receiver in receivers:
             base, cur = expected[receiver]['cpu'], goal[receiver]['cpu']
-            ceiling = min(int(cpus * 1000 * .75), max(base * 3, base + 500))
+            ceiling = cpu_service_ceiling(receiver, base, cpus)
             request = (min(400, max(0, ceiling - cur)) // CPU_QUANTUM_MILLI) * CPU_QUANTUM_MILLI
             for donor in donors:
                 if spare >= request:
@@ -564,7 +632,7 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
         # was reduced even if no receiver had sufficient burst ceiling.
         for target in cpu_receivers:
             base, cur = expected[target]['cpu'], goal[target]['cpu']
-            ceiling = min(int(cpus * 1000 * .75), max(base * 3, base + 500))
+            ceiling = cpu_service_ceiling(target, base, cpus)
             requested = (min(400, max(0, ceiling - cur)) // CPU_QUANTUM_MILLI
                          ) * CPU_QUANTUM_MILLI
             for donor in cpu_donors:
@@ -618,7 +686,9 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     if memory_receivers:
         for target in memory_receivers:
             cur, base = goal[target]['mem'], expected[target]['mem']
-            max_burst = min(budget, max(base + 256, int(base * 1.75)))
+            max_burst = min(max(base + 256, int(base * 1.75)),
+                            (memory_service_ceiling(target, base, host_memory_mib, budget)
+                             if bound_ram else budget))
             requested = (min(128, max(0, max_burst - cur),
                              max(0, available_mib - 512)) // MEM_QUANTUM_MIB
                          ) * MEM_QUANTUM_MIB
@@ -1129,7 +1199,8 @@ def run_once(root, restore=False):
                                     directml_active=directml_busy, cpus=int(state['CPUS']),
                                     cpu_envelope=int(state['CPU_DOCKER_ENVELOPE_MILLI']),
                                     directml_reserve=int(state['CPU_DIRECTML_RESERVE_MILLI']),
-                                    budget=int(state['BUDGET_MIB']))
+                                    budget=int(state['BUDGET_MIB']),
+                                    host_memory_mib=int(state.get('MEM_MIB', state['BUDGET_MIB'])))
             snapshot['pending'] = target
             write_json(root / 'data/latticevale/resource-burst-state.json', snapshot)
             changes = perform(root, expected, actual, target)

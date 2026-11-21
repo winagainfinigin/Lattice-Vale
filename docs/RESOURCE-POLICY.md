@@ -1,4 +1,28 @@
 # LatticeVale 14.6.9 consolidated resource policy (canonical schema 13, bounded runtime scheduler 14)
+## v14.6.9 hotfix — hardware-scaled per-service CPU and RAM burst ceilings
+
+The installed version remains **14.6.9** (not 14.7.0 or 14.6.9.1). The
+canonical installer policy is unchanged (schema 13). The dynamic controller
+limits each service's optional CPU quota borrowing relative to WSL-visible
+logical CPUs: Ollama up to 60%, Hermes up to 45%, other services up to 30%
+(with 50-millicore scheduling granularity). The total Docker CPU envelope,
+service baselines, DirectML reservations, and existing safety gates still
+apply. A service cannot be raised beyond its role ceiling by the borrower,
+and stale above-ceiling CPU leases converge on the next controller tick.
+CPU quotas limit total container CPU time, **not the number of pinned cores**
+or the number of Python threads; changing process affinity would require a
+separate, carefully validated design.
+
+Optional memory borrowing is likewise bounded by detected WSL RAM: Ollama
+55%, Hermes 15%, other services 12%, capped by the Docker memory pool.
+Model/context-aware canonical baselines win when larger than those percentages;
+forcing Ollama below its required model floor could cause OOM. Previously
+borrowed memory is reduced only when measured cgroup charge and 20% plus
+64-MiB headroom permit it, and never during fresh memory.max pressure.
+The controller continues to conserve total memory and CPU across services.
+These caps do **not** guarantee an absence of crashes, repair Hermes event-loop
+watchdog bugs, or directly restrict individual subprocesses inside a container.
+
 
 See [14.6.9 review](RESOURCE-POLICY-14.6.9-REVIEW.md) for each version and authoritative source. The dynamic controller retains all prior identity, memory-charge, journal, rollback, and DirectML safety guards; under host memory/I/O PSI it may still lend *conserved* CPU to measured throttled services. Fresh cgroup memory.max events prevent designation as an idle donor. This policy does not prove a gateway watchdog fix.
 
