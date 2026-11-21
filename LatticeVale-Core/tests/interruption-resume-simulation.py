@@ -78,8 +78,12 @@ with tempfile.TemporaryDirectory(dir=TEST_TMP_BASE) as td:
     fakecurl=fakebin/'curl'
     fakecurl.write_text(textwrap.dedent('''\
         #!/usr/bin/env bash
-        # Simulate a healthy localhost HTTP endpoint. curl -w callers need a status code.
-        if [[ "$*" == *"%{http_code}"* ]]; then printf '200'; fi
+        # The mocked Hermes API must identify itself via JSON, not only HTTP 200.
+        # Preserve the status-only behavior for unrelated endpoints.
+        if [[ "$*" == *"%{http_code}"* ]]; then printf '200'; exit 0; fi
+        if [[ "$*" == *":8642/health"* ]]; then
+          printf '%s\\n' '{"status":"ok","platform":"hermes-agent"}'
+        fi
         exit 0
     ''')); fakecurl.chmod(0o755)
 
