@@ -1,3 +1,7 @@
+# LatticeVale 14.7.0 overlay verification and scope
+
+The v14.7.0 changes described in [the development review](DEVELOPMENT-14.7.0-REVIEW.md) require the normal **154-fixture** contract, both resume simulations, full static audit, source-manifest regeneration with `tools/New-SourceManifest.ps1`, `installer/verify-release.ps1`, a clean GitHub Actions run, and Windows PowerShell 5.1/7 parsing. Linux fixture success does not prove DirectML GPU behavior, Hermes retry handling, backup restoration, Docker database version interoperability, or actual Windows/WSL end-to-end behavior. Do not claim completion of those gates without their output. Tests for the function index, read-only restore, preflight backup space, qualification failure reports, and DirectML HTTP behavior use executable/mocked behavior rather than grepping newly inserted source text.
+
 # LatticeVale 14.6.7 Test Confidence Levels
 
 ## 14.6.7 budget-aware hotfix qualification status (2026-11-13)

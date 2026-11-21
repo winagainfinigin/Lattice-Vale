@@ -23,3 +23,12 @@ The report contains container mount and schema metadata, not database rows. Revi
 ## Automated runtime qualification
 
 The manual Windows/WSL qualification workflow is documented in [the integration matrix](WINDOWS-INTEGRATION-TEST-MATRIX.md). It is separate from these audit utilities and must run only against a disposable stack.
+
+
+## Deterministic function index
+
+After changing `LatticeVale-Core/Install-LatticeVale.ps1` or `LatticeVale-Core/stack/configure-stack.sh`, run `python tools/Generate-FunctionIndex.py` from the repository root. This regenerates `docs/FUNCTION-INDEX.md` from actual function declarations and line numbers, without executing installer code. `python tools/Generate-FunctionIndex.py --check` is read-only and exits nonzero on staleness. The 14.7.0 regression fixture executes both the passing check and a deliberately stale temporary copy.
+
+## Disposable live qualification report
+
+`LatticeVale-Core/tests/live-qualification.py` requires the existing exact disposable-stack marker; ordinary CI and production stacks must not run this probe. The script now writes an atomic JSON failure report containing `failedStep` and `failureType` for errors raised after valid CLI parsing; it reads `docker compose` service/container evidence for the selected marked project rather than engine-wide stats or a hard-coded Hermes container name. `passCriteria` identifies the prior health/verification gates. CPU pressure and watchdog signal counts are measurements only, **not** pass/fail thresholds. A success still requires full disposable-stack qualification on Windows/WSL/Docker.

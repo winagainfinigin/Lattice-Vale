@@ -30,6 +30,7 @@ TMP_TARGET="$TARGET.partial"
 STEP=initialize
 BACKUP_COMPLETE=false
 RESTORE_NEEDED=false
+STOPPED_AT=0
 COMPOSE_AVAILABLE=false
 RUNNING_SERVICES=()
 COMPOSE_LOG="$(mktemp /tmp/latticevale-preupdate-compose.XXXXXX)"
@@ -66,6 +67,7 @@ safe_restore() {
       rc=1
     fi
     RESTORE_NEEDED=false
+    echo "Measured stop/start window: $((SECONDS-STOPPED_AT))s (from stop initiation until restore attempt completion)."
   fi
   return "$rc"
 }
@@ -148,24 +150,11 @@ if [[ "$COMPOSE_AVAILABLE" == true ]]; then
   fi
 fi
 
-# Freeze only containers that were already running while the filesystem snapshot is
-# created. PostgreSQL has already been dumped above; stopping the writers also makes
-# SQLite/JSON/config state in Hermes/QMD/etc. consistent. Restore exactly these existing
-# containers before returning to the Windows installer.
-if [[ "$COMPOSE_AVAILABLE" == true && ${#RUNNING_SERVICES[@]} -gt 0 ]]; then
-  STEP=stop-running-services
-  report_progress 22 'Pausing only the containers that were already running for a consistent snapshot'
-  echo "Temporarily stopping ${#RUNNING_SERVICES[@]} running LatticeVale container(s) for a consistent filesystem snapshot."
-  RESTORE_NEEDED=true
-  : > "$COMPOSE_LOG"
-  if ! docker compose stop --timeout 45 "${RUNNING_SERVICES[@]}" >"$COMPOSE_LOG" 2>&1; then
-    echo "Unable to stop all previously-running LatticeVale containers for the consistent snapshot." >&2
-    tail -n 12 "$COMPOSE_LOG" >&2 || true
-    exit 1
-  fi
-fi
-
-STEP=archive-persistent-state
+# Inventory paths and check destination space BEFORE pausing any services. An
+# apparent-size upper bound deliberately favors refusing a too-large backup
+# rather than assuming compression will save space. Models and user data are
+# not excluded unless ownership/re-download safety can be established.
+STEP=preflight-space
 items=()
 for p in \
   .env install-options.json .installer-state.json compatibility.conf state-audit.py latticevale_readonly.py latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py repair-plan.py audit-free.py checkpoint-metadata.json .install-info \
@@ -178,6 +167,54 @@ for p in \
 done
 [[ "$matrix_dumped" == false && -e data/synapse-db ]] && items+=(data/synapse-db)
 [[ "$honcho_dumped" == false && -e data/honcho-db ]] && items+=(data/honcho-db)
+
+if ((${#items[@]})); then
+  python3 - "$TMP_TARGET" "${items[@]}" <<'PY_SPACE'
+import os
+from pathlib import Path
+import stat
+import sys
+
+target = Path(sys.argv[1])
+payload = 0
+for item in sys.argv[2:]:
+    paths = [item]
+    if os.path.isdir(item) and not os.path.islink(item):
+        for root, dirs, files in os.walk(item, followlinks=False):
+            paths.extend(os.path.join(root, name) for name in dirs + files)
+    for path in paths:
+        info = os.lstat(path)
+        if stat.S_ISREG(info.st_mode):
+            payload += info.st_size
+        elif stat.S_ISLNK(info.st_mode):
+            payload += len(os.readlink(path).encode('utf-8'))
+space = os.statvfs(target)
+available = space.f_bavail * space.f_frsize
+required = int(payload * 1.25) + 512 * 1024 * 1024
+print(f'Backup free-space preflight: payload apparent bytes={payload}, required with margin={required}, available={available}')
+if available < required:
+    sys.exit('Insufficient backup destination free space before pausing services; use the installer per-run backup skip only with an alternate verified backup.')
+PY_SPACE
+fi
+
+# Freeze only containers that were already running while the filesystem snapshot is
+# created. PostgreSQL has already been dumped above; stopping the writers also makes
+# SQLite/JSON/config state in Hermes/QMD/etc. consistent. Restore exactly these existing
+# containers before returning to the Windows installer.
+if [[ "$COMPOSE_AVAILABLE" == true && ${#RUNNING_SERVICES[@]} -gt 0 ]]; then
+  STEP=stop-running-services
+  report_progress 22 'Pausing only the containers that were already running for a consistent snapshot'
+  echo "Temporarily stopping ${#RUNNING_SERVICES[@]} running LatticeVale container(s) for a consistent filesystem snapshot."
+  RESTORE_NEEDED=true
+  STOPPED_AT=$SECONDS
+  : > "$COMPOSE_LOG"
+  if ! docker compose stop --timeout 45 "${RUNNING_SERVICES[@]}" >"$COMPOSE_LOG" 2>&1; then
+    echo "Unable to stop all previously-running LatticeVale containers for the consistent snapshot." >&2
+    tail -n 12 "$COMPOSE_LOG" >&2 || true
+    exit 1
+  fi
+fi
+
 
 if ((${#items[@]})); then
   echo "Archiving ${#items[@]} persistent/configuration path(s) with root read access so container-owned files are preserved. This can take time when local Ollama models are present."

@@ -49,3 +49,100 @@ assert 'latticevale-directml-gateway.service' in un and 'directml-gateway.sh sto
 assert '# LatticeVale v14.7.0' in (REPO/'README.md').read_text(encoding='utf-8')
 assert '## 14.5.3 - 2026-09-02' in (REPO/'docs/CHANGELOG.md').read_text(encoding='utf-8')
 print('v14.5.3 DIRECTML HYBRID FIXTURES: PASS')
+
+# Behavioral DirectML tests use an in-process HTTP server and stub tokenizer,
+# not a GPU, model weights, live Hermes instance, or source-text-only greps.
+import importlib.util
+import json
+import threading
+import urllib.error
+import urllib.request
+from unittest.mock import patch
+
+spec = importlib.util.spec_from_file_location('directml_gateway', ROOT / 'stack/directml-gateway.py')
+assert spec is not None and spec.loader is not None
+gateway = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(gateway)
+
+class StubTokens:
+    shape = (1, 700)
+    def to(self, device):
+        raise AssertionError('A context-overflow prompt must never be dispatched to GPU')
+
+class StubTokenizer:
+    def apply_chat_template(self, messages, **kwargs): return 'generated prompt'
+    def __call__(self, prompt, **kwargs):
+        assert kwargs.get('truncation') is False
+        return {'input_ids': StubTokens()}
+
+def _unavailable_model():
+    return object(), StubTokenizer(), 'mock-device'
+
+with patch.object(gateway, '_load_model', _unavailable_model), \
+     patch.object(gateway, 'EFFECTIVE_MAX_CONTEXT', 1024):
+    try:
+        gateway.routed_chat({'messages': [{'role': 'user', 'content': 'test'}], 'max_tokens': 512})
+    except gateway.ContextLengthExceeded:
+        pass
+    else:
+        raise AssertionError('Oversized DirectML prompt was neither rejected nor surfaced')
+
+with patch.object(gateway, 'GATEWAY_BEARER_TOKEN', 'fixture-secret'), \
+     patch.object(gateway, 'fallback_ready', return_value=(False, 'not-probed')), \
+     patch.object(gateway, 'routed_chat', side_effect=gateway.ContextLengthExceeded('exceeds context')):
+    server = gateway.BoundedGatewayServer(('127.0.0.1', 0), gateway.GatewayHandler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    base = 'http://127.0.0.1:' + str(server.server_address[1])
+    try:
+        try:
+            urllib.request.urlopen(base + '/v1/models', timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 401
+        else:
+            raise AssertionError('A protected model endpoint accepted unauthenticated access')
+        request = urllib.request.Request(base + '/v1/models', headers={'Authorization': 'Bearer fixture-secret'})
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 200
+        try:
+            urllib.request.urlopen(base + '/health', timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 503  # exempt from auth; backend not available in stub
+        else:
+            raise AssertionError('The mocked health path should report no healthy backend')
+        request = urllib.request.Request(base + '/v1/chat/completions', method='POST',
+            headers={'Authorization': 'Bearer fixture-secret', 'Content-Type': 'application/json'},
+            data=b'{"messages":[{"role":"user","content":"hi"}]}')
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            assert exc.code == 400
+            error = json.loads(exc.read())['error']
+            assert error['code'] == 'context_length_exceeded'
+        else:
+            raise AssertionError('Oversized prompt did not produce HTTP 400')
+    finally:
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=5)
+
+print('PASS DirectML over-context behavior, opt-in bearer authorization, and health exemption over HTTP')
+
+# Exercise bounded server behavior with an occupied slot; do not rely on
+# source-string checks or a real GPU/hanging client to trigger saturation.
+import socket
+with patch.object(gateway, 'MAX_HTTP_HANDLERS', 1):
+    server = gateway.BoundedGatewayServer(('127.0.0.1', 0), gateway.GatewayHandler)
+    assert server._request_slots.acquire(blocking=False)
+    left, right = socket.socketpair()
+    try:
+        server.process_request(left, ('127.0.0.1', 7))
+        right.settimeout(3)
+        rejection = right.recv(512)
+        assert b'503 Service Unavailable' in rejection
+        assert b'Retry-After: 1' in rejection
+    finally:
+        right.close()
+        server._request_slots.release()
+        server.server_close()
+print('PASS bounded handler saturation returns HTTP 503 without spawning a worker')

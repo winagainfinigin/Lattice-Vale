@@ -1,10 +1,8 @@
 #!/usr/bin/env python3
-"""Read-only stack qualification plus a bounded disposable CPU load probe.
+"""Opt-in disposable-stack qualification with bounded synthetic CPU pressure.
 
-This is deliberately opt-in. It refuses to run unless the selected stack has a
-`.latticevale-qualification-stack` marker containing the exact disposable-stack
-phrase. The synthetic container is separately capped at 0.5 CPU and 256 MiB;
-the script never recreates, restarts, or updates a LatticeVale service.
+Never run on a production stack.  A marker with exact contents is required
+before any Docker interaction, and reports are written even on failed checks.
 """
 from __future__ import annotations
 
@@ -50,17 +48,22 @@ def parse_compose_ps(text: str) -> list[dict[str, object]]:
         return rows
 
 
-def compose_status(root: Path) -> tuple[int, int, int]:
+def compose_rows(root: Path) -> list[dict[str, object]]:
     proc = command(['docker', 'compose', 'ps', '--format', 'json'], cwd=root, timeout=30)
     if proc.returncode:
         raise RuntimeError('Compose service status could not be read')
     rows = parse_compose_ps(proc.stdout)
     if not rows:
         raise RuntimeError('No Compose services were returned for the marked stack')
+    return rows
+
+
+def compose_status(root: Path) -> tuple[int, int, int]:
+    rows = compose_rows(root)
     unhealthy = 0
     known = 0
     for row in rows:
-        name = str(row.get('Service') or row.get('Name') or '').split('-', 1)[0].lower()
+        name = str(row.get('Service') or '').lower()
         if name in KNOWN_SERVICES:
             known += 1
         state = str(row.get('State') or row.get('Status') or '').lower()
@@ -80,7 +83,12 @@ def psi_avg10(path: str) -> float | None:
 
 
 def stats_max_cpu(root: Path) -> float | None:
-    proc = command(['docker', 'stats', '--no-stream', '--format', '{{json .}}'], cwd=root, timeout=30)
+    # IDs come from *this* marked Compose project, never engine-wide stats.
+    ids = [str(row.get('ID') or '') for row in compose_rows(root)]
+    ids = [container_id for container_id in ids if container_id]
+    if not ids:
+        return None
+    proc = command(['docker', 'stats', '--no-stream', '--format', '{{json .}}', *ids], cwd=root, timeout=30)
     if proc.returncode:
         return None
     values = []
@@ -96,35 +104,54 @@ def stats_max_cpu(root: Path) -> float | None:
 
 
 def recent_gateway_watchdog_signals(root: Path) -> int | None:
-    proc = command(['docker', 'logs', '--since', '10m', '--tail', '1000', 'hermes-agent'], cwd=root, timeout=20)
+    services = {str(row.get('Service') or '') for row in compose_rows(root)}
+    if 'hermes' not in services:
+        return None
+    proc = command(['docker', 'compose', 'logs', '--since', '10m', '--tail', '1000', '--no-color', 'hermes'], cwd=root, timeout=20)
     if proc.returncode:
         return None
     return sum(len(re.findall(pattern, proc.stdout + '\n' + proc.stderr, re.I))
                for pattern in (r'watchdog', r'missed liveness', r'event loop', r'slow callback'))
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--stack', type=Path, required=True)
-    parser.add_argument('--duration-seconds', type=int, default=300)
-    parser.add_argument('--output', type=Path, required=True)
-    args = parser.parse_args()
-    root = args.stack.resolve()
-    if not (60 <= args.duration_seconds <= 3600):
-        raise SystemExit('--duration-seconds must be between 60 and 3600')
+def write_report(output: Path, report: dict[str, object]) -> None:
+    # Atomic replacement prevents leaving a partial JSON report on interruption.
+    output.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output.with_name(output.name + f'.{os.getpid()}.tmp')
+    try:
+        temporary.write_text(json.dumps(report, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+        os.replace(temporary, output)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def qualify(root: Path, duration: int, report: dict[str, object]) -> None:
+    # Deliberately perform NO docker command before the explicit marker check.
+    report['failedStep'] = 'validate-duration'
+    if not (60 <= duration <= 3600):
+        raise ValueError('--duration-seconds must be between 60 and 3600')
+    report['failedStep'] = 'disposable-stack-marker'
     marker = root / MARKER
     if not marker.is_file() or marker.read_text(encoding='utf-8').strip() != MARKER_TEXT:
-        raise SystemExit(f'Refusing live qualification: {root.name} lacks the explicit disposable-stack marker.')
+        raise RuntimeError('Refusing live qualification: explicit disposable-stack marker missing or invalid')
 
+    report['failedStep'] = 'inspect-preloaded-probe-image'
     image = command(['docker', 'image', 'inspect', 'alpine:3.21'], cwd=root, timeout=20)
     if image.returncode:
-        raise SystemExit('The bounded probe image alpine:3.21 must already be present; no image is pulled.')
+        raise RuntimeError('Bounded probe image alpine:3.21 is not already present; no image is pulled')
 
+    report['failedStep'] = 'initial-verification'
     initial_verify = command(['./manage.sh', 'verify'], cwd=root, timeout=600)
+    report['initialVerifyExitCode'] = initial_verify.returncode
     initial_count, initial_unhealthy, _ = compose_status(root)
+    report['initialServiceCount'] = initial_count
+    report['initialUnhealthyServiceCount'] = initial_unhealthy
+    report['passCriteria']['initialVerifySucceeded'] = initial_verify.returncode == 0
+    report['passCriteria']['initialServicesHealthy'] = initial_unhealthy == 0
     if initial_verify.returncode or initial_unhealthy:
-        raise SystemExit('Refusing load probe because the initial verification or service-health check failed.')
+        raise RuntimeError('Initial verification or service-health check failed; no load probe started')
 
+    report['failedStep'] = 'start-bounded-load'
     load = subprocess.Popen(
         ['docker', 'run', '--rm', '--pull=never', '--name', LOAD_NAME,
          '--cpus', '0.50', '--memory', '256m', 'alpine:3.21', 'sh', '-c', 'while :; do :; done'],
@@ -142,8 +169,9 @@ def main() -> int:
     try:
         time.sleep(1)
         if load.poll() is not None:
-            raise RuntimeError('The capped synthetic load container did not start.')
-        deadline = time.monotonic() + args.duration_seconds
+            raise RuntimeError('The capped synthetic load container did not start')
+        report['failedStep'] = 'sample-service-health'
+        deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
             count, unhealthy, _known = compose_status(root)
             service_samples += 1
@@ -162,48 +190,79 @@ def main() -> int:
                 cpu_pct.append(current_cpu)
             time.sleep(min(10, max(0, deadline - time.monotonic())))
     finally:
+        # Cleanup is attempted on every post-launch path, including exceptions.
         command(['docker', 'stop', '--time', '3', LOAD_NAME], cwd=root, timeout=15)
         try:
             load.wait(timeout=10)
         except subprocess.TimeoutExpired:
             load.kill()
             load.wait(timeout=5)
+        report.update({
+            'durationSeconds': int(time.time()) - started,
+            'samples': service_samples,
+            'unhealthyServiceSamples': unhealthy_samples,
+            'hostPressureAvg10Max': {
+                'cpuSome': max(cpu_psi) if cpu_psi else None,
+                'memorySome': max(memory_psi) if memory_psi else None,
+                'ioSome': max(io_psi) if io_psi else None,
+            },
+            'containerCpuPercentMax': max(cpu_pct) if cpu_pct else None,
+        })
 
+    report['passCriteria']['stableServiceCountAndHealth'] = not interrupted
+    report['failedStep'] = 'final-verification'
     final_verify = command(['./manage.sh', 'verify'], cwd=root, timeout=600)
+    report['finalVerifyExitCode'] = final_verify.returncode
     final_count, final_unhealthy, known_services = compose_status(root)
-    watchdog_signals = recent_gateway_watchdog_signals(root)
-    report = {
-        'schema': 1,
-        'result': 'pass' if not interrupted and final_verify.returncode == 0 and final_unhealthy == 0 else 'fail',
-        'durationSeconds': int(time.time()) - started,
-        'initialVerifyExitCode': initial_verify.returncode,
-        'finalVerifyExitCode': final_verify.returncode,
-        'initialServiceCount': initial_count,
+    report.update({
         'finalServiceCount': final_count,
         'knownLatticeValeServiceCount': known_services,
-        'samples': service_samples,
-        'unhealthyServiceSamples': unhealthy_samples,
         'finalUnhealthyServiceCount': final_unhealthy,
-        'hostPressureAvg10Max': {
-            'cpuSome': max(cpu_psi) if cpu_psi else None,
-            'memorySome': max(memory_psi) if memory_psi else None,
-            'ioSome': max(io_psi) if io_psi else None,
-        },
-        'containerCpuPercentMax': max(cpu_pct) if cpu_pct else None,
-        'recentHermesGatewayWatchdogSignalCount': watchdog_signals,
-        'syntheticProbe': {'cpuLimit': '0.50', 'memoryLimitMiB': 256, 'imagePulled': False},
-        'directmlInference': 'not-exercised-by-this-WSL-load-probe',
+        'recentHermesGatewayWatchdogSignalCount': recent_gateway_watchdog_signals(root),
+    })
+    report['passCriteria'] = {
+        'initialVerifySucceeded': True,
+        'initialServicesHealthy': initial_unhealthy == 0,
+        'stableServiceCountAndHealth': not interrupted,
+        'finalVerifySucceeded': final_verify.returncode == 0,
+        'finalServicesHealthy': final_unhealthy == 0,
+        'pressureAndWatchdog': 'observed-not-judged',
     }
-    output = args.output.resolve()
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(report, indent=2, sort_keys=True) + '\n', encoding='utf-8')
+    # Preserve original verdict logic; no pressure thresholds are invented.
+    if not interrupted and final_verify.returncode == 0 and final_unhealthy == 0:
+        report['result'] = 'pass'
+        report['failedStep'] = None
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--stack', type=Path, required=True)
+    parser.add_argument('--duration-seconds', type=int, default=300)
+    parser.add_argument('--output', type=Path, required=True)
+    args = parser.parse_args()
+    report: dict[str, object] = {
+        'schema': 1, 'result': 'fail', 'failedStep': 'preflight',
+        'directmlInference': 'not-exercised-by-this-WSL-load-probe',
+        'syntheticProbe': {'cpuLimit': '0.50', 'memoryLimitMiB': 256, 'imagePulled': False},
+        'passCriteria': {
+            'initialVerifySucceeded': None, 'initialServicesHealthy': None,
+            'stableServiceCountAndHealth': None, 'finalVerifySucceeded': None,
+            'finalServicesHealthy': None, 'pressureAndWatchdog': 'observed-not-judged',
+        },
+    }
+    try:
+        qualify(args.stack.resolve(), args.duration_seconds, report)
+    except Exception as exc:
+        report['failureType'] = type(exc).__name__
+        print(f"Qualification failed safely at step {report['failedStep']}: {type(exc).__name__}", file=sys.stderr)
+    try:
+        write_report(args.output.resolve(), report)
+    except OSError as exc:
+        print(f'Could not write qualification report: {type(exc).__name__}', file=sys.stderr)
+        return 1
     print(json.dumps(report, sort_keys=True))
     return 0 if report['result'] == 'pass' else 1
 
 
 if __name__ == '__main__':
-    try:
-        raise SystemExit(main())
-    except (OSError, subprocess.TimeoutExpired, RuntimeError, ValueError) as exc:
-        print(f'Qualification failed safely: {type(exc).__name__}', file=sys.stderr)
-        raise SystemExit(1)
+    raise SystemExit(main())

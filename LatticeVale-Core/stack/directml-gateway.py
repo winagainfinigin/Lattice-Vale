@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hmac
 import json
 import os
 import re
@@ -48,6 +49,9 @@ DEFAULT_MAX_NEW = max(32, min(int(os.environ.get("LATTICEVALE_DIRECTML_MAX_NEW_T
 IDLE_UNLOAD_SECONDS = max(60, min(int(os.environ.get("LATTICEVALE_DIRECTML_IDLE_UNLOAD_SECONDS", "300")), 3600))
 FAILURE_COOLDOWN_SECONDS = max(15, min(int(os.environ.get("LATTICEVALE_DIRECTML_FAILURE_COOLDOWN_SECONDS", "60")), 600))
 NATIVE_FALLBACK_URL = os.environ.get("LATTICEVALE_NATIVE_OLLAMA_URL", "").rstrip("/")
+GATEWAY_BEARER_TOKEN = os.environ.get("LATTICEVALE_DIRECTML_BEARER_TOKEN", "")
+HANDLER_READ_TIMEOUT_SECONDS = 30
+MAX_HTTP_HANDLERS = 8
 REQUESTED_ADAPTER_NAME = os.environ.get("LATTICEVALE_DIRECTML_ADAPTER_NAME", "").strip()
 REQUESTED_GPU_VENDOR = os.environ.get("LATTICEVALE_DIRECTML_GPU_VENDOR", "").strip().lower()
 try:
@@ -85,6 +89,10 @@ EFFECTIVE_MAX_CONTEXT = MAX_CONTEXT
 VRAM_POLICY_DETAIL = "not-evaluated"
 DIRECTML_TRANSFORMERS_COMPAT = "not-applied"
 STOP_EVENT = threading.Event()
+
+
+class ContextLengthExceeded(ValueError):
+    """Caller prompt is too large for DirectML without destructive truncation."""
 
 
 def _no_proxy_opener() -> urllib.request.OpenerDirector:
@@ -625,7 +633,14 @@ def directml_chat(payload: dict[str, Any]) -> dict[str, Any]:
         model, tokenizer, device = _load_model()
         prompt = _render_prompt(tokenizer, messages, tools)
         max_input = max(256, EFFECTIVE_MAX_CONTEXT - max_new)
-        encoded = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=max_input)
+        # Never silently truncate the newest conversation turns. Full tokenization
+        # occurs on CPU so we can reject before allocating a GPU generation graph.
+        encoded = tokenizer(prompt, return_tensors="pt", truncation=False)
+        if int(encoded["input_ids"].shape[-1]) > max_input:
+            raise ContextLengthExceeded(
+                f"Prompt exceeds DirectML context window: max {max_input} input tokens "
+                f"after reserving {max_new} completion tokens"
+            )
         input_ids = encoded["input_ids"].to(device)
         attention_mask = encoded.get("attention_mask")
         if attention_mask is not None:
@@ -662,6 +677,9 @@ def directml_chat(payload: dict[str, Any]) -> dict[str, Any]:
             "prompt_tokens": input_tokens,
             "completion_tokens": output_tokens,
         }
+    except ContextLengthExceeded:
+        # Invalid client input does not mark the GPU/model as failed.
+        raise
     except Exception as exc:
         LAST_ERROR = f"DirectML inference failed: {exc}"
         LAST_FAILURE = time.monotonic()
@@ -695,6 +713,10 @@ def routed_chat(payload: dict[str, Any]) -> dict[str, Any]:
         return ollama_chat(payload, "DirectML temporarily disabled after a prior hard gateway/model failure")
     try:
         return directml_chat(payload)
+    except ContextLengthExceeded:
+        # The client's requested context must not silently spill to an Ollama
+        # fallback with different semantics or be reported as gateway health loss.
+        raise
     except Exception as exc:
         error = str(exc)
         if not FALLBACK_ENABLED:
@@ -782,6 +804,24 @@ def stream_chunks(handler: BaseHTTPRequestHandler, result: dict[str, Any], model
 
 
 class GatewayHandler(BaseHTTPRequestHandler):
+    def setup(self) -> None:
+        # Bound abandoned/incomplete request-body reads even when the client
+        # leaves the socket open after sending Content-Length.
+        self.request.settimeout(HANDLER_READ_TIMEOUT_SECONDS)
+        super().setup()
+
+    def _authorized(self) -> bool:
+        if not GATEWAY_BEARER_TOKEN:
+            return True
+        provided = self.headers.get("Authorization", "")
+        return hmac.compare_digest(provided, "Bearer " + GATEWAY_BEARER_TOKEN)
+
+    def _require_authorization(self) -> bool:
+        if self._authorized():
+            return True
+        self._json(401, {"error": {"message": "authentication required", "type": "authentication_error"}})
+        return False
+
     server_version = f"LatticeValeDirectML/{VERSION}"
 
     def log_message(self, fmt: str, *args: Any) -> None:
@@ -851,6 +891,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 }
             self._json(200 if payload["status"] == "ok" else 503, payload)
             return
+        if not self._require_authorization():
+            return
         if self.path.rstrip("/") == "/v1/models":
             self._json(
                 200,
@@ -870,6 +912,8 @@ class GatewayHandler(BaseHTTPRequestHandler):
         self._json(404, {"error": {"message": "not found", "type": "invalid_request_error"}})
 
     def do_POST(self) -> None:  # noqa: N802
+        if not self._require_authorization():
+            return
         if self.path.rstrip("/") != "/v1/chat/completions":
             self._json(404, {"error": {"message": "not found", "type": "invalid_request_error"}})
             return
@@ -886,11 +930,46 @@ class GatewayHandler(BaseHTTPRequestHandler):
                 stream_chunks(self, result, model)
             else:
                 self._json(200, completion_object(result, model))
+        except ContextLengthExceeded as exc:
+            self._json(400, {"error": {"message": str(exc), "type": "invalid_request_error", "code": "context_length_exceeded"}})
         except ValueError as exc:
             self._json(400, {"error": {"message": str(exc), "type": "invalid_request_error"}})
         except Exception as exc:
             traceback.print_exc(file=sys.stderr)
             self._json(503, {"error": {"message": str(exc), "type": "service_unavailable"}})
+
+
+class BoundedGatewayServer(ThreadingHTTPServer):
+    # The old request_queue_size assignment happened *after* bind/listen and
+    # therefore did not set the kernel backlog. Apply it before initialization.
+    daemon_threads = True
+    request_queue_size = 32
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        self._request_slots = threading.BoundedSemaphore(MAX_HTTP_HANDLERS)
+        super().__init__(*args, **kwargs)
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if not self._request_slots.acquire(blocking=False):
+            try:
+                request.settimeout(1)
+                request.sendall(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\nRetry-After: 1\r\n\r\n")
+            except OSError:
+                pass
+            finally:
+                self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._request_slots.release()
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._request_slots.release()
 
 
 def main() -> int:
@@ -905,9 +984,7 @@ def main() -> int:
     HF_HOME.mkdir(parents=True, exist_ok=True)
     unloader = threading.Thread(target=idle_unloader, name="directml-idle-unloader", daemon=True)
     unloader.start()
-    server = ThreadingHTTPServer((args.listen_address, args.listen_port), GatewayHandler)
-    server.daemon_threads = True
-    server.request_queue_size = 32
+    server = BoundedGatewayServer((args.listen_address, args.listen_port), GatewayHandler)
 
     def _term(_signum: int, _frame: Any) -> None:
         STOP_EVENT.set()

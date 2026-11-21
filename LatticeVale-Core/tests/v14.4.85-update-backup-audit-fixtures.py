@@ -136,3 +136,28 @@ with tempfile.TemporaryDirectory(prefix='lv-hf2-backup-fail-') as td:
     assert not list((stack/'backups').glob('*.partial'))
 
 print('v14.4.85 UPDATE BACKUP + READ-ONLY AUDIT FIXTURES: PASS')
+
+# A sparse file has large apparent size but consumes almost no real fixture disk.
+# The preflight must fail before ever pausing a selected Docker service.
+with tempfile.TemporaryDirectory(prefix='lv-preflight-space-') as td:
+    td = Path(td)
+    stack = td/'hermes-stack'
+    stack.mkdir()
+    bindir = td/'bin'
+    bindir.mkdir()
+    make_fake_docker(bindir)
+    (stack/'compose.yaml').write_text('services: {}\n')
+    (stack/'install-options.json').write_text('{}\n')
+    big = stack/'data/hermes/cache-large.bin'
+    big.parent.mkdir(parents=True)
+    with big.open('wb') as file:
+        file.truncate(40 * 1024 ** 3)
+    log = td/'docker.log'
+    env = dict(os.environ, PATH=f"{bindir}:{os.environ['PATH']}", FAKE_DOCKER_LOG=str(log))
+    failed = subprocess.run(['bash', str(backup), str(stack)], capture_output=True,
+                            text=True, env=env, timeout=30)
+    assert failed.returncode != 0
+    assert 'step=preflight-space' in failed.stderr, failed.stderr
+    assert 'Insufficient backup destination free space' in failed.stderr, failed.stderr
+    assert 'compose stop' not in log.read_text()
+print('PASS backup preflight fails before Compose stop on insufficient destination free space')

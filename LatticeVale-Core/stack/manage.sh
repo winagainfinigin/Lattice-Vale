@@ -28,6 +28,8 @@ Usage: ./manage.sh COMMAND [ARG]
   kanban                  Show Kanban board/tasks (when enabled)
   reindex                 Run a QMD vault update/embed now (when enabled)
   backup                  Create a local backup under ./backups
+  restore BACKUP-DIR --plan
+                         Validate a backup and show what manual restore would replace; never applies it
   update                  Force latest-supported upstream refresh of installer-managed refs, then verify
   dashboard-info          Print the dashboard URL (never prints its password)
   matrix-info             Print non-secret Matrix connection information
@@ -1410,27 +1412,154 @@ refresh_adaptive_resource_policy() {
 }
 
 backup() {
-  local stamp target matrix_dumped=false honcho_dumped=false
+  local stamp target matrix_dumped=false honcho_dumped=false started=$SECONDS
   stamp="$(date -u +%Y%m%dT%H%M%SZ)"; target="$PWD/backups/$stamp"; install -d -m 0700 "$target"
   if [[ "$(opt_bool matrix)" == true ]] && docker compose ps --status running synapse-db | grep -q synapse-db; then
     docker compose exec -T synapse-db pg_dump -U synapse -d synapse -Fc > "$target/synapse.dump"
+    [[ -s "$target/synapse.dump" && "$(head -c 5 "$target/synapse.dump")" == PGDMP ]] || {
+      echo 'Invalid Synapse custom-format dump; backup refused.' >&2; return 1;
+    }
+    docker compose exec -T synapse-db pg_restore --list < "$target/synapse.dump" >/dev/null || {
+      echo 'Synapse pg_restore --list validation failed; backup refused.' >&2; return 1;
+    }
     matrix_dumped=true
   fi
   if [[ "$(opt_bool honcho)" == true ]] && docker compose ps --status running honcho-db | grep -q honcho-db; then
     docker compose exec -T honcho-db pg_dump -U honcho -d honcho -Fc > "$target/honcho.dump"
+    [[ -s "$target/honcho.dump" && "$(head -c 5 "$target/honcho.dump")" == PGDMP ]] || {
+      echo 'Invalid Honcho custom-format dump; backup refused.' >&2; return 1;
+    }
+    docker compose exec -T honcho-db pg_restore --list < "$target/honcho.dump" >/dev/null || {
+      echo 'Honcho pg_restore --list validation failed; backup refused.' >&2; return 1;
+    }
     honcho_dumped=true
   fi
   local -a items=()
   for p in .env install-options.json .installer-state.json state-audit.py .install-info .configured .provider-configured .installer-gateway-multiplex-owned .installer-managed-profiles .installer-owned-gateway-parks.json .matrix-configured .matrix-info .matrix-profiles .tailscale-info .windows-native-info \
-    compose.yaml compatibility.conf latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/latticevale data/directml data/qmd data/synapse data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
+    compose.yaml compose.override.yaml compatibility.conf latticevale_arch.py hardware-capabilities.py backend-capabilities.py runtime-policy.py diagnostics.py directml-gateway.py directml-gateway.sh directml-requirements.txt config secrets logs data/hermes data/latticevale data/directml data/qmd data/synapse data/tailscale data/tailscale-matrix data/searxng-valkey data/honcho-redis data/ollama vault workspace; do
     [[ -e "$p" ]] && items+=("$p")
   done
   [[ "$matrix_dumped" == false && -e data/synapse-db ]] && items+=(data/synapse-db)
   [[ "$honcho_dumped" == false && -e data/honcho-db ]] && items+=(data/honcho-db)
   ((${#items[@]})) && tar -czf "$target/files.tar.gz" "${items[@]}"
+  if [[ -s "$target/files.tar.gz" ]]; then
+    tar -tzf "$target/files.tar.gz" >/dev/null || { echo 'Archive integrity validation failed; backup refused.' >&2; return 1; }
+  else
+    echo 'No persistent/configuration files were archived; backup refused.' >&2
+    return 1
+  fi
   chmod -R go-rwx "$target"
-  echo "Backup created: $target"
+  echo "Backup created and validated: $target"
+  echo "Backup operation elapsed: $((SECONDS-started))s; service downtime from this command: 0s (services were not stopped)."
+  echo 'Consistency warning: this online file archive can contain inconsistent SQLite/JSON state while services are writing. Prefer the pre-update safety backup for a quiesced snapshot.'
   echo 'Security note: this backup may contain API keys, Matrix credentials, profile configuration, and other sensitive state. Store it securely and consider encrypting it before copying it to cloud storage or another system.'
+}
+
+# Read-only backup inspection. This command deliberately has no apply mode.
+restore_plan() {
+  local backup_dir="${1:-}" mode="${2:---plan}"
+  [[ -n "$backup_dir" && "$mode" == --plan && $# -le 2 ]] || {
+    echo 'Usage: ./manage.sh restore BACKUP-DIR --plan (read-only; executing a restore is not implemented)' >&2
+    return 2
+  }
+  python3 - "$PWD" "$backup_dir" <<'PY_RESTORE_PLAN'
+import json
+from pathlib import Path, PurePosixPath
+import re
+import subprocess
+import sys
+import tarfile
+
+stack = Path(sys.argv[1]).resolve()
+backup = Path(sys.argv[2]).absolute()
+
+
+def fail(message):
+    raise RuntimeError(message)
+
+
+def schema_values(data):
+    result = {}
+    for key in ('INSTALL_OPTIONS_SCHEMA', 'RUNTIME_POLICY_SCHEMA'):
+        m = re.search(r'^' + key + r'=([0-9]+)$', data, re.M)
+        if not m:
+            fail('Cannot verify compatibility: missing ' + key)
+        result[key] = int(m.group(1))
+    return result
+
+
+try:
+    if backup.is_symlink() or not backup.is_dir():
+        fail('Backup directory does not exist or is a symlink')
+    archive = backup / 'files.tar.gz'
+    if archive.is_symlink() or not archive.is_file():
+        fail('Missing regular files.tar.gz; refusing incomplete backup')
+    listed = subprocess.run(['tar', '-tzf', str(archive)], stdout=subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, text=True, timeout=180, check=False)
+    if listed.returncode:
+        fail('tar -tzf integrity verification failed')
+    with tarfile.open(archive, 'r:gz') as stream:
+        members = stream.getmembers()
+        if not members:
+            fail('Archive is empty')
+        files = {}
+        for m in members:
+            name = PurePosixPath(m.name)
+            if (name.is_absolute() or '..' in name.parts or not name.parts or
+                    any(part in ('', '.') for part in name.parts)):
+                fail('Archive contains unsafe relative paths')
+            path = name.as_posix()
+            if path in files:
+                fail('Archive contains duplicate paths')
+            if m.isdev() or m.isfifo() or m.issym() or m.islnk():
+                fail('Archive contains link/special entry requiring manual security review: ' + path)
+            if not (m.isfile() or m.isdir()):
+                fail('Archive contains unsupported entry: ' + path)
+            files[path] = m
+        member = files.get('compatibility.conf')
+        if not member or not member.isfile():
+            fail('Backup does not include compatibility.conf; cannot verify schema')
+        content = stream.extractfile(member).read(256 * 1024).decode('utf-8')
+        saved_schema = schema_values(content)
+        current_schema = schema_values((stack / 'compatibility.conf').read_text(encoding='utf-8'))
+        if saved_schema != current_schema:
+            fail(f'Schema mismatch; backup={saved_schema} current={current_schema}; manual migration assessment required')
+        options = files.get('install-options.json')
+        if not options or not options.isfile():
+            fail('Backup missing install-options.json; cannot verify installer version/schema')
+        saved_options = json.loads(stream.extractfile(options).read(1024 * 1024))
+        active_options = json.loads((stack / 'install-options.json').read_text(encoding='utf-8'))
+        if not isinstance(saved_options, dict) or not isinstance(active_options, dict):
+            fail('Install options must be JSON objects')
+        if not isinstance(saved_options.get('schema'), int) or not 1 <= saved_options['schema'] <= current_schema['INSTALL_OPTIONS_SCHEMA']:
+            fail('Backup install-options schema is missing or unsupported')
+        saved_version = str(saved_options.get('installerVersion') or 'unknown')
+        active_version = str(active_options.get('installerVersion') or 'unknown')
+    dumps = sorted(backup.glob('*.dump'))
+    for dump in dumps:
+        if dump.is_symlink() or not dump.is_file():
+            fail('Dump is not a regular file: ' + dump.name)
+        result = subprocess.run(['pg_restore', '--list', str(dump)], stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, text=True, timeout=180, check=False)
+        if result.returncode:
+            fail('pg_restore --list failed for ' + dump.name)
+    print('RESTORE PLAN ONLY — NO FILES, SERVICES OR DATABASES ARE MODIFIED')
+    print('Backup kind:', 'pre-update safety' if (backup / 'BACKUP-INFO.txt').is_file() else 'manual')
+    print('Backup directory:', backup)
+    print('Schema match:', saved_schema)
+    print('Installer versions: backup=' + saved_version + ' active=' + active_version)
+    if saved_version != active_version:
+        print('WARNING: Installer versions differ; manual compatibility/migration review is mandatory.')
+    print('Validated PostgreSQL dumps:', ', '.join(x.name for x in dumps) if dumps else '(none)')
+    print('Paths that a future manual restore WOULD replace (archive entries, relative to stack):')
+    for name in sorted(path for path, m in files.items() if m.isfile()):
+        print('  ' + name)
+    print('Database dumps are NOT applied. No automatic restore action exists.')
+except (OSError, ValueError, json.JSONDecodeError, tarfile.TarError,
+        subprocess.TimeoutExpired, RuntimeError) as exc:
+    print('RESTORE PLAN REFUSED: ' + str(exc), file=sys.stderr)
+    sys.exit(1)
+PY_RESTORE_PLAN
 }
 
 cmd="${1:-status}"
@@ -1467,6 +1596,12 @@ if [[ "$cmd" == diagnose || "$cmd" == diagnose-gpu || "$cmd" == diagnose-backend
       python3 ./runtime-policy.py verify --stack . --compat compatibility.conf --state .latticevale-resource-state --output data/latticevale/runtime-policy.json
       python3 -m json.tool data/latticevale/runtime-policy.json ;;
   esac
+  exit $?
+fi
+
+# A damaged stack must still be able to inspect its backups without Docker.
+if [[ "$cmd" == restore ]]; then
+  restore_plan "${2:-}" "${3:---plan}"
   exit $?
 fi
 
