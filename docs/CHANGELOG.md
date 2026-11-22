@@ -2,6 +2,8 @@
 
 ## 14.7.0 — reproducible releases, runtime qualification, and auditability
 
+- **Same-version evidence-first resource diagnostics:** add planner-origin reason codes to the controller's bounded decision history and read-only `./manage.sh resources --explain|--json`, including WSL and Docker budgets, cgroup charge, timer state and qualified donor headroom. Extend explicitly marked disposable Windows/WSL qualification with an optional time-bounded Hermes CPU probe and before/after controller decisions; distinguish observed loans from demonstrated repayment. No second allocator, host-memory-reserve lending, version/schema change or production load test is included.
+
 - **Same-version resource-policy regression correction:** restore the original v14.6.6 demand-dependent 256-MiB/1.75x baseline burst limit for optional per-container RAM borrowing. Remove the v14.6.9 extra 55%/15%/12%-of-WSL per-role caps: they could equal or undercut a canonical allocation and prevent any Hermes memory borrowing on otherwise healthy, idle-donor stacks. Retain the canonical hardware/model-aware service planner, conserved WSL/Docker envelopes, DirectML and managed/native Ollama placement, cgroup memory.current headroom, fresh memory.max/OOM guards, journal and repair rollback. CPU ceilings, reserved host memory and persistence schemas are unchanged. Mocked source tests are not a live runtime qualification.
 
 - Build the release archive from the SHA-256 source manifest, verify the exact `Lattice-Vale/` root, and reject Git metadata, bytecode, unlisted files, and path escapes. Record source commit and archive SHA-256 beside the ZIP; publish those artifacts from the exact matching release tag.

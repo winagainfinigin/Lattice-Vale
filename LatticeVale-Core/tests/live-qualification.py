@@ -125,7 +125,64 @@ def write_report(output: Path, report: dict[str, object]) -> None:
         temporary.unlink(missing_ok=True)
 
 
-def qualify(root: Path, duration: int, report: dict[str, object]) -> None:
+def resource_history(root: Path) -> dict[str, object]:
+    """Read only controller sample metadata; do not convert lack of activity to PASS."""
+    path = root / 'data/latticevale/resource-burst-state.json'
+    try:
+        payload = json.loads(path.read_text(encoding='utf-8'))
+        rows = payload.get('decisionHistory') or []
+        valid = [r for r in rows if isinstance(r, dict) and
+                 isinstance(r.get('sampledAt'), (int, float))]
+        return {'available': True, 'sampleCount': len(valid),
+                'lastSampleAt': valid[-1]['sampledAt'] if valid else None,
+                'history': valid}
+    except (OSError, ValueError, TypeError, AttributeError):
+        return {'available': False, 'sampleCount': 0, 'history': []}
+
+
+def observe_transfers(before: dict[str, object], after: dict[str, object]) -> dict[str, object]:
+    """Assess evidence of actual transfers and repayment, never assume a pass.
+
+    A donor's initial reduction is not proof that a recipient later repaid a
+    loan. Track increase, then subsequent reduction of that SAME resource.
+    """
+    old_at = before.get('lastSampleAt')
+    rows = [x for x in after.get('history', [])
+            if isinstance(x, dict) and isinstance(x.get('sampledAt'), (int, float))
+            and (old_at is None or x['sampledAt'] > old_at)]
+    rows.sort(key=lambda x: x['sampledAt'])
+    changed = set()
+    borrowed = set()
+    repaid = set()
+    for row in rows:
+        for service, values in (row.get('services') or {}).items():
+            if not isinstance(values, dict):
+                continue
+            for field in ('cpuMilli', 'memoryMiB'):
+                pair = values.get(field) or {}
+                old, new = pair.get('before'), pair.get('after')
+                if type(old) is not int or type(new) is not int or old == new:
+                    continue
+                key = (service, field)
+                changed.add(key)
+                if new > old:
+                    borrowed.add(key)
+                elif key in borrowed:
+                    repaid.add(key)
+    return {
+        'freshControllerSamples': len(rows),
+        'changedServicesAndResources': [f'{name}:{field}' for name, field in sorted(changed)],
+        'borrowedServicesAndResources': [f'{name}:{field}' for name, field in sorted(borrowed)],
+        'repaidServicesAndResources': [f'{name}:{field}' for name, field in sorted(repaid)],
+        'redistributionObserved': bool(changed),
+        'borrowAndReturnObserved': bool(repaid),
+        'qualification': ('borrow-and-return-observed' if repaid else
+                          'transfer-observed-but-return-unproven' if changed else
+                          'not-demonstrated'),
+    }
+
+
+def qualify(root: Path, duration: int, report: dict[str, object], *, exercise_hermes_cpu=False) -> None:
     # Deliberately perform NO docker command before the explicit marker check.
     report['failedStep'] = 'validate-duration'
     if not (60 <= duration <= 3600):
@@ -151,6 +208,8 @@ def qualify(root: Path, duration: int, report: dict[str, object]) -> None:
     if initial_verify.returncode or initial_unhealthy:
         raise RuntimeError('Initial verification or service-health check failed; no load probe started')
 
+    before_resource = resource_history(root)
+    report['resourceControllerBefore'] = {k: v for k, v in before_resource.items() if k != 'history'}
     report['failedStep'] = 'start-bounded-load'
     load = subprocess.Popen(
         ['docker', 'run', '--rm', '--pull=never', '--name', LOAD_NAME,
@@ -166,11 +225,28 @@ def qualify(root: Path, duration: int, report: dict[str, object]) -> None:
     service_samples = 0
     unhealthy_samples = 0
     interrupted = False
+    hermes_load = None
     try:
         time.sleep(1)
         if load.poll() is not None:
             raise RuntimeError('The capped synthetic load container did not start')
         report['failedStep'] = 'sample-service-health'
+        if exercise_hermes_cpu:
+            # Explicitly opt in, only after the disposable-stack marker was validated.
+            # In-container Python exits on its own after at most 120 seconds.
+            # No models, files, options, or user data are changed by this probe.
+            available = {str(r.get('Service') or '') for r in compose_rows(root)}
+            if 'hermes' not in available:
+                raise RuntimeError('Hermes is not in this marked Compose project')
+            seconds = min(120, max(30, duration // 2))
+            # A multiline statement is needed for Python's compound while.
+            code = 'import time\nend=time.monotonic()+%d\nn=0\nwhile time.monotonic()<end:\n n=(n+1)%%1000003' % seconds
+            hermes_load = subprocess.Popen(
+                ['docker', 'compose', 'exec', '-T', '-u', 'hermes', 'hermes',
+                 'python3', '-c', code], cwd=root, stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL, stdin=subprocess.DEVNULL)
+            report['hermesCpuProbe'] = {'requested': True, 'durationSeconds': seconds,
+                                        'status': 'started-bounded-in-container'}
         deadline = time.monotonic() + duration
         while time.monotonic() < deadline:
             count, unhealthy, _known = compose_status(root)
@@ -190,6 +266,17 @@ def qualify(root: Path, duration: int, report: dict[str, object]) -> None:
                 cpu_pct.append(current_cpu)
             time.sleep(min(10, max(0, deadline - time.monotonic())))
     finally:
+        if hermes_load is not None:
+            try:
+                hermes_load.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                # The in-container process still has its own monotonic deadline.
+                hermes_load.terminate()
+                try:
+                    hermes_load.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    hermes_load.kill()
+                    hermes_load.wait(timeout=3)
         # Cleanup is attempted on every post-launch path, including exceptions.
         command(['docker', 'stop', '--time', '3', LOAD_NAME], cwd=root, timeout=15)
         try:
@@ -209,6 +296,16 @@ def qualify(root: Path, duration: int, report: dict[str, object]) -> None:
             'containerCpuPercentMax': max(cpu_pct) if cpu_pct else None,
         })
 
+    if exercise_hermes_cpu and hermes_load is not None:
+        if hermes_load.returncode != 0:
+            report['hermesCpuProbe']['status'] = 'command-failed'
+            raise RuntimeError('Opted-in Hermes CPU probe did not complete successfully')
+        report['hermesCpuProbe']['status'] = 'completed'
+    after_resource = resource_history(root)
+    report['resourceControllerAfter'] = {k: v for k, v in after_resource.items() if k != 'history'}
+    report['resourceRedistribution'] = observe_transfers(before_resource, after_resource)
+    # Seeing no transfer is NOT a qualification PASS: it may simply mean no donor
+    # was available, no managed load crossed thresholds, or the timer was inactive.
     report['passCriteria']['stableServiceCountAndHealth'] = not interrupted
     report['failedStep'] = 'final-verification'
     final_verify = command(['./manage.sh', 'verify'], cwd=root, timeout=600)
@@ -238,6 +335,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--stack', type=Path, required=True)
     parser.add_argument('--duration-seconds', type=int, default=300)
+    parser.add_argument('--exercise-hermes-cpu', action='store_true',
+                        help='Opt-in bounded Hermes CPU probe; disposable stack only')
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
     report: dict[str, object] = {
@@ -251,7 +350,8 @@ def main() -> int:
         },
     }
     try:
-        qualify(args.stack.resolve(), args.duration_seconds, report)
+        qualify(args.stack.resolve(), args.duration_seconds, report,
+                exercise_hermes_cpu=args.exercise_hermes_cpu)
     except Exception as exc:
         report['failureType'] = type(exc).__name__
         print(f"Qualification failed safely at step {report['failedStep']}: {type(exc).__name__}", file=sys.stderr)

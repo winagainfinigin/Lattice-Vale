@@ -446,7 +446,7 @@ def safe_state(root, expected, state, actual):
 def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi,
          cpu_load1=None, io_psi=None, fresh_oom=False,
          directml_selected=False, directml_active=True, cpus=1, cpu_envelope=0,
-         directml_reserve=0, budget=0, host_memory_mib=None, now=None):
+         directml_reserve=0, budget=0, host_memory_mib=None, now=None, trace=None):
     """Pure, reproducible planner; never raises per-service cap outside group budget."""
     now = time.time() if now is None else now
     old = {k: {'mem': current[k]['mem'], 'cpu': current[k]['cpu']} for k in expected}
@@ -458,6 +458,21 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     if host_memory_mib < budget:
         raise ValueError('WSL memory must cover Docker budget')
     counters = {}
+    decisions = {k: {'memory': 'not-evaluated', 'cpu': 'not-evaluated'} for k in expected}
+    def finish():
+        # Populate the optional diagnostic trace from decisions made by this planner.
+        # No second scheduler or speculative capacity calculation is involved.
+        if trace is not None:
+            for service in expected:
+                for metric, key in (('memory', 'mem'), ('cpu', 'cpu')):
+                    old_limit = current[service][key]
+                    new_limit = goal[service][key]
+                    if new_limit > old_limit:
+                        decisions[service][metric] = 'measured-demand-transfer'
+                    elif new_limit < old_limit:
+                        decisions[service][metric] = 'safe-cap-reclamation'
+                trace[service] = decisions[service].copy()
+        return goal, counters
     # WSL-wide CPU PSI includes time that *cgroup-quota-throttled* tasks
     # cannot run. A high PSI number alone therefore does not prove physical
     # cores are exhausted (observed: 88% PSI with load1=0.31 on 4 vCPUs).
@@ -485,6 +500,14 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
             'up': min(5, int(prev.get('up', 0)) + 1) if saturated else 0,
             'idle': min(5, int(prev.get('idle', 0)) + 1) if idle else 0,
         }
+    for k in expected:
+        if counters[k]['up'] < 2:
+            decisions[k]['memory'] = 'sustained-demand-not-established'
+            decisions[k]['cpu'] = 'sustained-demand-not-established'
+        if usage[k].get('throttled', False):
+            decisions[k]['cpu'] = 'quota-throttling-observed'
+        if usage[k].get('memory_limit_hit', False):
+            decisions[k]['memory'] = 'recent-memory-limit-event'
     # Reserve against sudden host/DirectML pressure. On a verified inactive
     # DirectML worker, temporarily lend at most a third of its CPU reservation.
     extra = (min(int(directml_reserve / 3), int(cpus * 100))
@@ -596,6 +619,9 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
             spare -= given
 
     if high_pressure or fresh_oom:
+        for k in expected:
+            decisions[k]['memory'] = ('fresh-oom-protection' if fresh_oom else 'host-pressure-protection')
+            decisions[k]['cpu'] = ('fresh-oom-protection' if fresh_oom else 'within-envelope-only')
         # When memory pressure or prior OOM is indicated, give resources back to
         # the canonical safe profile gradually, leaving busy memory untouched.
         for k, e in expected.items():
@@ -610,14 +636,17 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
         if not fresh_oom:
             transfer_cpu_to_throttled_receivers()
         ensure_cpu_envelope()
-        return goal, counters
+        return finish()
     # A measured, fresh quota-throttling signal can bypass cooldown for CPU
     # only. Ordinary quota increases still require two demand samples.
     urgent_throttle = any(usage[k].get('throttled', False) for k in expected)
     in_cooldown = now - record.get('lastUpdate', 0) < 45
     if in_cooldown and not urgent_throttle:
+        for k in expected:
+            decisions[k]['memory'] = 'controller-cooldown'
+            decisions[k]['cpu'] = 'controller-cooldown'
         ensure_cpu_envelope()
-        return goal, counters
+        return finish()
 
     # Rebalance CPU from idle services to busy services while conserving the
     # aggregate Docker envelope. Never reduce the stable minimum for a service.
@@ -626,15 +655,22 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
                      (usage[k]['cpu_pct'] >= (current[k]['cpu'] / 10) * .82 or
                       usage[k].get('throttled', False))]
     cpu_receivers.sort(key=lambda k: (-PRIORITY[k], -usage[k]['cpu_pct'], k))
+    for k in expected:
+        if k not in cpu_receivers and decisions[k]['cpu'] == 'not-evaluated':
+            decisions[k]['cpu'] = 'cpu-below-receiver-threshold'
     cpu_donors = [k for k in expected if counters[k]['idle'] >= 3 and k not in cpu_receivers]
     cpu_donors.sort(key=lambda k: (PRIORITY[k], k))
     available_cpu = max(0, usable_cpu - sum(x['cpu'] for x in goal.values()))
     if cpu_receivers:
+        for k in cpu_receivers:
+            decisions[k]['cpu'] = 'receiver-selected-for-cpu-loan'
         # Allocate only what recipients can accept. Previously every idle donor
         # was reduced even if no receiver had sufficient burst ceiling.
         for target in cpu_receivers:
             base, cur = expected[target]['cpu'], goal[target]['cpu']
             ceiling = cpu_service_ceiling(target, base, cpus)
+            if cur >= ceiling:
+                decisions[target]['cpu'] = 'service-cpu-ceiling-reached'
             requested = (min(400, max(0, ceiling - cur)) // CPU_QUANTUM_MILLI
                          ) * CPU_QUANTUM_MILLI
             for donor in cpu_donors:
@@ -650,6 +686,8 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
             added = min(requested, available_cpu)
             goal[target]['cpu'] += added
             available_cpu -= added
+            if requested and not added:
+                decisions[target]['cpu'] = 'no-transferable-cpu-headroom'
     else:
         # Return toward original weights once workloads quiet down.
         # Restore normal allocations when borrowing has ended. A service
@@ -666,10 +704,12 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
                 spare_cpu -= add
 
     if in_cooldown:
+        for k in expected:
+            decisions[k]['memory'] = 'controller-cooldown'
         ensure_cpu_envelope()
         assert sum(x['cpu'] for x in goal.values()) <= usable_cpu
         assert sum(x['mem'] for x in goal.values()) <= budget
-        return goal, counters
+        return finish()
 
     # Redistribute caps only by taking safely unused headroom from idle donors.
     # The sum of all hard limits stays <= the original container budget.
@@ -677,6 +717,9 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
                         (usage[k]['mem'] >= current[k]['mem'] * .82 or
                          usage[k].get('memory_limit_hit', False))]
     memory_receivers.sort(key=lambda k: (-PRIORITY[k], -usage[k]['mem'], k))
+    for k in expected:
+        if k not in memory_receivers and decisions[k]['memory'] == 'not-evaluated':
+            decisions[k]['memory'] = 'memory-below-receiver-threshold'
     # The cgroup charge (memory.current), including file cache, is required
     # before reducing anyone's hard memory limit. Docker stats alone is not.
     memory_donors = [k for k in expected if counters[k]['idle'] >= 3 and
@@ -687,9 +730,12 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     spare = max(0, budget - sum(x['mem'] for x in goal.values()))
     if memory_receivers:
         for target in memory_receivers:
+            decisions[target]['memory'] = 'receiver-selected-for-memory-loan'
             cur, base = goal[target]['mem'], expected[target]['mem']
             # Original v14.6.6 demand cap, bounded by the conserved Docker pool.
             max_burst = memory_service_ceiling(target, base, host_memory_mib, budget)
+            if cur >= max_burst:
+                decisions[target]['memory'] = 'service-memory-ceiling-reached'
             requested = (min(128, max(0, max_burst - cur),
                              max(0, available_mib - 512)) // MEM_QUANTUM_MIB
                          ) * MEM_QUANTUM_MIB
@@ -708,6 +754,9 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
             added = min(requested, spare)
             goal[target]['mem'] += added
             spare -= added
+            if requested and not added:
+                decisions[target]['memory'] = ('no-qualified-idle-memory-donor' if not memory_donors
+                                               else 'no-transferable-memory-headroom')
     else:
         for k, e in expected.items():
             charged = usage[k].get('charged_mem')
@@ -729,11 +778,11 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     assert sum(x['cpu'] for x in goal.values()) <= usable_cpu
     assert sum(x['mem'] for x in goal.values()) <= budget
     assert all(goal[k]['mem'] >= expected[k]['floor'] and goal[k]['cpu'] >= 50 for k in expected)
-    return goal, counters
+    return finish()
 
 
 def decision_report(expected, actual, usage, target, *, policy_fingerprint,
-                    sampled_at, host_metrics):
+                    sampled_at, host_metrics, trace=None):
     """Build a credential-free, bounded explanation of one scheduler sample."""
     services = {}
     for name in expected:
@@ -759,6 +808,7 @@ def decision_report(expected, actual, usage, target, *, policy_fingerprint,
         services[name] = {
             'cpuMilli': {'before': int(old['cpu']), 'after': int(new['cpu']), 'reason': cpu_reason},
             'memoryMiB': {'before': int(old['mem']), 'after': int(new['mem']), 'reason': mem_reason},
+            'diagnosticReasonCodes': (trace or {}).get(name, {}),
             'usage': {
                 'cpuPercent': round(float(sample.get('cpu_pct', 0.0)), 2),
                 'dockerMemoryMiB': int(sample.get('mem', 0)),
@@ -1245,6 +1295,7 @@ def run_once(root, restore=False):
                         previous.get('nr_throttled'))
             sampled_at = time.time()
             directml_busy = directml_workload(snapshot, sampled_at) if state.get('DIRECTML_SELECTED') == 'true' else True
+            trace = {}
             target, counters = plan(expected, actual, usage, snapshot,
                                     available_mib=available, memory_psi=psi_m, cpu_psi=psi_c,
                                     cpu_load1=host_load1, io_psi=psi_io, fresh_oom=fresh_oom,
@@ -1253,11 +1304,13 @@ def run_once(root, restore=False):
                                     cpu_envelope=int(state['CPU_DOCKER_ENVELOPE_MILLI']),
                                     directml_reserve=int(state['CPU_DIRECTML_RESERVE_MILLI']),
                                     budget=int(state['BUDGET_MIB']),
-                                    host_memory_mib=int(state.get('MEM_MIB', state['BUDGET_MIB'])))
+                                    host_memory_mib=int(state.get('MEM_MIB', state['BUDGET_MIB'])),
+                                    trace=trace)
             sample_report = decision_report(
                 expected, actual, usage, target,
                 policy_fingerprint=state['POLICY_FINGERPRINT'],
                 sampled_at=sampled_at,
+                trace=trace,
                 host_metrics={
                     'availableMiB': available,
                     'memoryPsiSomeAvg10': psi_m,
@@ -1483,6 +1536,112 @@ def reconcile_static_limits(root):
         print(f'Reconciled {len(applied)} effective Compose hard-resource settings in place; managed containers were not restarted')
         return 0
 
+def explain_resources(root, as_json=False):
+    """Inspect owned allocations and the last real controller decision, without changes.
+
+    Last decision reasons are historical, not an assertion about a fresh future
+    scheduling tick. This command never invokes plan(), perform(), or write_json().
+    """
+    expected, state = load_expected(root)
+    actual = inspect_containers(root, expected)
+    saved = safe_state(root, expected, state, actual)
+    if saved.get('pending') is not None or saved.get('_requires_restore'):
+        raise RuntimeError('incomplete controller transaction; explanations require verified stable state')
+    usage = read_usage(root, expected)
+    history = saved.get('decisionHistory') or []
+    recent = history[-1] if history else None
+    if recent and recent.get('policyFingerprint') != state['POLICY_FINGERPRINT'][:64]:
+        recent = None
+    sampled = recent.get('sampledAt') if recent else None
+    try:
+        timer = subprocess.run(
+            ['systemctl', 'is-active', 'latticevale-resource-burst.timer'],
+            cwd=root, capture_output=True, text=True, timeout=6, check=False)
+        timer_state = timer.stdout.strip() if timer.returncode in (0, 3) else 'unavailable'
+    except (OSError, subprocess.TimeoutExpired):
+        timer_state = 'unavailable'
+    try:
+        actual_wsl_ram = int(re.search(
+            r'^MemTotal:\s*(\d+)\s*kB', Path('/proc/meminfo').read_text(), re.M
+        ).group(1)) // 1024
+    except (OSError, AttributeError):
+        actual_wsl_ram = None
+    report = {
+        'status': 'verified-live-limits', 'source': 'read-only',
+        'timerState': timer_state,
+        'actualWslVisibleMiB': actual_wsl_ram,
+        'wslAllocationMatchesSavedState': (actual_wsl_ram == int(state['MEM_MIB'])
+                                            if actual_wsl_ram is not None else None),
+        'persistedControllerStatePresent': (root / 'data/latticevale/resource-burst-state.json').is_file(),
+        'wslVisibleMiB': int(state['MEM_MIB']),
+        'wslAvailableMiB': host_available_mib(),
+        'wslPressureAvg10': {
+            'memory': pressure('/proc/pressure/memory'),
+            'cpu': pressure('/proc/pressure/cpu'),
+            'io': pressure('/proc/pressure/io'),
+        },
+        'wslHostReservedMiB': int(state.get('RESERVE_MIB', int(state['MEM_MIB']) - int(state['BUDGET_MIB']))),
+        'dockerBudgetMiB': int(state['BUDGET_MIB']),
+        'dockerAssignedMiB': sum(v['mem'] for v in actual.values()),
+        'dockerCpuEnvelopeMilli': int(state['CPU_DOCKER_ENVELOPE_MILLI']),
+        'dockerAssignedCpuMilli': sum(v['cpu'] for v in actual.values()),
+        'directmlSelected': state.get('DIRECTML_SELECTED') == 'true',
+        'directmlCpuReserveMilli': int(state['CPU_DIRECTML_RESERVE_MILLI']),
+        'lastDecisionHostMetrics': (recent.get('host') or {}) if recent else {},
+        'lastDecisionAtEpoch': sampled,
+        'lastDecisionAgeSeconds': max(0, int(time.time() - sampled)) if type(sampled) in (int, float) else None,
+        'lastDecisionIsCurrentSample': False,
+        'services': {},
+    }
+    for name, baseline in expected.items():
+        live = actual[name]
+        saved_service = saved['services'].get(name, {})
+        charge = live.get('memory_current_mib')
+        validated = (type(charge) is int and charge >= 0 and
+                     saved_service.get('idle', 0) >= 3)
+        floor = (memory_donor_floor(name, baseline['mem'], baseline['floor'], charge)
+                 if validated else None)
+        reclaimable = (max(0, (live['mem'] - floor) // MEM_QUANTUM_MIB * MEM_QUANTUM_MIB)
+                       if floor is not None else None)
+        decision = (recent.get('services') or {}).get(name, {}) if recent else {}
+        report['services'][name] = {
+            'baselineMiB': baseline['mem'], 'limitMiB': live['mem'],
+            'dockerUsageMiB': usage[name]['mem'], 'cgroupChargeMiB': charge,
+            'memoryFloorMiB': baseline['floor'],
+            'verifiedIdleDonorHeadroomMiB': reclaimable,
+            'cpuBaselineMilli': baseline['cpu'], 'cpuLimitMilli': live['cpu'],
+            'cpuPercent': round(usage[name]['cpu_pct'], 2),
+            'memoryBurstCeilingMiB': memory_service_ceiling(
+                name, baseline['mem'], int(state['MEM_MIB']), int(state['BUDGET_MIB'])),
+            'cpuBurstCeilingMilli': cpu_service_ceiling(
+                name, baseline['cpu'], int(state['CPUS'])),
+            'lastDecisionMemory': decision.get('memoryMiB', {}).get('reason'),
+            'lastDecisionCpu': decision.get('cpuMilli', {}).get('reason'),
+            'lastDecisionReasonCodes': decision.get('diagnosticReasonCodes', {}),
+        }
+    if as_json:
+        print(json.dumps(report, indent=2, sort_keys=True))
+        return 0
+    print('LatticeVale resource explanation (read-only; historical decisions are not live forecasts)')
+    print('Controller timer:', report['timerState'], 'Saved WSL RAM matches live:', report['wslAllocationMatchesSavedState'])
+    print('WSL visible/available: {}/{} MiB; Docker assigned/budget: {}/{} MiB; CPU assigned/envelope: {}/{}m'.format(
+        report['wslVisibleMiB'], report['wslAvailableMiB'], report['dockerAssignedMiB'],
+        report['dockerBudgetMiB'], report['dockerAssignedCpuMilli'], report['dockerCpuEnvelopeMilli']))
+    print('WSL PSI avg10:', report['wslPressureAvg10'],
+          'DirectML selected:', report['directmlSelected'],
+          'reserved CPU:', report['directmlCpuReserveMilli'])
+    print('Last controller decision: {} (age {}s)'.format(sampled if sampled else 'not recorded',
+                                                       report['lastDecisionAgeSeconds']))
+    for name, row in report['services'].items():
+        print('{}: memory used/charged/limit/baseline={}/{}/{}/{}MiB, CPU={}/{}m, idle donor headroom={}MiB'.format(
+            name, row['dockerUsageMiB'], row['cgroupChargeMiB'], row['limitMiB'], row['baselineMiB'],
+            row['cpuLimitMilli'], row['cpuBaselineMilli'], row['verifiedIdleDonorHeadroomMiB']))
+        if row['lastDecisionReasonCodes']:
+            print('  last recorded reason codes:', row['lastDecisionReasonCodes'])
+    print('NOTE: No new planner run, Docker update, timer change, or backend activation occurred.')
+    return 0
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--stack', type=Path, default=Path(__file__).resolve().parent)
@@ -1492,6 +1651,8 @@ def main():
     p.add_argument('--reconcile-static', action='store_true',
                    help='Safely reconcile owned live CPU/RAM limits to effective Compose during repair')
     p.add_argument('--verify', action='store_true')
+    p.add_argument('--explain', action='store_true', help='Read-only live limits and last controller decisions')
+    p.add_argument('--explain-json', action='store_true', help='Print read-only explanation as JSON')
     p.add_argument('--check-override', action='store_true',
                    help='Read-only check of an image-only Compose override')
     a = p.parse_args()
@@ -1512,6 +1673,10 @@ def main():
             if not override_eligible(root):
                 raise RuntimeError('Compose override modifies managed policy beyond Hermes image selection')
             return 0
+        if a.explain or a.explain_json:
+            if a.restore or a.prepare_repair or a.reconcile_static:
+                raise RuntimeError('read-only explanation cannot be combined with mutating operations')
+            return explain_resources(root, as_json=a.explain_json)
         if a.verify:
             verify_snapshot(root)
             return 0

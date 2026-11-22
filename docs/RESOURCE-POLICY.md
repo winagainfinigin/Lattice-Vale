@@ -1,4 +1,48 @@
 # LatticeVale 14.7.0 consolidated resource policy (canonical schema 13, bounded runtime scheduler 14)
+
+
+## v14.7.0 same-version resource explanations and qualification
+
+Run `./manage.sh resources --explain` in the installed WSL stack for read-only
+inspection or `./manage.sh resources --json` for a machine-readable snapshot.
+This executes the existing controller's ownership/fingerprint/snapshot checks,
+reads current Docker/cgroup resource usage, host memory/PSI, systemd timer
+state and its last persisted scheduler decision; it makes **no** Docker updates,
+planner transactions, backend changes or configuration writes. A missing or
+invalid controller snapshot cannot be represented as a successful loan. The
+last recorded reason is time-stamped **historical** evidence and may not be a
+valid prediction for a later tick. A reported idle donor's headroom is bounded
+by the *same* configured floors, cgroup `memory.current`, 20% charge margin
+and 64-MiB cushion; it does not assert that a borrow will occur during the
+current cycle.
+
+The controller records per-service reason codes while executing its **existing**
+`plan()` rather than using an independent decision algorithm. A lack of
+additional RAM can reflect insufficient receiver demand, cooldown, verified
+donor capacity, service ceiling, WSL pressure, OOM protection, or static
+fallback. `no-change` is not proof of a defect; check the recorded sample time,
+controller timer state, and current telemetry before concluding anything.
+
+The marked disposable-stack qualification tool can optionally run a bounded
+CPU-only probe *inside the owned Hermes service* with
+`--exercise-hermes-cpu`. It compares genuine new controller decisions over
+the probe window and distinguishes `not-demonstrated`, a transfer observed
+without proven repayment, and an increase followed by a decrease to the
+**same** resource. It does not artificially allocate Hermes RAM to an unsafe
+percentage of its hard limit, nor does it guarantee borrowing on machines
+without safely idle donors or free CPU envelope. The regular health PASS
+remains separate from this resource observation. Production stacks are not
+eligible; a precisely marked disposable test installation is required.
+
+**DirectML host-memory lending is deliberately not enabled.** Existing CPU
+reserve lending can be reclaimed using the current bounded CPU envelope.
+Windows-host/WSL DirectML memory allocation is not a container limit and
+there is no verified atomic method to force its release before the preferred
+backend resumes; treating it as an idle Docker donor could overcommit the
+WSL VM. Keep the existing backend-specific host reserve unless real recovery
+and host-memory evidence establishes a safe reversible mechanism. No GPU
+model, particular RAM total, or vendor-specific hardware preset is introduced.
+
 ## v14.7.0 — release qualification and auditable bounded resource decisions
 
 The release version is **14.7.0**. Install-options schema 24 and runtime-policy

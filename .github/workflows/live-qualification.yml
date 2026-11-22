@@ -11,6 +11,11 @@ on:
         description: WSL distribution containing Docker and the marked stack
         required: true
         type: string
+      exercise_hermes_cpu:
+        description: Optional bounded CPU load inside disposable Hermes to observe quota transfers
+        required: true
+        type: boolean
+        default: false
       run_directml_inference:
         description: Run one non-streaming DirectML inference on this dedicated runner
         required: true
@@ -45,12 +50,15 @@ jobs:
         env:
           QUALIFICATION_STACK: ${{ inputs.disposable_stack_path }}
           QUALIFICATION_DISTRO: ${{ inputs.wsl_distro }}
+          QUALIFICATION_EXERCISE_HERMES: ${{ inputs.exercise_hermes_cpu }}
         run: |
           $repoLinux = (& wsl.exe -d $env:QUALIFICATION_DISTRO -- wslpath -u $env:GITHUB_WORKSPACE).Trim()
           $stackLinux = (& wsl.exe -d $env:QUALIFICATION_DISTRO -- wslpath -u $env:QUALIFICATION_STACK).Trim()
           $outputLinux = (& wsl.exe -d $env:QUALIFICATION_DISTRO -- wslpath -u "$env:RUNNER_TEMP\latticevale-live-qualification.json").Trim()
           if ($LASTEXITCODE -ne 0 -or -not $repoLinux -or -not $stackLinux -or -not $outputLinux) { throw 'Could not resolve qualification paths in WSL.' }
-          wsl.exe -d $env:QUALIFICATION_DISTRO -- python3 "$repoLinux/LatticeVale-Core/tests/live-qualification.py" --stack "$stackLinux" --duration-seconds 300 --output "$outputLinux"
+          $probeArgs = @( "$repoLinux/LatticeVale-Core/tests/live-qualification.py", "--stack", "$stackLinux", "--duration-seconds", "300", "--output", "$outputLinux" )
+          if ($env:QUALIFICATION_EXERCISE_HERMES -eq "true") { $probeArgs += "--exercise-hermes-cpu" }
+          wsl.exe -d $env:QUALIFICATION_DISTRO -- python3 @probeArgs
           if ($LASTEXITCODE -ne 0) { throw 'The bounded WSL qualification did not pass.' }
       - name: Run DirectML inference check
         if: inputs.run_directml_inference

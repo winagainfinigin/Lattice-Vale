@@ -1,3 +1,23 @@
+
+## v14.7.0 resource transfer observation (optional, disposable only)
+
+On a dedicated Windows runner with the exact disposable stack marker, the
+manual qualification workflow offers `exercise_hermes_cpu` (default false).
+It starts a nonprivileged, self-terminating Python CPU loop inside the
+**selected marked Compose project's Hermes container** for at most 120 s,
+while continuing normal bounded service-health checks. A post-probe report
+compares genuine persisted controller samples and distinguishes first
+increases from later decreases of the **same** resource. It does not change
+Docker limits itself, start a GPU workload or load a language model.
+
+A stable healthy stack can PASS even when the report says no resource
+transfer was demonstrated: no idle donors, no resource exhaustion, or a
+static timer can make a transfer inapplicable. Use `./manage.sh resources
+--explain` to distinguish those cases. Manual CPU/RAM production benchmarks,
+OOM behavior, DirectML-host reserve transition, real Ollama fallback, and
+subsequent Windows-side repair remain separately required.
+
+
 # Windows integration test matrix
 
 ## v14.7.0 manual qualification workflow

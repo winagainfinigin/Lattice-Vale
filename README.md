@@ -4,6 +4,9 @@
 
 > **v14.7.0 Ollama GPU-verification hotfix (same version):** A temporary 60-second *request-scoped* model keep-alive prevents the normal `OLLAMA_KEEP_ALIVE=0s` DirectML coexistence policy from unloading a test model before `ollama ps` can inspect its CPU/GPU placement. The verifier checks the exact requested model, reports failed inference or processor queries, and unloads the test model afterward. Auto-selected acceleration re-budgets as CPU only when Ollama positively reports CPU execution; unknown status still fails closed. This is a source-level fix, **not** proof that Vulkan or DirectML works on the host. See [hotfix notes](docs/HOTFIX-14.7.0-OLLAMA-OFFLOAD.md).
 
+
+> **v14.7.0 same-version resource observability follow-up:** `./manage.sh resources --explain` and `--json` expose verified live Docker limits, cgroup charges, safely reclaimable idle-donor headroom, current WSL pressure, controller timer state, and *timestamped historical* decision reasons. The controller now records reason codes from the actual allocation routine; no independent allocator is added. Optional disposable-stack live qualification can exercise bounded Hermes CPU demand and report whether real borrow/return events occurred; absence of such events is explicitly **not demonstrated**, never silently PASS. Protected DirectML host-memory reserves are unchanged because reversible host-memory lending lacks adequate runtime proof. See [resource policy](docs/RESOURCE-POLICY.md).
+
 ## Historical v14.6.x release context
 
 The versioned notes below document earlier fixes carried into v14.7.0. They do not make an older release, overlay ZIP, or previously required verification procedure the current installation method.

@@ -105,3 +105,97 @@ with tempfile.TemporaryDirectory() as tmp:
     assert any(args[:2] == ['docker', 'stop'] for args in calls)
 
 print('PASS opt-in qualification failure report, scoped Docker evidence and mocked success path')
+
+# v14.7.0 resource-explain diagnostics must be derived from the exact planner
+# and from verified read-only live allocations. Do not create another allocator.
+from unittest.mock import patch as _patch
+from io import StringIO
+from contextlib import redirect_stdout
+
+ro_expected = {
+    'hermes': {'name': 'hermes-agent', 'mem': 1024, 'cpu': 700, 'floor': 600},
+    'qmd-indexer': {'name': 'hermes-qmd-indexer', 'mem': 1024, 'cpu': 500, 'floor': 512},
+}
+ro_actual = {
+    'hermes': {'mem': 1024, 'cpu': 700, 'memory_current_mib': 850},
+    'qmd-indexer': {'mem': 1024, 'cpu': 500, 'memory_current_mib': 200},
+}
+ro_usage = {
+    'hermes': {'mem': 870, 'cpu_pct': 65.0, 'charged_mem': 850},
+    'qmd-indexer': {'mem': 220, 'cpu_pct': 2.0, 'charged_mem': 200},
+}
+ro_record = {'lastUpdate': 0, 'services': {
+    'hermes': {'up': 1, 'idle': 0}, 'qmd-indexer': {'up': 0, 'idle': 2}}}
+trace = {}
+ro_goals, ro_counters = module.plan(
+    ro_expected, ro_actual, ro_usage, ro_record,
+    available_mib=4096, memory_psi=0, cpu_psi=0,
+    io_psi=0, cpus=4, cpu_envelope=1200, budget=2048,
+    host_memory_mib=4096, now=150, trace=trace)
+assert ro_goals['hermes']['mem'] > ro_actual['hermes']['mem']
+assert trace['hermes']['memory'] == 'measured-demand-transfer'
+assert ro_goals['qmd-indexer']['mem'] < ro_actual['qmd-indexer']['mem']
+assert trace['qmd-indexer']['memory'] == 'safe-cap-reclamation'
+assert sum(x['mem'] for x in ro_goals.values()) <= 2048
+assert trace.keys() == ro_expected.keys()
+
+pressure_trace = {}
+module.plan(ro_expected, ro_actual, ro_usage, ro_record,
+            available_mib=200, memory_psi=8, cpu_psi=3,
+            cpus=4, cpu_envelope=1200, budget=2048,
+            host_memory_mib=4096, now=150, trace=pressure_trace)
+assert pressure_trace['hermes']['memory'] == 'host-pressure-protection'
+cooldown_trace = {}
+module.plan(ro_expected, ro_actual, ro_usage, {'lastUpdate': 140, 'services': ro_record['services']},
+            available_mib=4096, memory_psi=0, cpu_psi=0,
+            cpus=4, cpu_envelope=1200, budget=2048,
+            host_memory_mib=4096, now=150, trace=cooldown_trace)
+assert cooldown_trace['hermes']['memory'] == 'controller-cooldown'
+
+sample = module.decision_report(
+    ro_expected, ro_actual, ro_usage, ro_goals, policy_fingerprint='z' * 64,
+    sampled_at=12345, host_metrics={}, trace=trace)
+assert sample['services']['hermes']['diagnosticReasonCodes']['memory'] == 'measured-demand-transfer'
+assert 'unexpected_password' not in repr(sample)
+
+fake_state = {
+    'MEM_MIB': '4096', 'BUDGET_MIB': '2048', 'CPUS': '4', 'CPU_DOCKER_ENVELOPE_MILLI': '1200',
+    'CPU_DIRECTML_RESERVE_MILLI': '0', 'DIRECTML_SELECTED': 'false',
+    'POLICY_FINGERPRINT': 'z' * 64,
+}
+reader_record = {'services': {'hermes': {'idle': 0}, 'qmd-indexer': {'idle': 3}},
+                 'decisionHistory': [sample]}
+with _patch.object(module, 'load_expected', return_value=(ro_expected, fake_state)), \
+     _patch.object(module, 'inspect_containers', return_value=ro_actual), \
+     _patch.object(module, 'safe_state', return_value=reader_record), \
+     _patch.object(module, 'read_usage', return_value=ro_usage), \
+     _patch.object(module, 'host_available_mib', return_value=3000), \
+     _patch.object(module, 'pressure', return_value=0.0), \
+     _patch.object(module, 'write_json', side_effect=AssertionError('read-only violated')), \
+     _patch.object(module, 'perform', side_effect=AssertionError('read-only violated')):
+    output = StringIO()
+    with redirect_stdout(output):
+        assert module.explain_resources(Path('/not/an/actual/stack'), as_json=True) == 0
+    view = json.loads(output.getvalue())
+    assert view['status'] == 'verified-live-limits'
+    assert view['dockerAssignedMiB'] == 2048
+    assert view['services']['qmd-indexer']['verifiedIdleDonorHeadroomMiB'] >= 0
+    assert view['services']['hermes']['lastDecisionReasonCodes']['memory'] == 'measured-demand-transfer'
+
+assert qualification.observe_transfers(
+    {'lastSampleAt': 100},
+    {'history': [{'sampledAt': 101, 'services': {'hermes': {
+        'cpuMilli': {'before': 500, 'after': 550},
+        'memoryMiB': {'before': 1000, 'after': 1000}}}}]}) == {
+            'freshControllerSamples': 1,
+            'changedServicesAndResources': ['hermes:cpuMilli'],
+            'borrowedServicesAndResources': ['hermes:cpuMilli'],
+            'repaidServicesAndResources': [],
+            'redistributionObserved': True, 'borrowAndReturnObserved': False,
+            'qualification': 'transfer-observed-but-return-unproven'}
+assert qualification.observe_transfers({'lastSampleAt': 100}, {'history': [
+    {'sampledAt': 101, 'services': {'hermes': {'memoryMiB': {'before': 1000, 'after': 1128}}}},
+    {'sampledAt': 102, 'services': {'hermes': {'memoryMiB': {'before': 1128, 'after': 1064}}}},
+]})['qualification'] == 'borrow-and-return-observed'
+assert qualification.observe_transfers({'lastSampleAt': 100}, {'history': []})['qualification'] == 'not-demonstrated'
+print('PASS read-only explain, real planner trace, resource qualification observation')

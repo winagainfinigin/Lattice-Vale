@@ -1,3 +1,22 @@
+
+## Resource explanation (read-only)
+
+From a configured installed WSL stack run `./manage.sh resources --explain`
+for a human-readable view or `./manage.sh resources --json` for JSON. The
+controller validates Docker project/ownership, its policy fingerprint and
+persisted transaction before returning observed limits and cgroup charges.
+Timer status, currently visible WSL RAM, host pressure and the last recorded
+decision are reported separately. Historical decision codes are **not** proof
+that a fresh workload will borrow resources. No changes are made.
+
+The manual disposable-stack qualification supports
+`--exercise-hermes-cpu`; it creates bounded CPU demand inside the selected
+Compose Hermes service, observes fresh controller decisions, and records
+whether the same borrower later relinquished capacity. A normal health PASS
+is independent of a resource `not-demonstrated` result. This command must not
+be run against a production stack.
+
+
 # Optional Hermes audit tools
 
 The repository includes two opt-in, read-only audit helpers under `tools/`. They read stack/container metadata and write a local report; they do not change Docker services, databases, WSL configuration, or installer state.

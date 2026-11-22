@@ -15,6 +15,8 @@ Usage: ./manage.sh COMMAND [ARG]
   diagnose-gpu           Refresh and print canonical Windows/WSL hardware capabilities
   diagnose-backends      Refresh and print backend capabilities/selection
   diagnose-policy        Validate and print canonical runtime resource policy
+  resources --explain     Read-only live limits and the last actual resource decisions
+  resources --json        Read-only machine-readable resource explanation
   audit-free             Read-only check of the current free/local operating path
   plan [--offline]       Show a read-only repair plan; never changes the stack
   repair --plan [--offline]
@@ -1610,6 +1612,12 @@ case "$cmd" in
   status) status ;;
   verify) verify "${2:-300}" ;;
   audit) python3 ./state-audit.py --stack . ;;
+  resources)
+    case "${2:---explain}" in
+      --explain) python3 ./resource-burst-controller.py --stack . --explain ;;
+      --json) python3 ./resource-burst-controller.py --stack . --explain-json ;;
+      *) echo 'Usage: ./manage.sh resources [--explain|--json]' >&2; exit 2 ;;
+    esac ;;
   audit-free) python3 ./audit-free.py --stack . "${@:2}" ;;
   plan) python3 ./repair-plan.py --stack . "${@:2}" ;;
   repair)
