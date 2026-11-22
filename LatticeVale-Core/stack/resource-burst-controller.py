@@ -82,22 +82,24 @@ def cpu_service_ceiling(service, baseline_milli, visible_cpus):
 
 
 def memory_service_ceiling(service, baseline_mib, host_memory_mib, budget_mib):
-    """Bound dynamic *container* memory by detected WSL RAM and service role.
+    """Restore the v14.6.6 demand-burst ceiling, with current safety envelopes.
 
-    No arbitrary percentage may invalidate the model/context-aware canonical
-    baseline. Hard ceilings are admission limits, not forced memory usage.
-    This only limits optional burst *above* that baseline; active cgroup pages
-    are never reclaimed to enforce it. Docker memory.max applies to an entire
-    container including its child processes and charged file cache.
+    The v14.6.9 WSL-RAM-percentage cap (Hermes 15%, other services 12%,
+    Ollama 55%) frequently fell *below the canonical installer allocation*.
+    Because canonical baselines take precedence, it then prohibited any
+    borrowing by a busy Hermes, even with safely idle donor containers.
+
+    The earlier, already qualified v14.6.6 scheduler bounded each recipient
+    by the larger of 256 MiB over baseline and 1.75x its canonical allocation.
+    Keep that established policy, within the ONE Docker container budget.
+    Do not touch CPU caps, live host reserves, model-aware floors, cgroup
+    charge safety, pressure gates, ownership checks or transaction recovery.
     """
-    if min(baseline_mib, host_memory_mib, budget_mib) <= 0:
-        raise ValueError('invalid memory baseline, detected host RAM or budget')
-    # Keep non-inference roles from accumulating a dominant portion of RAM.
-    ratio = (0.55 if service == 'ollama' else
-             0.15 if service == 'hermes' else 0.12)
-    by_host = (int(host_memory_mib * ratio) // MEM_QUANTUM_MIB) * MEM_QUANTUM_MIB
-    # Never increase a service above the independently conserved Docker pool.
-    return max(baseline_mib, min(budget_mib, by_host))
+    if min(baseline_mib, host_memory_mib, budget_mib) <= 0 or host_memory_mib < budget_mib:
+        raise ValueError('invalid memory baseline, detected WSL RAM or Docker budget')
+    if baseline_mib > budget_mib:
+        raise ValueError('service baseline exceeds the conserved Docker memory budget')
+    return min(budget_mib, max(baseline_mib + 256, int(baseline_mib * 1.75)))
 
 
 def memory_donor_floor(service, baseline, configured_floor, charged_mib):
@@ -451,7 +453,6 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     goal = {k: v.copy() for k, v in old.items()}
     # Canonical installer state supplies the WSL-visible RAM total; tests and
     # older call sites without that optional field retain the Docker budget.
-    bound_ram = host_memory_mib is not None
     if host_memory_mib is None:
         host_memory_mib = budget
     if host_memory_mib < budget:
@@ -500,10 +501,11 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
         if goal[service]['cpu'] > ceiling:
             goal[service]['cpu'] = ceiling
 
-    # Reclaim excess legacy *burst* memory only when safely possible. A cap
-    # change never shrinks the canonical baseline, and missing cgroup charge
-    # telemetry leaves the current ceiling untouched until it is safe.
-    for service in expected if bound_ram else ():
+    # Reclaim excessive legacy *burst* memory only when safely possible.
+    # Unlike the discarded percentage cap, the restored v14.6.6 demand cap
+    # never equals a valid baseline solely because a fixed WSL fraction is low.
+    # Missing cgroup charge telemetry leaves the current ceiling untouched.
+    for service in expected:
         ceiling = memory_service_ceiling(
             service, expected[service]['mem'], host_memory_mib, budget)
         if goal[service]['mem'] > ceiling:
@@ -686,9 +688,8 @@ def plan(expected, current, usage, record, *, available_mib, memory_psi, cpu_psi
     if memory_receivers:
         for target in memory_receivers:
             cur, base = goal[target]['mem'], expected[target]['mem']
-            max_burst = min(max(base + 256, int(base * 1.75)),
-                            (memory_service_ceiling(target, base, host_memory_mib, budget)
-                             if bound_ram else budget))
+            # Original v14.6.6 demand cap, bounded by the conserved Docker pool.
+            max_burst = memory_service_ceiling(target, base, host_memory_mib, budget)
             requested = (min(128, max(0, max_burst - cur),
                              max(0, available_mib - 512)) // MEM_QUANTUM_MIB
                          ) * MEM_QUANTUM_MIB

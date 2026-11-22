@@ -15,15 +15,32 @@ CPU quotas limit total container CPU time, **not the number of pinned cores**
 or the number of Python threads; changing process affinity would require a
 separate, carefully validated design.
 
-Optional memory borrowing is likewise bounded by detected WSL RAM: Ollama
-55%, Hermes 15%, other services 12%, capped by the Docker memory pool.
-Model/context-aware canonical baselines win when larger than those percentages;
-forcing Ollama below its required model floor could cause OOM. Previously
-borrowed memory is reduced only when measured cgroup charge and 20% plus
-64-MiB headroom permit it, and never during fresh memory.max pressure.
-The controller continues to conserve total memory and CPU across services.
-These caps do **not** guarantee an absence of crashes, repair Hermes event-loop
-watchdog bugs, or directly restrict individual subprocesses inside a container.
+**v14.7.0 regression correction (no version/schema change):** Optional memory
+borrowing once again uses the original v14.6.6 demand-burst limit: a service
+can grow to at most the greater of **256 MiB over its canonical baseline** or
+**1.75 times that baseline**, always bounded by the ONE Docker memory budget.
+The v14.6.9 independent per-role percentages of WSL RAM (Ollama 55%, Hermes
+15%, other services 12%) have been discarded. With a fully enabled 12-GiB WSL
+stack, those caps often fell *below* Hermes's own legal baseline, silently
+prohibiting any RAM borrowing. The restored rule is workload-proportional,
+not tied to a particular PC or GPU. It does **not** raise WSL RAM, individual
+canonical model/service minima, or aggregate Docker ceilings.
+
+Current safeguards remain in force: a donor must be idle for repeated samples,
+retain its configured service/model minimum and priority-weighted baseline,
+and preserve **120% of its measured cgroup memory.current plus 64 MiB**. The
+controller refuses reductions when charge telemetry is unavailable or a fresh
+memory.max event is observed; memory borrowing pauses under WSL memory or I/O
+pressure or fresh OOM activity. Verified image-only Compose overrides remain
+eligible; resource-changing user overrides keep their authority and suppress
+automatic redistribution. Borrowed limits are reconciled with a persistent
+fingerprint/identity-bound transaction journal and rollback protections.
+
+This fix changes **the size of permissible unused RAM loans**, not how much
+RAM a process physically consumes. It does not guarantee a Hermes dashboard
+memory warning will disappear: that warning can be based on WSL-wide available
+RAM, which depends on actual resident memory and cache. Never infer that a
+healthy source manifest or timer alone proves actual runtime borrowing.
 
 
 See [14.7.0 review](RESOURCE-POLICY-14.7.0-REVIEW.md) for the release qualification boundaries and [the archived 14.6.9 review](RESOURCE-POLICY-14.6.9-REVIEW.md) for the prior hotfix details. The dynamic controller retains all prior identity, memory-charge, journal, rollback, and DirectML safety guards; under host memory/I/O PSI it may still lend *conserved* CPU to measured throttled services. Fresh cgroup memory.max events prevent designation as an idle donor. This policy does not prove a gateway watchdog fix.

@@ -1187,17 +1187,30 @@ assert all(bounded_goal[k]['cpu'] >= bounded_roles[k]['cpu'] for k in bounded_ro
 assert all(bounded_goal[k]['mem'] == bounded_live[k]['mem'] for k in bounded_roles)
 print('v14.6.9 detected-core CPU service ceiling + legacy lease convergence: PASS')
 
-# v14.6.9 follow-up: detected WSL RAM bounds individual Docker containers.
-# These are optional burst ceilings, never reductions of model-aware baselines.
-for wsl_mem in (4096, 8192, 11680, 32768):
+# v14.7.0 regression: restore the original v14.6.6 demand-dependent
+# memory-burst cap while RETAINING newer cgroup / pressure / ownership guards.
+# v14.6.9 imposed Hermes 15%, Ollama 55%, others 12% of WSL RAM as
+# independent ceilings. These were often BELOW the legitimate static limit,
+# making the permitted extra burst exactly zero for a loaded agent.
+for wsl_mem in (4096, 8192, 11680, 12288, 32768):
     budget_mib = int(wsl_mem * .9)
-    for role, fraction in (('ollama', .55), ('hermes', .15),
-                           ('qmd', .12), ('honcho-api', .12)):
-        ceiling = module.memory_service_ceiling(role, 256, wsl_mem, budget_mib)
-        assert 256 <= ceiling <= budget_mib
-        assert ceiling <= max(256, int(wsl_mem * fraction / 16) * 16)
-assert module.memory_service_ceiling('ollama', 5632, 11680, 10512) >= 5632
-assert module.memory_service_ceiling('ollama', 8000, 11680, 10512) == 8000
+    for role in ('hermes', 'ollama', 'qmd', 'qmd-indexer', 'honcho-api'):
+        for baseline in (256, 512, max(512, int(wsl_mem * .20))):
+            if baseline > budget_mib:
+                continue
+            ceiling = module.memory_service_ceiling(role, baseline, wsl_mem, budget_mib)
+            assert ceiling == min(budget_mib, max(baseline + 256, int(baseline * 1.75)))
+            assert baseline <= ceiling <= budget_mib
+assert module.memory_service_ceiling('hermes', 1872, 12288, 11060) == 3276
+assert module.memory_service_ceiling('ollama', 5632, 11680, 10512) == 9856
+assert module.memory_service_ceiling('ollama', 8000, 11680, 10512) == 10512
+for invalid in ((256, 4096, 0), (256, 4096, 4097), (4097, 4096, 4096)):
+    try:
+        module.memory_service_ceiling('hermes', *invalid)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(f'bad host/memory cap accepted: {invalid}')
 
 ram_roles = {'ollama': {'cpu': 1350, 'mem': 5632, 'floor': 5632},
              'hermes': {'cpu': 900, 'mem': 1040, 'floor': 1024},
@@ -1213,19 +1226,55 @@ ram_goal, _ = module.plan(ram_roles, ram_live, ram_usage, ram_record,
                           available_mib=4000, memory_psi=.1, cpu_psi=.1,
                           cpu_load1=.2, io_psi=.1, cpus=4, cpu_envelope=3600,
                           budget=10512, host_memory_mib=11680, now=510)
-assert ram_goal['ollama']['mem'] == module.memory_service_ceiling('ollama', 5632, 11680, 10512)
+assert ram_goal['ollama']['mem'] == 7000  # Valid old loan is not forcibly shrunk.
 assert ram_goal['hermes']['mem'] == module.memory_service_ceiling('hermes', 1040, 11680, 10512)
 assert ram_goal['qmd']['mem'] == 1040
-# Don't shrink a cgroup near its hard ceiling or with a fresh limit event.
+# Never shrink a cgroup near its working-set limit or after memory.max pressure.
 ram_loaded = {k: dict(v) for k, v in ram_usage.items()}
-ram_loaded['ollama']['charged_mem'] = 6500
+ram_loaded['ollama']['charged_mem'] = 6900
 ram_loaded['ollama']['memory_limit_hit'] = True
 loaded_goal, _ = module.plan(ram_roles, ram_live, ram_loaded, ram_record,
-                              available_mib=4000, memory_psi=.1, cpu_psi=.1,
-                              cpu_load1=.2, io_psi=.1, cpus=4, cpu_envelope=3600,
-                              budget=10512, host_memory_mib=11680, now=510)
+                             available_mib=4000, memory_psi=.1, cpu_psi=.1,
+                             cpu_load1=.2, io_psi=.1, cpus=4, cpu_envelope=3600,
+                             budget=10512, host_memory_mib=11680, now=510)
 assert loaded_goal['ollama']['mem'] == 7000
-print('v14.6.9 WSL-RAM-scaled per-container ceilings + safe legacy lease recovery: PASS')
+print('v14.7.0 consolidated original demand cap / charged-memory lease safety: PASS')
+
+# Reproduce the 12 GiB WSL, 12-service stalled-Hermes case against the actual
+# installer policy rather than a made-up per-service RAM quota. In prior code
+# the independent Hermes 15% host cap was <= its static quota, preventing even
+# one 16-MiB loan. The original v14.6.6 burst limit must permit lending.
+from latticevale_arch import hermes_floor_mib
+full_options = dict(matrix=True, searxng=True, qmd=True, ollama=True, honcho=True,
+                    hermes_floor=1024, ollama_floor=2048)
+wsl_mib = 12288
+full_budget = host_memory_budget(wsl_mib, 'cpu', True, False)['containerBudgetMiB']
+full_limits = service_memory_plan(full_budget, **full_options)
+full_cpu = cpu_quota_plan(4, 3, 3, 'cpu', matrix=True, searxng=True, qmd=True,
+                          ollama=True, honcho=True)
+full_meta = resource_burst_metadata(full_budget, **full_options)
+full_expected = {k: {'cpu': full_cpu[k], 'mem': v, 'floor': full_meta[k]['memoryFloorMiB']}
+                 for k, v in full_limits.items()}
+full_live = {k: {'cpu': v['cpu'], 'mem': v['mem']} for k, v in full_expected.items()}
+full_usage = {k: {'cpu_pct': 1, 'mem': max(1, int(v['mem']*.22)),
+                  'charged_mem': max(1, int(v['mem']*.25))} for k,v in full_expected.items()}
+full_usage['hermes'] = {'cpu_pct': full_cpu['hermes']/10*.95,
+                        'mem': int(full_limits['hermes']*.88),
+                        'charged_mem': int(full_limits['hermes']*.90)}
+full_record = {'lastUpdate': 0, 'services': {
+    k: {'up': 1 if k == 'hermes' else 0, 'idle': 0 if k == 'hermes' else 2}
+    for k in full_expected}}
+full_goal, _ = module.plan(full_expected, full_live, full_usage, full_record,
+    available_mib=2700, memory_psi=.1, cpu_psi=.1, cpu_load1=.5, io_psi=.1,
+    cpus=4, cpu_envelope=3600, budget=full_budget, host_memory_mib=wsl_mib, now=500)
+assert full_goal['hermes']['mem'] > full_live['hermes']['mem'], 'Regression: Hermes can never borrow RAM'
+assert any(full_goal[k]['mem'] < full_live[k]['mem'] for k in full_expected if k!='hermes')
+assert sum(v['mem'] for v in full_goal.values()) <= full_budget
+assert all(v['mem'] >= full_expected[k]['floor'] for k,v in full_goal.items())
+for name in full_expected:
+    if full_goal[name]['mem'] < full_live[name]['mem']:
+        assert full_goal[name]['mem'] >= int(full_usage[name]['charged_mem'] * 1.20) + 64
+print('v14.7.0 12 GiB full-stack Hermes lending regression: PASS')
 
 # v14.6.9 same-version GPU admission hotfix. The original log reproduced a
 # dedicated Radeon + DirectML text + managed CPU/Ollama fallback topology:

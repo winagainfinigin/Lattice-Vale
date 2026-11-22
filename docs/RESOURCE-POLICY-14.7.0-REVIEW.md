@@ -13,8 +13,35 @@
 1. CI can package a release only from a manifest-verified tree. The generated archive has exactly one `Lattice-Vale/` root, excludes Git metadata and bytecode, records the source commit and archive SHA-256, and is checked before upload.
 2. Release-tag builds attach the package, SHA-256 sidecar, and provenance record to the matching GitHub release. Workflow actions remain pinned to reviewed commit SHAs; updates are manual.
 3. A manually dispatched Windows/WSL qualification workflow is available for a dedicated disposable runner. It requires an explicit stack marker, performs read-only verification, and runs a CPU/memory-limited load probe while watching service health and pressure metrics.
-4. The resource controller records a bounded, sanitized decision history with per-service before/after limits and the measured signals used by the planner. Allocation rules and aggregate limits are unchanged.
+4. The resource controller records a bounded, sanitized decision history with per-service before/after limits and measured signals. A same-version regression correction restores the original v14.6.6 workload-based optional RAM burst cap (larger of baseline + 256 MiB and baseline x 1.75); the later v14.6.9 per-service WSL percentage limits are removed because they can equal the canonical baseline and prohibit borrowing. Static admission rules, per-service model floors, conserved Docker/WSL envelopes, CPU borrowing, pressure guards, Docker ownership checks, and recovery transactions remain unchanged.
 5. The supplied Hermes/Kanban utilities are included as opt-in tools with output redaction, scoped export options, and a clear distinction between safe card metadata and sensitive comments, paths, and worker errors.
+
+## Historical-regression acceptance
+
+The original v14.4.1 installation-time weighted allocator is evidence of the
+conserved-host-budget principle, **not** a valid runtime donor-safety algorithm:
+its hard ceilings did not use live cgroup memory.current or replacement/rollback
+transactions. v14.6.0 introduced the canonical backend-aware planner; v14.6.6
+introduced demand-driven burst transfers; v14.6.7/8 hardened exact-owned
+replacement recovery; v14.6.9 added memory.max and CPU-PSI improvements, but
+also introduced per-role WSL-RAM percentage caps that can eliminate Hermes's
+borrowable RAM. The consolidated policy restores only the older demand-based
+RAM cap while retaining the later protections. Historical v14.6.9 review notes
+remain as a record of what changed then, not the current policy authority.
+
+A deterministic 12-GiB, 12-service fixture compares real canonical service
+allocations with idle cgroup-measured donors and 88%-utilized Hermes: the prior
+per-role cap permitted zero additional Hermes RAM; the restored policy permits
+a bounded 16-MiB-quantized loan without increasing aggregate container RAM.
+Additional representative 2-64-GiB and 1-32-vCPU cross-product simulation
+includes CPU/Vulkan/CUDA/ROCm paths, Windows-native Ollama, WSL-host DirectML,
+DirectML with managed or Windows-native fallback, optional services, and
+insufficient-service-budget rejection. This is mocked policy behavior.
+
+A Hermes dashboard warning can be based on host MemAvailable thresholds rather
+than only Docker's hard cap. A low dashboard number is not proof of a defective
+controller: confirm cgroup usage, host PSI, timer logs, and decision history
+on the real WSL host before attributing that symptom to this code.
 
 ## Qualification boundaries
 
